@@ -1,2 +1,7 @@
 # Python environment
+# Python virtual environment / libraries
 RAG/lib/
+**/site-packages/
+*.so
+__pycache__/
+*.pyc
