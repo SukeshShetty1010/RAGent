@@ -1,0 +1,501 @@
+{
+    "games": [
+        {
+            "id": 123757,
+            "first_release_date": 1923955200,
+            "genres": [
+                {
+                    "id": 10,
+                    "name": "Racing"
+                },
+                {
+                    "id": 14,
+                    "name": "Sport"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "PilotXross",
+            "platforms": [
+                {
+                    "id": 163,
+                    "name": "SteamVR"
+                }
+            ],
+            "summary": "VR flight game developed for VR devices.The player becomes a [Pilot] flying in the sky with a VRM model, wearing an equipment called [Xross], you can enjoy various ways of flying. The fastest time is to take a commemorative photo and share it on SNS!"
+        },
+        {
+            "id": 351081,
+            "first_release_date": 1919116800,
+            "genres": [
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Shadowless",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Shadowless is a first-person psychological horror game. Explore a creepy house marked by tragedy, where dark entities and the past haunt you. Defenseless, you face a nightmare that consumes you before you can escape."
+        },
+        {
+            "id": 243050,
+            "first_release_date": 1916524800,
+            "genres": [
+                {
+                    "id": 13,
+                    "name": "Simulator"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Doge Simulator",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Doge wants to destroy! Doge wants this whole damn city to be destroyed! Smash the shops, cafes and even the damn palm trees! In our game you play as Doge, and you have to destroy, smash and break!"
+        },
+        {
+            "id": 273800,
+            "first_release_date": 1912118400,
+            "genres": [
+                {
+                    "id": 13,
+                    "name": "Simulator"
+                },
+                {
+                    "id": 15,
+                    "name": "Strategy"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Slimes & Dusters TO",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Lead an army of slimes on the offensive against the dusters that have invaded your planet and restore your home to its former glory in this Tower Offense game!"
+        },
+        {
+            "id": 83563,
+            "first_release_date": 1894406400,
+            "genres": [
+                {
+                    "id": 5,
+                    "name": "Shooter"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "NeptuneGL",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Enjoy the thrill of the hunt in this 6 degree of freedom space shooter with immersive graphics and multiplayer."
+        },
+        {
+            "id": 127676,
+            "first_release_date": 1893369600,
+            "genres": [
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Bad Girl",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Bad Girl - Hardcore platformer made in the old-school style where there is nothing superfluous"
+        },
+        {
+            "id": 116090,
+            "first_release_date": 1893369600,
+            "genres": [
+                {
+                    "id": 13,
+                    "name": "Simulator"
+                },
+                {
+                    "id": 15,
+                    "name": "Strategy"
+                }
+            ],
+            "name": "Loop Craft",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Loop Craft is a game about economics. There is an item trading system within the game. This game has a variety of item mix systems. And have a reservation system to set up a factory to produce products for sale in the game."
+        },
+        {
+            "id": 76883,
+            "first_release_date": 1890777600,
+            "genres": [
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "In the Valley of Gods",
+            "platforms": [
+                {
+                    "id": 3,
+                    "name": "Linux"
+                },
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                },
+                {
+                    "id": 14,
+                    "name": "Mac"
+                }
+            ],
+            "summary": "In the Valley of Gods is a single-player first person video game set in Egypt in the 1920s. You play as an explorer and filmmaker who, along with your old partner, has traveled to the middle of the desert in the hopes of making a seemingly-impossible discovery and an incredible film."
+        },
+        {
+            "id": 106694,
+            "first_release_date": 1865116800,
+            "genres": [
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Plague Hunter",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Plague Hunter is an indie platformer game in the dark fantasy vein. In the game you’ll be using sword and gun to cut your way through hordes of zombies and other terrible monsters, avoiding deadly traps."
+        },
+        {
+            "id": 357519,
+            "first_release_date": 1861833600,
+            "genres": [
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                },
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Bound City",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "An action-packed and bittersweet adventure in a city of endless night. Explore the dying city and try to find your way to the tower that seems to be at the heart of it all. Nothing is quite as it appears to be, and only by facing death can you hope to understand the mysteries of Bound City."
+        },
+        {
+            "id": 355851,
+            "first_release_date": 1861833600,
+            "genres": [
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                }
+            ],
+            "name": "Project Restitution",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ]
+        },
+        {
+            "id": 307348,
+            "first_release_date": 1861833600,
+            "genres": [
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                }
+            ],
+            "name": "Frond Online",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Frond Online will be a game in the acclaimed MMORPG style, developed in Unreal Engine 5. It will feature a 3D view. Players will need to evolve their characters to explore increasingly challenging areas. Player characters must enhance their attributes and skills as they gain experience and levels, as well as acquire new equipment and relics scattered throughout the world. Each player can join groups and/or guilds, meeting new people or playing with friends, to develop and explore the world together. As a 'Game as a Service,' the promise is that there will always be new content released periodically, keeping players entertained and excited to explore and discover new places and challenges."
+        },
+        {
+            "id": 281770,
+            "first_release_date": 1861833600,
+            "genres": [
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                },
+                {
+                    "id": 34,
+                    "name": "Visual Novel"
+                },
+                {
+                    "id": 35,
+                    "name": "Card & Board Game"
+                }
+            ],
+            "name": "Kumitantei: Old-School Slaughter",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                },
+                {
+                    "id": 130,
+                    "name": "Nintendo Switch"
+                }
+            ],
+            "summary": "Janus Institute's Class of '89 are trapped and forced to kill each other 'for science', is survival in the cards? Kumitantei: Old-School Slaughter is an episodic murder-mystery ADV card-battler that lovingly fuses retro anime and killing game!"
+        },
+        {
+            "id": 169857,
+            "first_release_date": 1835049600,
+            "genres": [
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                },
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Amira",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Amira: A story driven adventure about a girl born in a middle eastern-fantasy world who finds by chance that her life is written and predetermined as she was helping her family, thus she fights for acceptance, love and writing her own life."
+        },
+        {
+            "id": 375111,
+            "first_release_date": 1830211200,
+            "name": "Project Tal",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                },
+                {
+                    "id": 167,
+                    "name": "PlayStation 5"
+                }
+            ],
+            "summary": "An open-world action Korean mythology RPG. Players will explore a detailed and in-depth world across a single-player adventure inspired by ancient folklore that reimagines Korea’s traditional Tal masks. Engage with an array of threats from massive monsters to formidable swordsmen, making use of enemy weak points, counterattacks, unique abilities, and more."
+        },
+        {
+            "id": 373833,
+            "first_release_date": 1830211200,
+            "genres": [
+                {
+                    "id": 9,
+                    "name": "Puzzle"
+                },
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                },
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Bearskull 2",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "A vast open world, ruthless Vikings, powerful bosses, and an epic co-op mode – rise to the challenge!"
+        },
+        {
+            "id": 371467,
+            "first_release_date": 1830211200,
+            "genres": [
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                },
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                },
+                {
+                    "id": 35,
+                    "name": "Card & Board Game"
+                }
+            ],
+            "name": "Brass & Bramble",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                },
+                {
+                    "id": 14,
+                    "name": "Mac"
+                }
+            ],
+            "summary": "Brass & Bramble is a narrative deck-builder set in a steampunk Victorian age where myth and empire collide. As Avalon’s Envoy, battle the brass-forged Empire, uncover forgotten roots of myth, and journey from Ireland to Egypt, Japan, and beyond in story-driven expeditions."
+        },
+        {
+            "id": 369761,
+            "first_release_date": 1830211200,
+            "genres": [
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 34,
+                    "name": "Visual Novel"
+                }
+            ],
+            "name": "Itachi: Haunted Abodes - Wandering Through 2000s Tokyo Culture",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Itachi: Hunted Abodes is a paranormal suspense adventure that has you wandering through 2000s Tokyo's subculture scenes!"
+        },
+        {
+            "id": 369657,
+            "first_release_date": 1830211200,
+            "genres": [
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                },
+                {
+                    "id": 31,
+                    "name": "Adventure"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "No Walls in Heaven",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "No Walls In Heaven is a first-person exploration platformer about losing yourself in the hostile vastness of the cosmos. Grapple, leap, and fight your way through the towering concrete and metal landscapes of a lost megastructure that seems to disobey all laws of physics and reality."
+        },
+        {
+            "id": 366886,
+            "first_release_date": 1830211200,
+            "genres": [
+                {
+                    "id": 12,
+                    "name": "Role-playing (RPG)"
+                },
+                {
+                    "id": 15,
+                    "name": "Strategy"
+                },
+                {
+                    "id": 16,
+                    "name": "Turn-based strategy (TBS)"
+                },
+                {
+                    "id": 24,
+                    "name": "Tactical"
+                },
+                {
+                    "id": 32,
+                    "name": "Indie"
+                }
+            ],
+            "name": "Curse of Dominion",
+            "platforms": [
+                {
+                    "id": 6,
+                    "name": "PC (Microsoft Windows)"
+                }
+            ],
+            "summary": "Crowned for saving the king, you wield the coveted Blessing of Dominion. Command tense tactical battles, deepen companion Loyalty, evade those who would kill for your power, and watch a secret moral scale quietly reshape Elvorith’s fate."
+        }
+    ]
+}

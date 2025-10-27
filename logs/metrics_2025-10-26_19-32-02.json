@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-10-26T14:02:02.677442+00:00",
+  "query": "What is the latest update on GamePass expansions?",
+  "retrieval_count": 6,
+  "avg_relevance": 0.6655,
+  "latency_retrieval": 6.127,
+  "latency_generation": 136.145,
+  "latency_total": 142.272,
+  "low_confidence": "False",
+  "filters": {},
+  "citations_count": 6
+}
