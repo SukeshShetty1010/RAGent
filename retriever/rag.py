@@ -6,7 +6,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, UTC
 from langchain_core.documents import Document
-from langchain_community.llms import HuggingFacePipeline
+from langchain_huggingface import HuggingFacePipeline
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain_weaviate import WeaviateVectorStore
 from weaviate.classes.query import Filter
@@ -26,7 +26,7 @@ def get_llm() -> HuggingFacePipeline:
     global _llm
     if _llm is None:
         hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_API_TOKEN")
-        model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        model_id = "instruction-pretrain/InstructLM-500M"
         
         logger.info(f"Loading LLM model: {model_id}")
         
