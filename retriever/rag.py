@@ -26,7 +26,7 @@ def get_llm() -> HuggingFacePipeline:
     global _llm
     if _llm is None:
         hf_token = os.getenv("HF_TOKEN") or os.getenv("HF_API_TOKEN")
-        model_id = "facebook/opt-350m"
+        model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
         
         logger.info(f"Loading LLM model: {model_id}")
         
@@ -91,6 +91,7 @@ def answer_query(
         citations = []
         avg_relevance = 0.0
         retr_count = 0
+        low_conf = True
     else:
         # Compute metrics (re-run search with scores)
         embeddings = get_embedding_model()
