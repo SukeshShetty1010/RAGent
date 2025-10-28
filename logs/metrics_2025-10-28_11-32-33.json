@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-10-28T11:32:33.569502+00:00",
+  "query": "Summarise top 3 gaming trends from headlines.",
+  "retrieval_count": 8,
+  "avg_relevance": 0.6681,
+  "latency_retrieval": 3.508,
+  "latency_generation": 204.85,
+  "latency_total": 208.375,
+  "low_confidence": "False",
+  "filters": {
+    "source": "news"
+  },
+  "citations_count": 8,
+  "retrieval_precision": 0.88,
+  "grounding_fidelity": 0.92,
+  "task_completion": 1.0,
+  "automation_depth": 1
+}

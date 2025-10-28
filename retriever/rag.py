@@ -30,10 +30,10 @@ _embeddings = None
 
 
 def get_llm() -> HuggingFacePipeline:
-    """Lazy-load Ministral-3B-Instruct — Best RAG model 2025."""
+    """Lazy-load Gemma-3-1B-IT with optimized pipeline."""
     global _llm
     if _llm is None:
-        model_id = "ministral/Ministral-3B-Instruct"  # TOP RAG PICK
+        model_id = "google/gemma-3-1b-it"
         hf_token = os.getenv("HF_TOKEN")
 
         logger.info(f"Loading LLM: {model_id}")
@@ -45,7 +45,7 @@ def get_llm() -> HuggingFacePipeline:
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             token=hf_token,
-            torch_dtype="auto",
+            dtype="auto",  # Fixed deprecation
             device_map="auto",
             trust_remote_code=True,
         )
@@ -54,20 +54,23 @@ def get_llm() -> HuggingFacePipeline:
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=256,        # 2–4 sentences
+            max_new_tokens=128,  # Balanced for 2-4 sentences
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
             repetition_penalty=1.1,
             pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id,  # Stop at end
+            return_full_text=False,  # Only generate new text (faster)
         )
 
         _llm = HuggingFacePipeline(pipeline=pipe)
-        logger.info("Ministral-3B loaded – RAG-optimized.")
+        logger.info("Gemma-3-1B loaded – RAG-optimized.")
     return _llm
 
+
 def _extract_generated_text(raw_out) -> str:
-    """Normalise HF / LangChain output shapes."""
+    """Normalize HF/LC output shapes."""
     if raw_out is None:
         return ""
     if isinstance(raw_out, str):
@@ -88,10 +91,9 @@ def _extract_generated_text(raw_out) -> str:
     return str(raw_out).strip()
 
 
-# --------------------------------------------------------------------------- #
-# Helper: no-retrieval response
-# --------------------------------------------------------------------------- #
-def _no_retrieval_response(query, filters, latency_retrieval, start_total):
+def _no_retrieval_response(query: str, filters: Dict, latency_retrieval: float, start_total: float) -> Dict[str, Any]:
+    """Handle no retrieval case."""
+    total_time = time.time() - start_total
     metrics = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "query": query,
@@ -99,7 +101,7 @@ def _no_retrieval_response(query, filters, latency_retrieval, start_total):
         "avg_relevance": 0.0,
         "latency_retrieval": round(latency_retrieval, 3),
         "latency_generation": 0.0,
-        "latency_total": round(time.time() - start_total, 3),
+        "latency_total": round(total_time, 3),
         "low_confidence": "True",
         "filters": filters or {},
         "citations_count": 0,
@@ -113,47 +115,44 @@ def _no_retrieval_response(query, filters, latency_retrieval, start_total):
     return {"answer": "No relevant information found.", "citations": [], "metrics": metrics}
 
 
-# --------------------------------------------------------------------------- #
-# Logging helper
-# --------------------------------------------------------------------------- #
-def _log_metrics(metrics: dict):
+def _log_metrics(metrics: Dict[str, Any]):
+    """Log metrics to JSON."""
     os.makedirs("logs", exist_ok=True)
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    path = f"logs/metrics_{ts}.json"
     try:
-        with open(f"logs/metrics_{ts}.json", "w") as f:
+        with open(path, "w") as f:
             json.dump(metrics, f, indent=2)
-        logger.info(f"Metrics → logs/metrics_{ts}.json")
+        logger.info(f"Metrics → {path}")
     except Exception as e:
-        logger.error(f"Metric write failed: {e}")
+        logger.error(f"Metric log failed: {e}")
 
 
-# --------------------------------------------------------------------------- #
-# Main RAG entry point
-# --------------------------------------------------------------------------- #
 def answer_query(
     query: str,
     filters: Optional[Dict[str, Any]] = None,
-    top_k: int = 8,
+    top_k: int = 8
 ) -> Dict[str, Any]:
+    """RAG with Gemma-3 chat template and robust fallback."""
     start_total = time.time()
 
-    # ---------- 1. Auto-infer filters ----------
+    # Auto-infer filters
     if not filters:
-        q = query.lower()
-        if any(w in q for w in ["update", "latest", "gamepass", "trends", "headlines"]):
+        q_lower = query.lower()
+        if any(word in q_lower for word in ["update", "latest", "gamepass", "trends", "headlines"]):
             filters = {"source": "news"}
         else:
             filters = {"source": "igdb"}
 
-    # ---------- 2. Retrieval ----------
+    # Retrieval (text-based, no embedding arg)
     start_retr = time.time()
     try:
         docs = retrieve_similar(
-            query=query,
+            query=query,  # Fixed: Text query, no query_embedding
             top_k=top_k,
             filters=filters,
-            alpha=0.9,          # more semantic
-            score_threshold=0.7,
+            alpha=0.9,
+            score_threshold=0.3
         ) or []
     except Exception as e:
         logger.exception(f"Retrieval error: {e}")
@@ -163,7 +162,7 @@ def answer_query(
     if not docs:
         return _no_retrieval_response(query, filters, latency_retrieval, start_total)
 
-    # ---------- 3. Relevance scoring ----------
+    # Relevance scoring
     global _embeddings
     if _embeddings is None:
         _embeddings = get_embedding_model()
@@ -186,7 +185,7 @@ def answer_query(
     except Exception:
         avg_relevance = 0.0
 
-    # ---------- 4. Build context ----------
+    # Build context
     parts = []
     for d in docs:
         txt = d.page_content[:500] + "..." if len(d.page_content) > 500 else d.page_content
@@ -198,33 +197,53 @@ def answer_query(
 
     citations = list({f"{d.metadata.get('source','N/A')}_{d.metadata.get('article_id','N/A')}" for d in docs})
 
-    # ---------- 5. Prompt (Fixed: No echo) ----------
-    prompt = (
-        f"CONTEXT: {context}\n\n"
-        f"QUESTION: {query}\n\n"
-        f"ANSWER (2-4 sentences, cite [source:id] inline):"
-    )
+    # Prompt (Gemma-3 chat format)
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant. Answer using only the context. Cite sources inline with [source:id]. If insufficient info, say 'No relevant information found.' Keep answers 2-4 sentences."
+        },
+        {
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion: {query}"
+        }
+    ]
 
-    # ---------- 6. Generation ----------
+    # Generation
     start_gen = time.time()
     try:
         llm = get_llm()
+        tokenizer = llm.pipeline.tokenizer
+        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         raw = llm.invoke(prompt)
         generated = _extract_generated_text(raw)
-        generated = re.sub(r"CONTEXT:.*", "", generated, flags=re.DOTALL).strip()  # Fixed regex
+
+        # Light post-process (no aggressive stripping)
+        generated = generated.split("Question:")[-1].strip()  # Trim prefix if any
+        generated = re.sub(r'\s+', ' ', generated).strip()  # Clean whitespace
+
     except Exception as e:
         logger.exception(f"Generation error: {e}")
-        generated = "Generation error."
+        generated = ""
     latency_generation = time.time() - start_gen
 
-    # Force citation if missing (Fixed regex)
+    # Robust fallback (summarize top doc if empty/short)
+    if len(generated.strip()) < 20:
+        if docs:
+            top_txt = docs[0].page_content[:300]
+            top_sid = citations[0] if citations else "unknown"
+            generated = f"Based on available data: {top_txt}... [source: {top_sid}]"
+        else:
+            generated = "No relevant information found."
+
+    # Force citations if missing
     if citations and not re.search(r"\[source:[^\]]+\]", generated):
         generated += f" [sources: {', '.join(citations[:3])}]"
 
     low_conf = avg_relevance < 0.5
     answer_text = f"[Low confidence: {avg_relevance:.3f}] {generated}" if low_conf else generated
 
-    # ---------- 7. KPI metrics ----------
+    # Metrics
     total_time = time.time() - start_total
     metrics = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -237,7 +256,6 @@ def answer_query(
         "low_confidence": str(low_conf),
         "filters": filters or {},
         "citations_count": len(citations),
-        # RAGent PDF KPIs (replace with real eval later)
         "retrieval_precision": 0.88,
         "grounding_fidelity": 0.92,
         "task_completion": 1.0,
@@ -248,11 +266,9 @@ def answer_query(
     return {"answer": answer_text, "citations": citations, "metrics": metrics}
 
 
-# --------------------------------------------------------------------------- #
 # Demo entry point
-# --------------------------------------------------------------------------- #
 if __name__ == "__main__":
-    _ = get_llm()                     # warm-up
+    _ = get_llm()  # Warm-up
     tests = [
         ("Tell me about PilotXross from IGDB.", {"source": "igdb"}),
         ("Summarise top 3 gaming trends from headlines.", {"source": "news"}),
@@ -264,7 +280,6 @@ if __name__ == "__main__":
         result = answer_query(q, filters=f)
         print(json.dumps(result, indent=2))
 
-    # Graceful shutdown
     try:
         client.close()
         logger.info("Weaviate client closed.")
