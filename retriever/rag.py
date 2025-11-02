@@ -15,28 +15,43 @@ from langchain_weaviate import WeaviateVectorStore
 from vector.embed import get_embedding_model
 from vector.index_manager import client
 from .retriever import retrieve_similar, _build_filter
+from utils.gpu_utils import get_device  # GPU support
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # Logging
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
-# Global singletons
+# Helper: log metrics to disk
 # --------------------------------------------------------------------------- #
+def _log_metrics(metrics: dict) -> None:
+    """Write a metrics dict to logs/ with a timestamped filename."""
+    os.makedirs("logs", exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    path = f"logs/metrics_{timestamp}.json"
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2)
+        logger.info(f"Metrics logged → {path}")
+    except Exception as e:
+        logger.error(f"Failed to write metrics file: {e}")
+
+# ---------------------------------------------------------------------------
+# Global singletons
+# ---------------------------------------------------------------------------
 _llm: Optional[HuggingFacePipeline] = None
 _embeddings = None
 
-
 def get_llm() -> HuggingFacePipeline:
-    """Lazy-load Gemma-3-1B-IT with optimized pipeline."""
     global _llm
     if _llm is None:
         model_id = "google/gemma-3-1b-it"
         hf_token = os.getenv("HF_TOKEN")
 
-        logger.info(f"Loading LLM: {model_id}")
+        device = get_device()
+        logger.info(f"Loading LLM: {model_id} on {device.upper()}")
 
         tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
         if tokenizer.pad_token is None:
@@ -45,8 +60,8 @@ def get_llm() -> HuggingFacePipeline:
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             token=hf_token,
-            dtype="auto",  # Fixed deprecation
-            device_map="auto",
+            dtype="auto",           # Fixed
+            device_map="auto",      # Requires accelerate
             trust_remote_code=True,
         )
 
@@ -54,23 +69,21 @@ def get_llm() -> HuggingFacePipeline:
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=128,  # Balanced for 2-4 sentences
+            max_new_tokens=128,
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
             repetition_penalty=1.1,
             pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id,  # Stop at end
-            return_full_text=False,  # Only generate new text (faster)
+            device_map="auto"
         )
 
         _llm = HuggingFacePipeline(pipeline=pipe)
-        logger.info("Gemma-3-1B loaded – RAG-optimized.")
+        logger.info(f"LLM loaded on {device.upper()}.")
     return _llm
 
-
-def _extract_generated_text(raw_out) -> str:
-    """Normalize HF/LC output shapes."""
+def _extract_generated_text(raw_out: Any) -> str:
+    """Normalize generated output from different HF/LC shapes."""
     if raw_out is None:
         return ""
     if isinstance(raw_out, str):
@@ -90,82 +103,52 @@ def _extract_generated_text(raw_out) -> str:
         return " ".join(str(v) for v in raw_out.values()).strip()
     return str(raw_out).strip()
 
-
-def _no_retrieval_response(query: str, filters: Dict, latency_retrieval: float, start_total: float) -> Dict[str, Any]:
-    """Handle no retrieval case."""
-    total_time = time.time() - start_total
-    metrics = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "query": query,
-        "retrieval_count": 0,
-        "avg_relevance": 0.0,
-        "latency_retrieval": round(latency_retrieval, 3),
-        "latency_generation": 0.0,
-        "latency_total": round(total_time, 3),
-        "low_confidence": "True",
-        "filters": filters or {},
-        "citations_count": 0,
-        "retrieval_precision": 0.0,
-        "grounding_fidelity": 0.0,
-        "task_completion": 0.0,
-        "automation_depth": 0,
-        "suggested_action": "Run ingestor or broaden query."
-    }
-    _log_metrics(metrics)
-    return {"answer": "No relevant information found.", "citations": [], "metrics": metrics}
-
-
-def _log_metrics(metrics: Dict[str, Any]):
-    """Log metrics to JSON."""
-    os.makedirs("logs", exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    path = f"logs/metrics_{ts}.json"
-    try:
-        with open(path, "w") as f:
-            json.dump(metrics, f, indent=2)
-        logger.info(f"Metrics → {path}")
-    except Exception as e:
-        logger.error(f"Metric log failed: {e}")
-
-
 def answer_query(
     query: str,
     filters: Optional[Dict[str, Any]] = None,
     top_k: int = 8
 ) -> Dict[str, Any]:
-    """RAG with Gemma-3 chat template and robust fallback."""
+    """Retrieve relevant context and generate grounded answer."""
     start_total = time.time()
+    default_score_threshold = 0.40
 
-    # Auto-infer filters
-    if not filters:
-        q_lower = query.lower()
-        if any(word in q_lower for word in ["update", "latest", "gamepass", "trends", "headlines"]):
-            filters = {"source": "news"}
-        else:
-            filters = {"source": "igdb"}
-
-    # Retrieval (text-based, no embedding arg)
+    # Retrieval phase
     start_retr = time.time()
     try:
         docs = retrieve_similar(
-            query=query,  # Fixed: Text query, no query_embedding
+            query=query,
             top_k=top_k,
             filters=filters,
-            alpha=0.9,
-            score_threshold=0.3
+            alpha=0.75,
+            score_threshold=default_score_threshold
         ) or []
     except Exception as e:
-        logger.exception(f"Retrieval error: {e}")
+        logger.exception("Error during retrieve_similar(): %s", e)
         docs = []
     latency_retrieval = time.time() - start_retr
 
     if not docs:
-        return _no_retrieval_response(query, filters, latency_retrieval, start_total)
+        metrics = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "query": query,
+            "retrieval_count": 0,
+            "avg_relevance": 0.0,
+            "latency_retrieval": round(latency_retrieval, 3),
+            "latency_generation": 0.0,
+            "latency_total": round(time.time() - start_total, 3),
+            "low_confidence": "True",
+            "filters": filters or {},
+            "citations_count": 0,
+        }
+        return {
+            "answer": "No relevant information found.",
+            "citations": [],
+            "metrics": metrics
+        }
 
-    # Relevance scoring
     global _embeddings
     if _embeddings is None:
-        _embeddings = get_embedding_model()
+        _embeddings = get_embedding_model()  # Already GPU
 
     vectorstore = WeaviateVectorStore(
         client=client,
@@ -175,59 +158,67 @@ def answer_query(
         attributes=["source", "chunk_id", "created_at", "article_id"]
     )
 
+    where_filter = _build_filter(filters or {})
+    score_results = []
     try:
-        where = _build_filter(filters or {})
-        score_res = vectorstore.similarity_search_with_relevance_scores(
-            query=query, k=top_k * 2, alpha=0.9, filters=where, score_threshold=0.0
+        score_results = vectorstore.similarity_search_with_relevance_scores(
+            query=query,
+            k=top_k * 2,
+            alpha=0.75,
+            filters=where_filter,
+            score_threshold=0.0
         )
-        top_scores = [s for _, s in sorted(score_res, key=lambda x: x[1], reverse=True)[:top_k]]
+    except Exception as e:
+        logger.exception("Error computing similarity scores: %s", e)
+
+    try:
+        top_scores = [s for _, s in sorted(score_results, key=lambda x: x[1], reverse=True)[:top_k]]
         avg_relevance = sum(top_scores) / len(top_scores) if top_scores else 0.0
     except Exception:
         avg_relevance = 0.0
 
-    # Build context
-    parts = []
+    retrieval_count = len(docs)
+    context_parts = []
     for d in docs:
-        txt = d.page_content[:500] + "..." if len(d.page_content) > 500 else d.page_content
-        sid = f"{d.metadata.get('source','N/A')}_{d.metadata.get('article_id','N/A')}"
-        parts.append(f"[source:{sid}]\n{txt}")
-    context = "\n\n---\n\n".join(parts)
-    if len(context) > 12000:
-        context = context[:12000] + "\n[Context truncated]"
+        content = d.page_content[:500] + "..." if len(d.page_content) > 500 else d.page_content
+        source_id = f"{d.metadata.get('source','N/A')}-{d.metadata.get('article_id','N/A')}"
+        context_parts.append(f"[source:{source_id}]\n{content}")
 
-    citations = list({f"{d.metadata.get('source','N/A')}_{d.metadata.get('article_id','N/A')}" for d in docs})
+    context_str = "\n\n---\n\n".join(context_parts)
+    if len(context_str) > 12000:
+        context_str = context_str[:12000] + "\n[Context truncated for token limit]"
 
-    # Prompt (Gemma-3 chat format)
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful assistant. Answer using only the context. Cite sources inline with [source:id]. If insufficient info, say 'No relevant information found.' Keep answers 2-4 sentences."
-        },
-        {
-            "role": "user",
-            "content": f"Context:\n{context}\n\nQuestion: {query}"
-        }
-    ]
+    try:
+        citations = list({f"{d.metadata.get('source','N/A')}_{d.metadata.get('article_id','N/A')}" for d in docs})
+    except Exception:
+        citations = []
+
+    # Prompt creation
+    prompt = (
+        f"Answer the following question using only the given context.\n"
+        f"If the context does not contain enough information, reply with 'No relevant information found.'\n\n"
+        f"Context:\n{context_str}\n\n"
+        f"Question: {query}\n\n"
+        f"Provide a short, natural sentence that directly answers the question based on the context above:\n"
+    )
 
     # Generation
     start_gen = time.time()
     try:
         llm = get_llm()
-        tokenizer = llm.pipeline.tokenizer
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        raw = llm.invoke(prompt)
-        generated = _extract_generated_text(raw)
-
-        # Light post-process (no aggressive stripping)
-        generated = generated.split("Question:")[-1].strip()  # Trim prefix if any
-        generated = re.sub(r'\s+', ' ', generated).strip()  # Clean whitespace
-
+        raw_out = llm.invoke(prompt)
+        generated = _extract_generated_text(raw_out)
+        # Post-process to trim repeated context if echo occurs
+        if "Context:" in generated:
+            generated = generated.split("Context:")[-1].strip()
+        if "Answer:" in generated:
+            generated = generated.split("Answer:")[-1].strip()
     except Exception as e:
-        logger.exception(f"Generation error: {e}")
-        generated = ""
+        logger.exception("LLM generation failed: %s", e)
+        generated = f"Generation failed: {e}"
     latency_generation = time.time() - start_gen
 
-    # Robust fallback (summarize top doc if empty/short)
+    # Fallback to top doc if empty/short
     if len(generated.strip()) < 20:
         if docs:
             top_txt = docs[0].page_content[:300]

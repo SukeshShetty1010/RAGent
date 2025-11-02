@@ -1,0 +1,10 @@
+{
+  "output": "Agent stopped due to iteration limit or time limit.",
+  "citations": [],
+  "metrics": {
+    "timestamp": "2025-11-01T06:39:27.572136+00:00",
+    "query": "What are the latest headlines about GTA VI?",
+    "latency_total": 102.751,
+    "citations_count": 0
+  }
+}

@@ -5,7 +5,7 @@ from langchain_weaviate import WeaviateVectorStore
 from weaviate.classes.query import Filter
 from vector.embed import get_embedding_model
 from vector.index_manager import client
-
+from utils.gpu_utils import get_device  # GPU support
 
 def retrieve_similar(
     query: str,
@@ -28,7 +28,16 @@ def retrieve_similar(
     Returns:
         List of relevant Documents (filtered and ranked).
     """
-    embeddings = get_embedding_model()
+    embeddings = get_embedding_model()  # Already GPU-enabled
+    
+    # DEBUG: Confirm GPU
+    device = get_device()
+    try:
+        model_device = next(embeddings.client.model.parameters()).device
+        print(f"[retriever.py] Embeddings on {model_device} ({device.upper()})")
+    except:
+        pass
+
     vectorstore = WeaviateVectorStore(
         client=client,
         index_name="KnowledgeBase",

@@ -1,0 +1,10 @@
+{
+  "output": "Agent stopped due to iteration limit or time limit.",
+  "citations": [],
+  "metrics": {
+    "timestamp": "2025-11-01T06:40:02.282992+00:00",
+    "query": "Tell me about the newest shooter games released this month.",
+    "latency_total": 34.604,
+    "citations_count": 0
+  }
+}

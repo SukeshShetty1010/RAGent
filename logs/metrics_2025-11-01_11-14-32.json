@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-11-01T05:44:32.266233+00:00",
+  "query": "Tell me about PilotXross from IGDB.",
+  "retrieval_count": 8,
+  "avg_relevance": 0.5146,
+  "latency_retrieval": 14.779,
+  "latency_generation": 10.576,
+  "latency_total": 29.064,
+  "low_confidence": "False",
+  "filters": {
+    "source": "igdb"
+  },
+  "citations_count": 8,
+  "retrieval_precision": 0.88,
+  "grounding_fidelity": 0.92,
+  "task_completion": 1.0,
+  "automation_depth": 1
+}

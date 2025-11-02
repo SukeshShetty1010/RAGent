@@ -1,202 +1,262 @@
-# agent/ragent.py
-import json, time, logging, re, os
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+#!/usr/bin/env python3
+"""
+RAG_ENT Agent - ReAct RAG Agent for Gaming Knowledge
+Integrates: Weaviate RAG + IGDB + APITube News + Local HF LLM (<3B)
+"""
 
-from langchain_core.prompts import PromptTemplate
-from langchain_huggingface import HuggingFacePipeline
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain_core.tools import Tool
-from langchain.agents.output_parsers import ReActSingleInputOutputParser
+import json
+import time
+import logging
+import os
+import torch
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+from dotenv import load_dotenv
 
-from .tools import search_knowledge_base, fetch_news, search_igdb
-from .utils import save_jsonl
+# Local imports (your project)
+from retriever.retriever import retrieve_similar
+from api.apitube_client import APITubeClient
+from api.igdb_client import igdb_request
+from utils.gpu_utils import get_device  # Assuming you have this
+from vector.embed import get_embedding_model
 
+# Load env
+load_dotenv()
+
+# === LOGGING ===
+logging.basicConfig(
+    level=logging.INFO,
+    format=f"[RAGENT] [GPU:{get_device().upper()}] [%(asctime)s] [%(levelname)s] %(message)s"
+)
 log = logging.getLogger(__name__)
 
-# --------------------------------------------------------------------------- #
-# 1. LLM (FIXED: NO STREAMING, RELIABLE OUTPUT)
-# --------------------------------------------------------------------------- #
-_llm: Optional[HuggingFacePipeline] = None
+class ReActAgent:
+    def __init__(self):
+        self.device = get_device()
+        self.llm = self._init_llm()
+        self.news_client = APITubeClient()
+        self.conversation_history = []
+        
+        log.info(f"🚀 ReAct Agent initialized on {self.device.upper()}")
 
-def _get_llm() -> HuggingFacePipeline:
-    global _llm
-    if _llm is None:
-        from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-        model_id = "google/gemma-3-1b-it"
-        hf_token = os.getenv("HF_TOKEN")
-        tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+    def _init_llm(self):
+        """Load <3B Gemma-2-2B (best local model for reasoning)"""
+        from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
+        
+        model_name = "google/gemma-2-2b-it"  # 2B params - perfect for local
+        log.info(f"Loading {model_name} on {self.device.upper()}...")
+        
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            token=hf_token,
-            dtype="auto",
+            model_name,
+            torch_dtype=torch.float16,
             device_map="auto",
-            trust_remote_code=True,
+            trust_remote_code=True
         )
+        
         pipe = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=1024,
-            temperature=0.05,        # Ultra-reliable
-            top_p=0.95,
-            repetition_penalty=1.05,
-            return_full_text=False,
-            # ✅ NO STREAMING = NO TIMEOUTS
-            streamer=None,
-            batch_size=1,
+            max_new_tokens=512,
+            temperature=0.1,
+            do_sample=True,
+            device_map="auto",
+            torch_dtype=torch.float16
         )
-        _llm = HuggingFacePipeline(pipeline=pipe)
-        log.info("Gemma-3-1B-IT loaded for agent (NO STREAMING)")
-    return _llm
+        
+        log.info("✅ LLM loaded successfully!")
+        return pipe
 
-# --------------------------------------------------------------------------- #
-# 2. PERFECT CLASSIC REACT PROMPT (NO JSON CONFUSION)
-# --------------------------------------------------------------------------- #
-def build_agent() -> AgentExecutor:
-    llm = _get_llm()
-    
-    tools = [
-        Tool.from_function(
-            func=search_knowledge_base,
-            name="search_knowledge_base",
-            description="Search stored game facts from vector database.",
-        ),
-        Tool.from_function(
-            func=fetch_news,
-            name="fetch_news",
-            description="Get LIVE NEWS HEADLINES. Use for 'latest', 'headlines', 'news', 'trends'.",
-        ),
-        Tool.from_function(
-            func=search_igdb,
-            name="search_igdb",
-            description="Get game DATABASE info (ratings, release dates, platforms).",
-        ),
-    ]
+    def _react_prompt(self, query: str) -> str:
+        """ReAct prompt template with RAG context"""
+        history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self.conversation_history[-3:]])
+        
+        return f"""<s>[INST] You are a gaming expert agent. Use tools when needed, think step-by-step.
 
-    # ✅ CLASSIC REACT FORMAT - Gemma follows PERFECTLY
-    prompt = PromptTemplate.from_template("""You are RAGent, a gaming assistant. Answer using ONLY tool results.
+Recent conversation:
+{history}
 
-TOOLS:
-{tool_names}
+Current question: {query}
 
-{tools}
+Available tools:
+1. search_rag - Search knowledge base (games + news)
+2. search_igdb - Live IGDB game search
+3. fetch_news - Live gaming news
 
-FORMAT - Use EXACTLY these lines:
-
+Respond in this EXACT format:
 Thought: [your reasoning]
-Action: [ONE tool name]
-Action Input: [SHORT input string]
+Action: [tool_name]
+Action Input: [exact input for tool]
 
-OR for final answer:
-Final Answer: [2-4 sentences with [source:id] citations]
+Or to finish:
+Final Answer: [your answer]
 
-RULES:
-- "headlines" or "news" → fetch_news FIRST
-- Game details → search_igdb  
-- Never mix Action + Final Answer
-- Short Action Input (under 50 chars)
-- Cite EVERY fact: [source:123]
+Tools MUST return data in this format:
+{{"tool_name": "search_rag", "result": "data here"}}
 
-Question: {input}
-{agent_scratchpad}""")
+Think carefully before acting. [/INST]"""
 
-    agent = create_react_agent(
-        llm=llm,
-        tools=tools,
-        prompt=prompt
-    )
-
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        max_iterations=6,
-        handle_parsing_errors=True,  # Survives parsing issues
-        return_intermediate_steps=True
-    )
-
-# --------------------------------------------------------------------------- #
-# 3. Extract citations (unchanged)
-# --------------------------------------------------------------------------- #
-def _extract_citations(docs: List[Any]) -> List[str]:
-    cites = []
-    for d in docs:
-        if isinstance(d, dict):
-            cid = d.get("article_id") or d.get("id") or d.get("content_hash")
-        else:
-            cid = (
-                d.metadata.get("article_id")
-                or d.metadata.get("id")
-                or d.metadata.get("content_hash")
-            )
-        if cid:
-            cites.append(str(cid))
-    return cites
-
-# --------------------------------------------------------------------------- #
-# 4. Public entry point (unchanged)
-# --------------------------------------------------------------------------- #
-def answer_query(user_query: str) -> Dict[str, Any]:
-    start = time.time()
-    executor = build_agent()
-
-    raw = executor.invoke({"input": user_query})
-    agent_output = raw.get("output", "")
-
-    # Post-process citations
-    intermediate = raw.get("intermediate_steps", [])
-    all_docs = []
-    for action, obs in intermediate:
-        if isinstance(obs, list):
-            all_docs.extend(obs)
-        elif isinstance(obs, dict) and "results" in obs:
-            all_docs.extend(obs["results"])
-
-    citations = _extract_citations(all_docs)
-    if citations and not re.search(r"\[source:[^\]]+\]", agent_output):
-        agent_output += f" [sources: {', '.join(citations[:3])}]"
-
-    metrics = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "query": user_query,
-        "latency_total": round(time.time() - start, 3),
-        "citations_count": len(citations),
-        "automation_depth": 5,
-        "grounding_fidelity": 0.94,
-        "task_completion": 1.0,
-    }
-
-    os.makedirs("eval", exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    with open(f"eval/agent_run_{ts}.json", "w") as f:
-        json.dump(metrics, f, indent=2)
-
-    return {"answer": agent_output, "citations": citations, "metrics": metrics}
-
-# --------------------------------------------------------------------------- #
-# 5. Demo
-# --------------------------------------------------------------------------- #
-if __name__ == "__main__":
-    os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN") or "dummy"
-    tests = [
-        "What are the latest headlines about GTA VI?",
-        "Tell me about the newest shooter games released this month.",
-        "Summarise the top 3 gaming trends from news.",
-    ]
-
-    try:
-        for q in tests:
-            print("\n" + "=" * 60)
-            print(f"QUERY: {q}")
-            res = answer_query(q)
-            print(res["answer"])
-            print(f"Citations: {res['citations']}")
-    finally:
+    def search_rag(self, query: str, top_k: int = 5) -> Dict[str, Any]:
+        """Tool: Search Weaviate RAG (your retriever)"""
         try:
-            from vector.index_manager import client as weaviate_client
-            weaviate_client.close()
-        except Exception:
-            pass
+            docs = retrieve_similar(query=query, top_k=top_k)
+            results = []
+            for i, doc in enumerate(docs, 1):
+                source = doc.metadata.get("source", "unknown")
+                content = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+                results.append(f"{i}. [{source}] {content}")
+            
+            return {
+                "tool_name": "search_rag",
+                "result": f"Found {len(docs)} relevant chunks:\n" + "\n".join(results),
+                "doc_count": len(docs)
+            }
+        except Exception as e:
+            return {"tool_name": "search_rag", "result": f"Search failed: {str(e)}"}
+
+    def search_igdb(self, query: str) -> Dict[str, Any]:
+        """Tool: Live IGDB search"""
+        try:
+            igdb_query = (
+                f'fields id,name,summary,first_release_date,genres.name,platforms.name;'
+                f'search "{query}"; limit 5;'
+            )
+            data = igdb_request("games", igdb_query)
+            
+            results = []
+            for game in data[:3]:
+                name = game.get("name", "Unknown")
+                summary = game.get("summary", "")[:100] + "..." if game.get("summary") else ""
+                genres = ", ".join(g["name"] for g in game.get("genres", []))
+                results.append(f"- {name} | Genres: {genres} | {summary}")
+            
+            return {
+                "tool_name": "search_igdb", 
+                "result": f"Top IGDB matches for '{query}':\n" + "\n".join(results),
+                "count": len(data)
+            }
+        except Exception as e:
+            return {"tool_name": "search_igdb", "result": f"IGDB error: {str(e)}"}
+
+    def fetch_news(self, query: str) -> Dict[str, Any]:
+        """Tool: Live gaming news"""
+        try:
+            headlines = self.news_client.get_top_headlines(q=query, category="gaming")
+            news_items = headlines.get("articles", [])[:3]
+            
+            results = []
+            for item in news_items:
+                title = item.get("title", "No title")
+                source = item.get("source", {}).get("name", "Unknown")
+                results.append(f"- {title} [{source}]")
+            
+            return {
+                "tool_name": "fetch_news",
+                "result": f"Latest news for '{query}':\n" + "\n".join(results),
+                "count": len(news_items)
+            }
+        except Exception as e:
+            return {"tool_name": "fetch_news", "result": f"News error: {str(e)}"}
+
+    def _parse_action(self, response: str) -> tuple[Optional[str], Optional[str]]:
+        """Parse ReAct response -> Action + Input"""
+        lines = [line.strip() for line in response.split("\n") if line.strip()]
+        
+        action = None
+        action_input = None
+        
+        for line in lines:
+            if line.startswith("Action:"):
+                action = line.split("Action:")[1].strip().lower()
+            elif line.startswith("Action Input:"):
+                action_input = line.split("Action Input:")[1].strip().strip('"\'')
+            elif line.startswith("Final Answer:"):
+                return "FINAL", line.split("Final Answer:")[1].strip().strip('"\'')
+        
+        return action, action_input
+
+    def run(self, query: str, max_steps: int = 5) -> Dict[str, Any]:
+        """Main ReAct loop"""
+        start_time = time.time()
+        self.conversation_history.append({"role": "user", "content": query})
+        
+        step = 0
+        tool_results = []
+        
+        while step < max_steps:
+            step += 1
+            log.info(f"🤔 Step {step}/{max_steps}: Processing '{query[:50]}...'")
+            
+            # 1. Build ReAct prompt
+            prompt = self._react_prompt(query)
+            
+            # 2. LLM inference
+            try:
+                response = self.llm(prompt, pad_token_id=self.llm.tokenizer.eos_token_id)[0]["generated_text"]
+                response = response.split("[/INST]")[-1].strip()  # Extract after instruction
+            except Exception as e:
+                log.error(f"LLM error: {e}")
+                break
+            
+            # 3. Parse action
+            action, action_input = self._parse_action(response)
+            log.info(f"Action: {action} | Input: {action_input}")
+            
+            if action == "FINAL" or action_input is None:
+                final_answer = action_input or "No clear answer found"
+                latency = time.time() - start_time
+                
+                result = {
+                    "answer": final_answer,
+                    "steps": step,
+                    "latency": round(latency, 2),
+                    "tool_calls": len(tool_results),
+                    "sources": tool_results
+                }
+                
+                self.conversation_history.append({"role": "assistant", "content": final_answer})
+                log.info(f"✅ Done in {latency:.2f}s ({step} steps)")
+                return result
+            
+            # 4. Execute tool
+            tool_result = None
+            if action == "search_rag":
+                tool_result = self.search_rag(action_input)
+            elif action == "search_igdb":
+                tool_result = self.search_igdb(action_input)
+            elif action == "fetch_news":
+                tool_result = self.fetch_news(action_input)
+            else:
+                tool_result = {"tool_name": action, "result": f"Unknown tool: {action}"}
+            
+            tool_results.append(tool_result)
+            self.conversation_history.append({"role": "tool", "content": str(tool_result)})
+        
+        # Timeout fallback
+        fallback = "Sorry, I couldn't complete the reasoning in time. Try a simpler query."
+        return {"answer": fallback, "steps": max_steps, "tool_calls": 0, "latency": round(time.time() - start_time, 2)}
+
+# === CLI INTERFACE ===
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="RAG_ENT Gaming Agent")
+    parser.add_argument("query", help="Your gaming question")
+    parser.add_argument("--steps", type=int, default=5, help="Max reasoning steps")
+    args = parser.parse_args()
+    
+    agent = ReActAgent()
+    result = agent.run(args.query, max_steps=args.steps)
+    
+    print("\n" + "="*80)
+    print(f"🤖 ANSWER: {result['answer']}")
+    print(f"⏱️  Time: {result['latency']}s | Steps: {result['steps']}")
+    print(f"🔧 Tools: {result['tool_calls']}")
+    
+    if result['sources']:
+        print("\n📚 SOURCES:")
+        for source in result['sources'][-3:]:  # Last 3
+            print(f"  {source['tool_name']}: {source['result'][:100]}...")
+
+if __name__ == "__main__":
+    main()

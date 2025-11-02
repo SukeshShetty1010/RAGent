@@ -1,0 +1,10 @@
+{
+  "output": "Agent stopped due to iteration limit or time limit.",
+  "citations": [],
+  "metrics": {
+    "timestamp": "2025-11-01T06:40:46.696534+00:00",
+    "query": "Summarise the top 3 gaming trends from news.",
+    "latency_total": 44.01,
+    "citations_count": 0
+  }
+}

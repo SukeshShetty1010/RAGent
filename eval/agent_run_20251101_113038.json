@@ -1,0 +1,9 @@
+{
+  "timestamp": "2025-11-01T06:00:38.636423+00:00",
+  "query": "Summarise the top 3 gaming trends from news.",
+  "latency_total": 64.795,
+  "citations_count": 0,
+  "automation_depth": 5,
+  "grounding_fidelity": 0.94,
+  "task_completion": 1.0
+}
