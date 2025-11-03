@@ -8,28 +8,30 @@ services:
     ports:
       - "8080:8080"   # HTTP API
       - "50051:50051" # gRPC (optional)
+
     environment:
       QUERY_DEFAULTS_LIMIT: 25
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
       PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
       DEFAULT_VECTORIZER_MODULE: 'none'  # External GPU embeddings
       ENABLE_MODULES: ''
-      # GPU-optimized defaults
       CLUSTER_GOSSIP_BIND_PORT: 7000
       CLUSTER_DATA_BIND_PORT: 7001
-      # Increase memory for large batches
       WEAVIATE_SERVER_MAX_MEMORY: 8G
+
     volumes:
       - weaviate_data:/var/lib/weaviate
     restart: unless-stopped
-    # GPU passthrough (if Weaviate ever supports it)
+
+    # Conditional GPU settings (controlled via environment variables)
     deploy:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+            - driver: ${DEVICE_DRIVER:-none}
+              count: ${DEVICE_COUNT:-0}
+              capabilities:
+                - ${DEVICE_CAPABILITY:-cpu}
     # Optional: Pin to GPU-enabled node
     # placement:
     #   constraints: [node.labels.gpu == true]
