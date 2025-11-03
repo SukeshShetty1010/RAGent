@@ -1,0 +1,12 @@
+{
+    "run_timestamp": "2025-11-03T18:44:20.759958+00:00",
+    "device": "cuda",
+    "news_latency": 18.947,
+    "igdb_latency": 6.142,
+    "total_latency": 25.089,
+    "news_docs": 10,
+    "news_chunks": 10,
+    "igdb_docs": 10,
+    "igdb_chunks": 10,
+    "automation_depth": 5
+}
