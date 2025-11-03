@@ -1,0 +1,13 @@
+# docker-compose.gpu.yml
+services:
+  weaviate:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Optional: Pin to GPU-enabled node
+    # placement:
+    #   constraints: [node.labels.gpu == true]
