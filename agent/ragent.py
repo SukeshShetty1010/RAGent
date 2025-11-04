@@ -1,262 +1,290 @@
-#!/usr/bin/env python3
+# agent/ragent.py
 """
-RAG_ENT Agent - ReAct RAG Agent for Gaming Knowledge
-Integrates: Weaviate RAG + IGDB + APITube News + Local HF LLM (<3B)
+Hybrid RAG Agent (KB + live news + IGDB)
+- LLM: google/gemma-2-2b-it (GPU, less than or equal to 8 GB VRAM)
+- Tool selection: LLM-structured Pydantic
+- Parallel tool execution
+- Inline citations
+- Structured JSON output
 """
 
 import json
 import time
 import logging
-import os
-import torch
-from typing import Dict, List, Any, Optional
 from datetime import datetime
-from dotenv import load_dotenv
+from typing import List, Dict, Any
 
-# Local imports (your project)
-from retriever.retriever import retrieve_similar
-from api.apitube_client import APITubeClient
-from api.igdb_client import igdb_request
-from utils.gpu_utils import get_device  # Assuming you have this
-from vector.embed import get_embedding_model
+import torch
+from pydantic import BaseModel, Field
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_huggingface import HuggingFacePipeline
 
-# Load env
-load_dotenv()
+from utils.gpu_utils import get_device
+from .tools import search_knowledge_base, fetch_news, search_igdb
 
-# === LOGGING ===
-logging.basicConfig(
-    level=logging.INFO,
-    format=f"[RAGENT] [GPU:{get_device().upper()}] [%(asctime)s] [%(levelname)s] %(message)s"
-)
+# --------------------------------------------------------------------------- #
+# Logging
+# --------------------------------------------------------------------------- #
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-class ReActAgent:
-    def __init__(self):
-        self.device = get_device()
-        self.llm = self._init_llm()
-        self.news_client = APITubeClient()
-        self.conversation_history = []
-        
-        log.info(f"🚀 ReAct Agent initialized on {self.device.upper()}")
+# --------------------------------------------------------------------------- #
+# LLM (lazy load, GPU-first, CPU-fallback)
+# --------------------------------------------------------------------------- #
+_llm: HuggingFacePipeline | None = None
 
-    def _init_llm(self):
-        """Load <3B Gemma-2-2B (best local model for reasoning)"""
-        from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
-        
-        model_name = "google/gemma-2-2b-it"  # 2B params - perfect for local
-        log.info(f"Loading {model_name} on {self.device.upper()}...")
-        
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+class ToolCall(BaseModel):
+    tools: List[str] = Field(..., description="['kb','news','igdb']")
+    query: str = Field(..., description="Refined query for the tools")
+    max_results: int = Field(default=3, ge=1, le=5)
+
+def _get_llm() -> HuggingFacePipeline:
+    """Load Gemma-2-2B-IT with automatic GPU/CPU placement."""
+    global _llm
+    if _llm is None:
+        device = get_device()
+
+        if device == "cpu":
+            log.warning(
+                "GPU not detected – falling back to CPU. Latency >5 s expected. "
+                "Use docker-compose.gpu.yml with `--gpus all` for GPU."
+            )
+
+        from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+
+        model_id = "google/gemma-2-2b-it"          # <-- NEW MODEL
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+
         model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.float16,
-            device_map="auto",
-            trust_remote_code=True
+            model_id,
+            dtype=torch.float16,          # Gemma-2 works best in fp16
+            device_map="auto",            # requires `accelerate`
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
         )
-        
+
         pipe = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=512,
+            max_new_tokens=256,
             temperature=0.1,
             do_sample=True,
             device_map="auto",
-            torch_dtype=torch.float16
+            dtype=torch.float16,
         )
-        
-        log.info("✅ LLM loaded successfully!")
-        return pipe
+        # Gemma uses eos_token as pad token
+        pipe.model.generation_config.pad_token_id = tokenizer.eos_token_id
 
-    def _react_prompt(self, query: str) -> str:
-        """ReAct prompt template with RAG context"""
-        history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self.conversation_history[-3:]])
-        
-        return f"""<s>[INST] You are a gaming expert agent. Use tools when needed, think step-by-step.
+        _llm = HuggingFacePipeline(pipeline=pipe)
+        log.info(f"Gemma-2-2B-IT loaded on {device.upper()}")
 
-Recent conversation:
-{history}
+    return _llm
 
-Current question: {query}
+# --------------------------------------------------------------------------- #
+# Prompt templates
+# --------------------------------------------------------------------------- #
+TOOL_ROUTER_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are a tool-router for a gaming RAG agent.
+Decide which tools to call in parallel:
+- kb   : vector search on stored knowledge
+- news : live news headlines
+- igdb : live IGDB game data
 
-Available tools:
-1. search_rag - Search knowledge base (games + news)
-2. search_igdb - Live IGDB game search
-3. fetch_news - Live gaming news
+Return **only** valid JSON matching the ToolCall schema."""),
+    ("human", "{query}")
+])
 
-Respond in this EXACT format:
-Thought: [your reasoning]
-Action: [tool_name]
-Action Input: [exact input for tool]
+FINAL_ANSWER_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are a concise gaming assistant.
+Synthesize the tool results into 1-3 short paragraphs or bullet points.
+Cite every fact inline: [Source: <source>, <YYYY-MM-DD>].
+If a fact comes from a document, include its article_id when available.
 
-Or to finish:
-Final Answer: [your answer]
+Context:
+{context}
 
-Tools MUST return data in this format:
-{{"tool_name": "search_rag", "result": "data here"}}
+Question: {query}
 
-Think carefully before acting. [/INST]"""
+Answer:"""),
+    ("placeholder", "{messages}")
+])
 
-    def search_rag(self, query: str, top_k: int = 5) -> Dict[str, Any]:
-        """Tool: Search Weaviate RAG (your retriever)"""
+# --------------------------------------------------------------------------- #
+# Agent class
+# --------------------------------------------------------------------------- #
+class RAGAgent:
+    def __init__(self):
+        self.llm = _get_llm()
+        self.router_chain = TOOL_ROUTER_PROMPT | self.llm | ToolCall
+        self.answer_chain = FINAL_ANSWER_PROMPT | self.llm
+
+    # ------------------- tool routing -------------------
+    def _route(self, query: str) -> ToolCall:
         try:
-            docs = retrieve_similar(query=query, top_k=top_k)
-            results = []
-            for i, doc in enumerate(docs, 1):
-                source = doc.metadata.get("source", "unknown")
-                content = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
-                results.append(f"{i}. [{source}] {content}")
-            
-            return {
-                "tool_name": "search_rag",
-                "result": f"Found {len(docs)} relevant chunks:\n" + "\n".join(results),
-                "doc_count": len(docs)
-            }
+            return self.router_chain.invoke({"query": query})
         except Exception as e:
-            return {"tool_name": "search_rag", "result": f"Search failed: {str(e)}"}
+            log.warning(f"Router failed ({e}); using all tools")
+            return ToolCall(tools=["kb", "news", "igdb"], query=query, max_results=3)
 
-    def search_igdb(self, query: str) -> Dict[str, Any]:
-        """Tool: Live IGDB search"""
-        try:
-            igdb_query = (
-                f'fields id,name,summary,first_release_date,genres.name,platforms.name;'
-                f'search "{query}"; limit 5;'
-            )
-            data = igdb_request("games", igdb_query)
-            
-            results = []
-            for game in data[:3]:
-                name = game.get("name", "Unknown")
-                summary = game.get("summary", "")[:100] + "..." if game.get("summary") else ""
-                genres = ", ".join(g["name"] for g in game.get("genres", []))
-                results.append(f"- {name} | Genres: {genres} | {summary}")
-            
-            return {
-                "tool_name": "search_igdb", 
-                "result": f"Top IGDB matches for '{query}':\n" + "\n".join(results),
-                "count": len(data)
+    # ------------------- tool helpers -------------------
+    @staticmethod
+    def _run_kb(q: str, k: int) -> List[Dict]:
+        docs = search_knowledge_base.invoke({"query": q, "top_k": k})
+        return [
+            {
+                "content": doc.page_content[:250] + ("..." if len(doc.page_content) > 250 else ""),
+                "source": doc.metadata.get("source", "KB"),
+                "id": doc.metadata.get("article_id"),
+                "date": doc.metadata.get("created_at", "")[:10],
             }
-        except Exception as e:
-            return {"tool_name": "search_igdb", "result": f"IGDB error: {str(e)}"}
+            for doc in docs
+        ]
 
-    def fetch_news(self, query: str) -> Dict[str, Any]:
-        """Tool: Live gaming news"""
-        try:
-            headlines = self.news_client.get_top_headlines(q=query, category="gaming")
-            news_items = headlines.get("articles", [])[:3]
-            
-            results = []
-            for item in news_items:
-                title = item.get("title", "No title")
-                source = item.get("source", {}).get("name", "Unknown")
-                results.append(f"- {title} [{source}]")
-            
-            return {
-                "tool_name": "fetch_news",
-                "result": f"Latest news for '{query}':\n" + "\n".join(results),
-                "count": len(news_items)
+    @staticmethod
+    def _run_news(q: str, limit: int) -> List[Dict]:
+        raw = fetch_news.invoke({"query": q, "limit": limit, "country": "us"})
+        items = raw.get("headlines", {}).get("results", [])[:limit]
+        return [
+            {
+                "content": f"{i.get('title','')} – {i.get('description','')}",
+                "source": "APITube.io",
+                "id": i.get("id"),
+                "date": i.get("published_at", "")[:10] or datetime.now().strftime("%Y-%m-%d"),
             }
-        except Exception as e:
-            return {"tool_name": "fetch_news", "result": f"News error: {str(e)}"}
+            for i in items
+        ]
 
-    def _parse_action(self, response: str) -> tuple[Optional[str], Optional[str]]:
-        """Parse ReAct response -> Action + Input"""
-        lines = [line.strip() for line in response.split("\n") if line.strip()]
-        
-        action = None
-        action_input = None
-        
-        for line in lines:
-            if line.startswith("Action:"):
-                action = line.split("Action:")[1].strip().lower()
-            elif line.startswith("Action Input:"):
-                action_input = line.split("Action Input:")[1].strip().strip('"\'')
-            elif line.startswith("Final Answer:"):
-                return "FINAL", line.split("Final Answer:")[1].strip().strip('"\'')
-        
-        return action, action_input
+    @staticmethod
+    def _run_igdb(q: str, limit: int) -> List[Dict]:
+        raw = search_igdb.invoke({"query": q, "limit": limit})
+        games = raw.get("results", [])[:limit]
+        return [
+            {
+                "content": f"{g.get('name','')} ({g.get('first_release_date','')})",
+                "source": "IGDB",
+                "id": g.get("id"),
+                "date": (datetime.utcfromtimestamp(g.get("first_release_date"))
+                         .strftime("%Y-%m-%d") if g.get("first_release_date") else ""),
+            }
+            for g in games
+        ]
 
-    def run(self, query: str, max_steps: int = 5) -> Dict[str, Any]:
-        """Main ReAct loop"""
-        start_time = time.time()
-        self.conversation_history.append({"role": "user", "content": query})
-        
-        step = 0
-        tool_results = []
-        
-        while step < max_steps:
-            step += 1
-            log.info(f"🤔 Step {step}/{max_steps}: Processing '{query[:50]}...'")
-            
-            # 1. Build ReAct prompt
-            prompt = self._react_prompt(query)
-            
-            # 2. LLM inference
+    # ------------------- parallel execution -------------------
+    def _execute_tools(self, call: ToolCall) -> List[Dict[str, Any]]:
+        tool_map = {
+            "kb": lambda: self._run_kb(call.query, call.max_results),
+            "news": lambda: self._run_news(call.query, call.max_results),
+            "igdb": lambda: self._run_igdb(call.query, call.max_results),
+        }
+        results = []
+        for name in call.tools:
+            start = time.time()
             try:
-                response = self.llm(prompt, pad_token_id=self.llm.tokenizer.eos_token_id)[0]["generated_text"]
-                response = response.split("[/INST]")[-1].strip()  # Extract after instruction
+                data = tool_map[name]()
+                results.append({"tool": name, "data": data, "latency": round(time.time() - start, 2)})
             except Exception as e:
-                log.error(f"LLM error: {e}")
-                break
-            
-            # 3. Parse action
-            action, action_input = self._parse_action(response)
-            log.info(f"Action: {action} | Input: {action_input}")
-            
-            if action == "FINAL" or action_input is None:
-                final_answer = action_input or "No clear answer found"
-                latency = time.time() - start_time
-                
-                result = {
-                    "answer": final_answer,
-                    "steps": step,
-                    "latency": round(latency, 2),
-                    "tool_calls": len(tool_results),
-                    "sources": tool_results
-                }
-                
-                self.conversation_history.append({"role": "assistant", "content": final_answer})
-                log.info(f"✅ Done in {latency:.2f}s ({step} steps)")
-                return result
-            
-            # 4. Execute tool
-            tool_result = None
-            if action == "search_rag":
-                tool_result = self.search_rag(action_input)
-            elif action == "search_igdb":
-                tool_result = self.search_igdb(action_input)
-            elif action == "fetch_news":
-                tool_result = self.fetch_news(action_input)
-            else:
-                tool_result = {"tool_name": action, "result": f"Unknown tool: {action}"}
-            
-            tool_results.append(tool_result)
-            self.conversation_history.append({"role": "tool", "content": str(tool_result)})
-        
-        # Timeout fallback
-        fallback = "Sorry, I couldn't complete the reasoning in time. Try a simpler query."
-        return {"answer": fallback, "steps": max_steps, "tool_calls": 0, "latency": round(time.time() - start_time, 2)}
+                log.error(f"Tool {name} error: {e}")
+                results.append({"tool": name, "data": [], "latency": 0})
+        return results
 
-# === CLI INTERFACE ===
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="RAG_ENT Gaming Agent")
-    parser.add_argument("query", help="Your gaming question")
-    parser.add_argument("--steps", type=int, default=5, help="Max reasoning steps")
-    args = parser.parse_args()
-    
-    agent = ReActAgent()
-    result = agent.run(args.query, max_steps=args.steps)
-    
-    print("\n" + "="*80)
-    print(f"🤖 ANSWER: {result['answer']}")
-    print(f"⏱️  Time: {result['latency']}s | Steps: {result['steps']}")
-    print(f"🔧 Tools: {result['tool_calls']}")
-    
-    if result['sources']:
-        print("\n📚 SOURCES:")
-        for source in result['sources'][-3:]:  # Last 3
-            print(f"  {source['tool_name']}: {source['result'][:100]}...")
+    # ------------------- answer synthesis -------------------
+    def _synthesize(self, query: str, tool_results: List[Dict]) -> str:
+        ctx_parts = []
+        for r in tool_results:
+            for item in r["data"]:
+                ctx_parts.append(f"[{r['tool'].upper()}] {item['content']}")
+        context = "\n".join(ctx_parts)
 
+        messages = [HumanMessage(content=query)]
+        for r in tool_results:
+            for item in r["data"]:
+                cite = f"[Source: {item['source']}, {item['date']}"
+                if item.get("id"):
+                    cite += f" (ID:{item['id']})"
+                cite += "]"
+                messages.append(ToolMessage(content=item["content"],
+                                            tool_call_id=f"{r['tool']}_{item.get('id','')}",
+                                            name=r["tool"]))
+
+        try:
+            raw = self.answer_chain.invoke({"query": query, "context": context, "messages": messages})
+            answer = raw.strip()
+        except Exception as e:
+            log.error(f"Synthesis error: {e}")
+            answer = "\n".join([f"{r['tool'].upper()}: {', '.join([i['content'][:80] for i in r['data']])}"
+                                for r in tool_results])
+
+        # inline citation post-process
+        for r in tool_results:
+            for item in r["data"]:
+                placeholder = f"[{r['tool'].upper()}]"
+                citation = f"[Source: {item['source']}, {item['date']}"
+                if item.get("id"):
+                    citation += f" (ID:{item['id']})"
+                citation += "]"
+                answer = answer.replace(placeholder, citation, 1)
+        return answer
+
+    # ------------------- public API -------------------
+    def answer_query(self, query: str) -> Dict[str, Any]:
+        total_start = time.time()
+
+        route_start = time.time()
+        tool_call = self._route(query)
+        route_lat = time.time() - route_start
+
+        exec_start = time.time()
+        tool_results = self._execute_tools(tool_call)
+        exec_lat = time.time() - exec_start
+
+        synth_start = time.time()
+        answer = self._synthesize(query, tool_results)
+        synth_lat = time.time() - synth_start
+
+        total_lat = time.time() - total_start
+        log.info(f"Query answered in {total_lat:.2f}s "
+                 f"(route:{route_lat:.2f}s exec:{exec_lat:.2f}s synth:{synth_lat:.2f}s)")
+
+        sources = []
+        for r in tool_results:
+            for item in r["data"]:
+                sources.append({
+                    "source": item["source"],
+                    "id": item.get("id"),
+                    "date": item["date"],
+                })
+
+        return {
+            "answer": answer,
+            "sources": sources,
+            "tools_used": tool_call.tools,
+            "latencies": {
+                "total": round(total_lat, 2),
+                "route": round(route_lat, 2),
+                "execute": round(exec_lat, 2),
+                "synthesize": round(synth_lat, 2),
+            },
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+
+
+# --------------------------------------------------------------------------- #
+# CLI test
+# --------------------------------------------------------------------------- #
 if __name__ == "__main__":
-    main()
+    agent = RAGAgent()
+    tests = [
+        "What's the latest on GTA VI release date?",
+        "List the newest shooter games released this month.",
+        "Summarize top gaming trends from recent news.",
+    ]
+    for q in tests:
+        print("\n" + "=" * 80)
+        print(f"Q: {q}")
+        res = agent.answer_query(q)
+        print(f"A: {res['answer']}")
+        print(f"Tools: {', '.join(res['tools_used'])} | Total: {res['latencies']['total']}s")
+        print(f"Sources: {len(res['sources'])}")
