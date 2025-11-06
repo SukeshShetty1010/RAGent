@@ -11,7 +11,6 @@ import itertools
 import sys
 from datetime import datetime
 from typing import List, Dict, Any
-
 from pydantic import BaseModel, Field
 
 from agent.tools import search_knowledge_base, fetch_news, search_igdb
@@ -60,36 +59,12 @@ class RAGAgent:
     def __init__(self, model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct"):
         self.model = model_name
         self.temperature = 0.0
-        self.max_tokens_router = 128
+        self.max_tokens_router = 0  # skip router remote call
         self.max_tokens_answer = 512
 
     def _route(self, query: str) -> ToolCall:
-        messages = [
-            {"role": "system", "content": TOOL_ROUTER_SYSTEM},
-            {"role": "user", "content": query},
-        ]
-        stop_event = threading.Event()
-        spinner = threading.Thread(target=_spinner_task, args=(stop_event,))
-        spinner.start()
-        try:
-            resp = chat_completion(
-                messages,
-                model=self.model,
-                max_tokens=self.max_tokens_router,
-                temperature=self.temperature,
-                timeout=300
-            )
-            stop_event.set()
-            spinner.join()
-            text = get_text_from_response(resp).strip()
-            payload = json.loads(text)
-            return ToolCall(**payload)
-        except (RemoteLLMError, json.JSONDecodeError) as e:
-            stop_event.set()
-            spinner.join()
-            log.warning(f"Router error: {e}")
-            log.warning("Defaulting to all tools")
-            return ToolCall(tools=["kb","news","igdb"], query=query, max_results=3)
+        # Skip remote router for simplicity
+        return ToolCall(tools=["kb","news","igdb"], query=query, max_results=3)
 
     @staticmethod
     def _run_kb(q: str, k: int) -> List[Dict]:
@@ -127,24 +102,24 @@ class RAGAgent:
                 "content": f"{g.get('name','')} ({g.get('first_release_date','')})",
                 "source": "IGDB",
                 "id": g.get("id"),
-                "date": (datetime.utcfromtimestamp(g.get("first_release_date")).strftime("%Y-%m-d") 
+                "date": (datetime.utcfromtimestamp(g.get("first_release_date")).strftime("%Y-%m-d")
                          if g.get("first_release_date") else ""),
             }
             for g in games
         ]
 
     def _execute_tools(self, call: ToolCall) -> List[Dict[str, Any]]:
-        tool_map = {
-            "kb": lambda: self._run_kb(call.query, call.max_results),
-            "news": lambda: self._run_news(call.query, call.max_results),
-            "igdb": lambda: self._run_igdb(call.query, call.max_results),
-        }
-        results: List[Dict[str, Any]] = []
+        results = []
         for name in call.tools:
-            start_t = time.time()
+            s = time.time()
             try:
-                data = tool_map[name]()
-                latency = round(time.time()-start_t, 2)
+                if name == "kb":
+                    data = self._run_kb(call.query, call.max_results)
+                elif name == "news":
+                    data = self._run_news(call.query, call.max_results)
+                else:
+                    data = self._run_igdb(call.query, call.max_results)
+                latency = round(time.time() - s, 2)
                 results.append({"tool": name, "data": data, "latency": latency})
             except Exception as e:
                 log.error(f"Tool {name} error: {e}")
@@ -152,12 +127,12 @@ class RAGAgent:
         return results
 
     def _synthesize(self, query: str, tool_results: List[Dict]) -> str:
-        context = "\n".join(f"[{r['tool'].upper()}] {i['content']}"
-                            for r in tool_results for i in r["data"])
+        context = "\n".join(f"[{r['tool'].upper()}] {item['content']}"
+                            for r in tool_results for item in r["data"])
         system_prompt = FINAL_ANSWER_SYSTEM.format(context=context, query=query)
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
+            {"role": "user", "content": query}
         ]
         for r in tool_results:
             for item in r["data"]:
@@ -176,63 +151,45 @@ class RAGAgent:
                 model=self.model,
                 max_tokens=self.max_tokens_answer,
                 temperature=self.temperature,
-                timeout=600
+                timeout=120
             )
             stop_event.set()
             spinner.join()
-            answer_text = get_text_from_response(resp).strip()
+            answer = get_text_from_response(resp).strip()
         except RemoteLLMError as e:
             stop_event.set()
             spinner.join()
             log.error(f"Synthesis error: {e}")
-            answer_text = "\n".join(
+            answer = "\n".join(
                 f"{r['tool'].upper()}: {', '.join(i['content'][:80] for i in r['data'])}"
                 for r in tool_results
             )
 
-        for r in tool_results:
-            for item in r["data"]:
-                placeholder = f"[{r['tool'].upper()}]"
-                citation = f"[Source: {item['source']}, {item['date']}"
-                if item.get("id"):
-                    citation += f" (ID:{item['id']})"
-                citation += "]"
-                answer_text = answer_text.replace(placeholder, citation, 1)
-
-        return answer_text
+        return answer
 
     def answer_query(self, query: str) -> Dict[str, Any]:
         total_start = time.time()
-
-        route_start = time.time()
         call = self._route(query)
-        route_lat = time.time() - route_start
-
         exec_start = time.time()
         results = self._execute_tools(call)
         exec_lat = time.time() - exec_start
-
         synth_start = time.time()
         answer = self._synthesize(query, results)
         synth_lat = time.time() - synth_start
-
         total_lat = time.time() - total_start
-        log.info(f"Query answered in {round(total_lat,2)}s (route:{round(route_lat,2)}s execute:{round(exec_lat,2)}s synth:{round(synth_lat,2)}s)")
-
+        log.info(f"Answered in {round(total_lat,2)}s (execute:{round(exec_lat,2)}s synth:{round(synth_lat,2)}s)")
         sources = [
-            {"source": item['source'], "id": item.get('id'), "date": item['date']}
+            {"source": item["source"], "id": item.get("id"), "date": item["date"]}
             for r in results for item in r["data"]
         ]
-
         return {
             "answer": answer,
             "sources": sources,
             "tools_used": call.tools,
             "latencies": {
-                "total": round(total_lat,2),
-                "route": round(route_lat,2),
                 "execute": round(exec_lat,2),
                 "synthesize": round(synth_lat,2),
+                "total": round(total_lat,2)
             },
             "timestamp": datetime.utcnow().isoformat() + "Z",
         }
@@ -244,8 +201,8 @@ if __name__ == "__main__":
         q = input("> ")
         if q.lower().strip() in ("quit", "exit"):
             break
-        response = agent.answer_query(q)
-        print("Answer:", response["answer"])
-        print("Tools used:", response["tools_used"])
-        print("Sources:", response["sources"])
-        print("Latency:", response["latencies"]["total"], "s")
+        resp = agent.answer_query(q)
+        print("Answer:", resp["answer"])
+        print("Tools used:", resp["tools_used"])
+        print("Sources:", resp["sources"])
+        print("Latency:", resp["latencies"]["total"], "s")
