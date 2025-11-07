@@ -86,7 +86,7 @@ class RAGAgent:
                     "content": doc.page_content[:300] + ("..." if len(doc.page_content) > 300 else ""),
                     "source": doc.metadata.get("source", "KB"),
                     "id": doc.metadata.get("article_id"),
-                    "date": doc.metadata.get("created_at", "")[:10],
+                    "date": str(doc.metadata.get("created_at", "2025-11-07")).split(" ")[0],
                 }
                 for doc in docs
             ]
@@ -126,7 +126,8 @@ class RAGAgent:
                     "source": "IGDB",
                     "id": g.get("id"),
                     "date": (datetime.fromtimestamp(g.get("first_release_date")).strftime("%Y-%m-%d")
-                             if g.get("first_release_date") else "TBA"),
+                    if isinstance(g.get("first_release_date"), (int, float)) and g.get("first_release_date")
+                    else str(g.get("first_release_date", "TBA")).split(" ")[0]),
                 }
                 for g in games if g.get("name")
             ]
