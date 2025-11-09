@@ -1,0 +1,14 @@
+{
+    "run_timestamp": "2025-11-09T11:32:45.588449+00:00",
+    "device": "cpu",
+    "news_query": "Nintendo OR Switch OR Zelda OR Mario OR Pokemon",
+    "igdb_query": "Zelda OR Mario OR Pokemon OR Nintendo",
+    "news_latency": 5.786,
+    "igdb_latency": 4.841,
+    "total_latency": 10.626,
+    "news_docs": 10,
+    "news_chunks": 10,
+    "igdb_docs": 20,
+    "igdb_chunks": 20,
+    "gaming_precision": "100%"
+}

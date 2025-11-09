@@ -8,7 +8,8 @@ from vector.search import search as vector_search
 from vector.index_manager import client as weaviate_client
 from weaviate.classes.query import Filter
 import logging
-from utils.gpu_utils import get_device  # GPU support
+from utils.gpu_utils import get_device
+from agent.constants import SOURCE_NEWS, SOURCE_IGDB, DEFAULT_TOP_K  # ← NEW
 
 log = logging.getLogger(__name__)
 
@@ -18,22 +19,36 @@ log = logging.getLogger(__name__)
 @tool
 def search_knowledge_base(
     query: str,
-    top_k: int = 5,
+    top_k: int = DEFAULT_TOP_K,
     source: str | None = None,
 ) -> List[Document]:
     """
     Search the vector store (Weaviate) for the most relevant chunks.
-    Uses GPU-accelerated embeddings via vector.search.
-    Returns LangChain Documents with metadata for citation.
+    
+    Args:
+        query: Search query
+        top_k: Number of results (default: 5)
+        source: Filter by "news" or "igdb" (uses constants.SOURCE_NEWS / SOURCE_IGDB)
+
+    Returns:
+        List[Document] with full metadata for citations.
     """
-    log.info(f"Searching knowledge base on {get_device().upper()}: '{query}' (top_k={top_k}, source={source})")
+    device = get_device()
+    log.info(f"Searching KB on {device.upper()}: '{query}' | top_k={top_k} | source={source}")
+    
+    # Map human-friendly input to exact constant
+    if source == "news":
+        source = SOURCE_NEWS
+    elif source == "igdb" or source == "IGDB":
+        source = SOURCE_IGDB
+
     return vector_search(query=query, top_k=top_k, source=source)
 
 
 # ---------------------------------------------------------------------------
 # 2. Live News API
 # ---------------------------------------------------------------------------
-_news_tool = NewsTool()   # singleton – cheap to create
+_news_tool = NewsTool()
 
 @tool
 def fetch_news(
@@ -43,10 +58,9 @@ def fetch_news(
     category: str | None = None,
 ) -> Dict[str, Any]:
     """
-    Call the APITube news endpoint (search + headlines) and return raw JSON.
-    The agent will later chunk & cite if needed.
+    Fetch fresh gaming news via APITube.
     """
-    log.info(f"Fetching news on {get_device().upper()}: '{query}' (limit={limit}, country={country}, category={category})")
+    log.info(f"Fetching news on {get_device().upper()}: '{query}' (limit={limit})")
     filters = {}
     if country:
         filters["country"] = country
@@ -59,7 +73,7 @@ def fetch_news(
 # ---------------------------------------------------------------------------
 # 3. Live IGDB API
 # ---------------------------------------------------------------------------
-_igdb_tool = IGDBTool()   # singleton
+_igdb_tool = IGDBTool()
 
 @tool
 def search_igdb(
@@ -67,8 +81,7 @@ def search_igdb(
     limit: int = 10,
 ) -> Dict[str, Any]:
     """
-    Call IGDB for recent games + search results.
-    Returns raw JSON – the agent can cite `id`.
+    Search IGDB for recent + matching games.
     """
     log.info(f"Searching IGDB on {get_device().upper()}: '{query}' (limit={limit})")
     return _igdb_tool.fetch_both(query=query, limit=limit)

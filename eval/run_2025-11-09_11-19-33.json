@@ -1,0 +1,12 @@
+{
+    "run_timestamp": "2025-11-09T11:19:33.352077+00:00",
+    "device": "cpu",
+    "news_latency": 15.057,
+    "igdb_latency": 3.472,
+    "total_latency": 18.529,
+    "news_docs": 10,
+    "news_chunks": 10,
+    "igdb_docs": 10,
+    "igdb_chunks": 10,
+    "automation_depth": 5
+}

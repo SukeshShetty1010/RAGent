@@ -6,6 +6,7 @@ from datetime import datetime, UTC
 from ingest.chunking import chunk_documents
 from ingest.upsert import upsert_chunks
 from vector.index_manager import create_index_if_not_exists
+from agent.constants import SOURCE_IGDB 
 
 class GameIngestor(BaseIngestor):
     def fetch(self) -> List[Dict]:
@@ -36,7 +37,7 @@ class GameIngestor(BaseIngestor):
             metadata = {
                 "article_id": g.get("id"),
                 "created_at": created_at,
-                "source": "IGDB"
+                "source": SOURCE_IGDB  # ← FIXED: was "IGDB"
             }
             docs.append(Document(page_content=content, metadata=metadata))
         return docs

@@ -6,6 +6,7 @@ from datetime import datetime, UTC
 from ingest.chunking import chunk_documents
 from ingest.upsert import upsert_chunks
 from vector.index_manager import create_index_if_not_exists
+from agent.constants import SOURCE_NEWS 
 
 class NewsIngestor(BaseIngestor):
     def fetch(self) -> List[Dict]:
@@ -32,7 +33,7 @@ class NewsIngestor(BaseIngestor):
             metadata = {
                 "article_id": a.get("id") or hash(content),
                 "created_at": created_at,
-                "source": "APITube.io"
+                "source": SOURCE_NEWS  # ← FIXED: was "APITube.io"
             }
             docs.append(Document(page_content=content, metadata=metadata))
         return docs
@@ -57,7 +58,7 @@ class NewsIngestor(BaseIngestor):
         self.logger.info("News ingestion completed!")
 
 if __name__ == "__main__":
-    from api.apitube_client import apitube_client  # Update path
+    from api.apitube_client import apitube_client
     output_file = "data/raw/news_data.jsonl"
     ingestor = NewsIngestor(api_client=apitube_client, output_path=output_file)
     ingestor.run()

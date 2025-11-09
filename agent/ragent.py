@@ -1,10 +1,4 @@
-# agent/ragent.py
-"""
-FINAL WORKING RAG AGENT – November 07, 2025
-→ Local Weaviate + Tools
-→ LIVE Modal Llama-3-8B on T4 ($0.0012/query)
-"""
-
+# agent/ragent.py — FINAL UNIVERSAL RAG AGENT (November 09, 2025)
 import json
 import time
 import logging
@@ -16,23 +10,17 @@ from typing import List, Dict, Any
 import concurrent.futures
 from pydantic import BaseModel, Field
 
-# Add deploy folder to path
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent / "deploy"))
 
-# Local tools
 from agent.tools import search_knowledge_base, fetch_news, search_igdb
-
-# LIVE MODAL CONNECTION (NO MORE HYDRATION ERROR!)
 from agent.ragent_client import chat_completion_remote
 
-# Clean news content
 try:
     from ingest.ragent_ingestor import _clean_content
 except:
-    def _clean_content(x): return x
+    def _clean_content(x): return x.replace("[Upgrade subscription plan]", "").replace("Premium content", "").replace("Subscribe to read", "").strip()
 
-# Close Weaviate on exit
 try:
     from vector.index_manager import client as weaviate_client
     import atexit
@@ -40,126 +28,114 @@ try:
 except:
     pass
 
+from agent.constants import SOURCE_NEWS, SOURCE_IGDB, DEFAULT_TOP_K
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 class ToolCall(BaseModel):
-    tools: List[str] = Field(..., description="['kb','news','igdb']")
-    query: str = Field(..., description="Refined query")
-    max_results: int = Field(default=3, ge=1, le=5)
+    tools: List[str] = Field(default=["kb", "news", "igdb"])
+    query: str
+    max_results: int = Field(default=15, ge=1, le=30)
 
-FINAL_ANSWER_SYSTEM = """You are a concise gaming assistant.
-Answer in 1-3 short paragraphs or bullet points.
-Cite every fact inline: [Source: <source>, <YYYY-MM-DD>].
+FINAL_ANSWER_SYSTEM = """You are a gaming RAG agent. Answer ONLY using the context below.
+NO hallucinations. NO old games. NO chit-chat.
+
+If no relevant context → "No fresh info right now."
+
+Else: 4-7 short bullets. Newest first.
+Every bullet ends with [Source: NAME, YYYY-MM-DD]
 
 Context:
 {context}
 
 Question: {query}
 
-Answer:"""
+Answer now:"""
 
 def _spinner_task(stop_event):
     for c in itertools.cycle(['|', '/', '-', '\\']):
-        if stop_event.is_set():
-            break
-        sys.stdout.write(f'\rThinking {c} ')
-        sys.stdout.flush()
-        time.sleep(0.1)
-    sys.stdout.write('\r' + ' ' * 20 + '\r')
-    sys.stdout.flush()
+        if stop_event.is_set(): break
+        sys.stdout.write(f'\rThinking {c} '); sys.stdout.flush(); time.sleep(0.1)
+    sys.stdout.write('\r' + ' ' * 20 + '\r'); sys.stdout.flush()
 
 class RAGAgent:
     def __init__(self):
-        self.max_tokens_answer = 512
-        self.temperature = 0.1
+        self.temperature = 0.0
+        self.max_tokens = 512
 
     def _route(self, query: str) -> ToolCall:
-        return ToolCall(tools=["kb", "news", "igdb"], query=query, max_results=3)
+        return ToolCall(query=query, max_results=15)
 
     @staticmethod
     def _run_kb(q: str, k: int) -> List[Dict]:
         try:
             docs = search_knowledge_base.invoke({"query": q, "top_k": k})
-            return [
-                {
-                    "content": doc.page_content[:300] + ("..." if len(doc.page_content) > 300 else ""),
-                    "source": doc.metadata.get("source", "KB"),
-                    "id": doc.metadata.get("article_id"),
-                    "date": str(doc.metadata.get("created_at", "2025-11-07")).split(" ")[0],
-                }
-                for doc in docs
-            ]
-        except Exception as e:
-            log.error(f"KB error: {e}")
-            return []
+            return [{"content": d.page_content, "source": d.metadata.get("source","KB"), "date": str(d.metadata.get("created_at","2025-11-09")).split("T")[0]} for d in docs]
+        except: return []
 
     @staticmethod
     def _run_news(q: str, limit: int) -> List[Dict]:
         try:
-            raw = fetch_news.invoke({"query": q, "limit": limit, "country": "us"})
-            items = raw.get("headlines", {}).get("results", [])[:limit]
+            raw = fetch_news.invoke({"query": q, "limit": limit*2})
+            items = raw.get("headlines", {}).get("results", []) + raw.get("news", {}).get("results", [])
             results = []
             for i in items:
-                content = _clean_content(f"{i.get('title','')} – {i.get('description','')}".strip())
-                if content:
-                    date = (i.get("published_at") or "")[:10] or datetime.now(UTC).strftime("%Y-%m-%d")
-                    results.append({
-                        "content": content,
-                        "source": "APITube.io",
-                        "id": i.get("id"),
-                        "date": date,
-                    })
-            return results
-        except Exception as e:
-            log.error(f"News error: {e}")
-            return []
+                content = _clean_content(f"{i.get('title','')}\n{i.get('description','')}\n{i.get('body','')}\n{i.get('content','')}")
+                if len(content) < 70: continue
+                date = (i.get("publishedAt") or "2025-11-09").split("T")[0]
+                if int(date[:4]) < 2025: continue
+                results.append({"content": content, "source": i.get("source","GNEWS"), "date": date})
+            results.sort(key=lambda x: x["date"], reverse=True)
+            return results[:limit]
+        except: return []
 
     @staticmethod
     def _run_igdb(q: str, limit: int) -> List[Dict]:
         try:
             raw = search_igdb.invoke({"query": q, "limit": limit})
-            games = raw.get("results", [])[:limit]
-            return [
-                {
-                    "content": f"{g.get('name','Unknown')} ({g.get('first_release_date','TBA')})",
-                    "source": "IGDB",
-                    "id": g.get("id"),
-                    "date": (datetime.fromtimestamp(g.get("first_release_date")).strftime("%Y-%m-%d")
-                    if isinstance(g.get("first_release_date"), (int, float)) and g.get("first_release_date")
-                    else str(g.get("first_release_date", "TBA")).split(" ")[0]),
-                }
-                for g in games if g.get("name")
-            ]
-        except Exception as e:
-            log.error(f"IGDB error: {e}")
-            return []
+            items = raw.get("recent_games", []) + raw.get("searched_games", [])
+            results = []
+            for i in items:
+                content = f"{i.get('name','')} — {i.get('summary','')[:400]}"
+                if len(content) < 70: continue
+                ts = i.get("first_release_date")
+                date = datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%d") if ts else "2025-11-09"
+                if int(date[:4]) < 2025: continue
+                results.append({"content": content, "source": "IGDB", "date": date})
+            results.sort(key=lambda x: x["date"], reverse=True)
+            return results
+        except: return []
 
-    def _execute_tools(self, call: ToolCall):
-        results = []
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = {}
-            if "kb" in call.tools:
-                futures["kb"] = executor.submit(self._run_kb, call.query, call.max_results)
-            if "news" in call.tools:
-                futures["news"] = executor.submit(self._run_news, call.query, call.max_results)
-            if "igdb" in call.tools:
-                futures["igdb"] = executor.submit(self._run_igdb, call.query, call.max_results)
-
-            for name, future in futures.items():
-                data = future.result()
-                results.append({"tool": name, "data": data})
-        return results
+    def _execute_tools(self, call: ToolCall) -> List[Dict]:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+            futures = {
+                "kb": ex.submit(self._run_kb, call.query, call.max_results),
+                "news": ex.submit(self._run_news, call.query, call.max_results),
+                "igdb": ex.submit(self._run_igdb, call.query, call.max_results)
+            }
+            return [{"tool": k, "data": f.result()} for k, f in futures.items()]
 
     def _synthesize(self, query: str, tool_results: List[Dict]) -> str:
+        query_words = [w.lower().replace("'", "").replace("’", "") for w in query.split() if len(w) > 2]
+
         context_lines = []
         for r in tool_results:
             for item in r["data"]:
-                cite = f"[Source: {item['source']}, {item['date']}"
-                if item.get("id"): cite += f" ID:{item['id']}"
-                cite += "]"
-                context_lines.append(f"{item['content']}\n{cite}")
-        context = "\n\n".join(context_lines)
+                content_clean = item["content"].lower().replace("’", "'").replace("'", "")
+                if any(word in content_clean for word in query_words) or len(set(query_words) & set(content_clean.split())) >= 2:
+                    cite = f"[Source: {item['source']}, {item['date']}]"
+                    line = item["content"].replace("\n", " ").strip()[:600]
+                    context_lines.append(f"- {line} {cite}")
+
+        if not context_lines:
+            all_items = [item for r in tool_results for item in r["data"]]
+            all_items.sort(key=lambda x: x["date"], reverse=True)
+            for item in all_items[:7]:
+                cite = f"[Source: {item['source']}, {item['date']}]"
+                context_lines.append(f"- {item['content'].replace('\n', ' ')[:600]} {cite}")
+
+        context = "\n".join(context_lines[:14]) if context_lines else "No fresh info right now."
         prompt = FINAL_ANSWER_SYSTEM.format(context=context, query=query)
 
         stop_event = threading.Event()
@@ -167,41 +143,24 @@ class RAGAgent:
         spinner.start()
 
         try:
-            answer = chat_completion_remote.remote(
-                prompt=prompt,
-                max_tokens=self.max_tokens_answer,
-                temperature=self.temperature
-            )
+            answer = chat_completion_remote.remote(prompt=prompt, max_tokens=512, temperature=0.0)
             stop_event.set()
             spinner.join()
             return answer.strip()
         except Exception as e:
             stop_event.set()
             spinner.join()
-            log.error(f"Modal LLM failed: {e}")
-            return "No answer (LLM error). Raw results above."
+            return f"LLM error. Context:\n{context}"
 
     def answer_query(self, query: str) -> Dict[str, Any]:
-        total_start = time.time()
+        start = time.time()
         call = self._route(query)
-        exec_start = time.time()
         results = self._execute_tools(call)
-        exec_lat = round(time.time() - exec_start, 2)
-        synth_start = time.time()
         answer = self._synthesize(query, results)
-        synth_lat = round(time.time() - synth_start, 2)
-        total_lat = round(time.time() - total_start, 2)
-
-        sources = [
-            {"source": item["source"], "id": item.get("id"), "date": item["date"]}
-            for r in results for item in r["data"]
-        ]
-
         return {
             "answer": answer,
-            "sources": sources,
             "tools_used": call.tools,
-            "latencies": {"tools": exec_lat, "llm": synth_lat, "total": total_lat},
+            "latencies": {"total": round(time.time() - start, 2)},
             "timestamp": datetime.now(UTC).isoformat() + "Z",
         }
 
@@ -211,10 +170,8 @@ if __name__ == "__main__":
     print("Type 'quit' to exit\n")
     while True:
         q = input("> ").strip()
-        if q.lower() in ("quit", "exit", "q"):
-            break
-        if not q:
-            continue
+        if q.lower() in ("quit", "exit", "q"): break
+        if not q: continue
         resp = agent.answer_query(q)
         print("\n" + "="*60)
         print(resp["answer"])

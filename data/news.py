@@ -1,68 +1,80 @@
-# tools/news.py
-from typing import Dict, Any, Optional
-from api.apitube_client import APITubeClient  # Assuming apitube_client.py is in the same directory or importable
+# data/news.py — THE FINAL VERSION (NO MORE QUERY HACKS)
+import os
+import requests
+import logging
+from typing import Dict, Any, List
+from datetime import datetime, UTC
+
+logger = logging.getLogger(__name__)
 
 class NewsTool:
-    """
-    A tool for fetching news articles and top headlines using the APITube API.
-    This tool can perform general news searches, retrieve top headlines, or both, with optional filters.
-    """
+    def __init__(self):
+        self.api_key = os.getenv("GNEWS_API_KEY")
+        if not self.api_key:
+            raise ValueError("GNEWS_API_KEY missing! Get free key: https://gnews.io")
+        self.base = "https://gnews.io/api/v4"
 
-    def __init__(self, api_key: str | None = None):
-        """
-        Initialize the NewsTool with an optional API key.
-        Falls back to environment variable if not provided.
-        """
-        self.client = APITubeClient(api_key)
+    def _get(self, endpoint: str, params: dict) -> List[Dict]:
+        url = f"{self.base}/{endpoint}"
+        params.update({
+            "apikey": self.api_key,
+            "lang": "en",
+            "country": "us",
+            "max": 100
+        })
+        try:
+            r = requests.get(url, params=params, timeout=15)
+            r.raise_for_status()
+            data = r.json()
+            return data.get("articles", [])
+        except Exception as e:
+            logger.error(f"GNews {endpoint} failed: {e}")
+            return []
 
-    def run(self, query: str | None = None, top_headlines: bool = False, limit: int = 10, **filters) -> Dict[str, Any]:
-        """
-        Run the news fetch operation.
-        
-        Args:
-            query (str, optional): The search query for general news. Required if not fetching top headlines.
-            top_headlines (bool): If True, fetch top headlines instead of searching. Defaults to False.
-            limit (int): Number of results to return (for general search). Defaults to 10.
-            **filters: Additional filters as keyword arguments (e.g., country='us', category='technology').
-        
-        Returns:
-            Dict[str, Any]: JSON response from the API containing news data.
-        
-        Raises:
-            ValueError: If query is missing when not fetching top headlines.
-        """
-        if top_headlines:
-            return self.client.get_top_headlines(**filters)
-        else:
-            if not query:
-                raise ValueError("Query is required for general news search.")
-            return self.client.get_news(q=query, limit=limit, **filters)
+    def fetch_both(self, query: str = "", limit: int = 40, **filters) -> Dict[str, Any]:
+        # CLEAN QUERY — remove dangerous chars
+        clean_q = ""
+        if query:
+            clean_q = "".join(c for c in query if c.isalnum() or c in " -_").strip()
+            clean_q = clean_q[:100]  # GNews limit
 
-    def fetch_both(self, query: str, limit: int = 10, **filters) -> Dict[str, Any]:
-        """
-        Fetch both general news and top headlines without storing to a file.
-        
-        Args:
-            query (str): The search query for general news.
-            limit (int): Number of results to return for general news. Defaults to 10.
-            **filters: Additional filters applied to both requests (e.g., country='us', category='technology').
-        
-        Returns:
-            Dict[str, Any]: Combined dictionary with 'news' and 'headlines'.
-        
-        Raises:
-            ValueError: If query is missing.
-        """
-        if not query:
-            raise ValueError("Query is required for fetching both.")
+        # ALWAYS fetch fresh gaming news — even for "what is 2+2?"
+        search_articles = []
+        if clean_q:
+            search_articles = self._get("search", {"q": clean_q})
 
-        news = self.run(query=query, limit=limit, **filters)
-        headlines = self.run(top_headlines=True, **filters)
-        return {"news": news, "headlines": headlines}
+        # THIS IS THE MAGIC: BROAD GAMING FEED — ALWAYS FRESH
+        broad_articles = self._get("top-headlines", {
+            "category": "technology",
+            "q": "gaming OR esports OR nintendo OR playstation OR xbox OR ubisoft OR rockstar OR ea OR activision OR valve OR epic OR indie"
+        })
 
-# Example usage (for testing)
-if __name__ == "__main__":
-    tool = NewsTool()
-    # Example: Fetch both without storing
-    results = tool.fetch_both(query="GTA", limit=5, country="us", category="technology")
-    print(results)
+        # Combine + dedupe by URL
+        seen = set()
+        unique = []
+        for art in search_articles + broad_articles:
+            url = art["url"]
+            if url not in seen:
+                seen.add(url)
+                unique.append(art)
+
+        # Sort newest first
+        unique.sort(key=lambda x: x.get("publishedAt", ""), reverse=True)
+
+        # Format
+        results = []
+        for a in unique[:limit]:
+            results.append({
+                "title": a["title"],
+                "description": a.get("description", "") or "",
+                "body": a.get("content", "")[:1200],
+                "url": a["url"],
+                "publishedAt": a["publishedAt"],
+                "source": a["source"]["name"]
+            })
+
+        logger.info(f"GNews fetched {len(results)} articles (query='{query}')")
+        return {
+            "news": {"results": results},
+            "headlines": {"results": results[:limit//2]}
+        }
