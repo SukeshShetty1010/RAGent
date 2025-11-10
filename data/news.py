@@ -1,80 +1,61 @@
-# data/news.py — THE FINAL VERSION (NO MORE QUERY HACKS)
+# data/news.py — FINAL BULLETPROOF VERSION (Nov 10, 2025)
 import os
 import requests
 import logging
 from typing import Dict, Any, List
-from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
 
 class NewsTool:
     def __init__(self):
-        self.api_key = os.getenv("GNEWS_API_KEY")
-        if not self.api_key:
-            raise ValueError("GNEWS_API_KEY missing! Get free key: https://gnews.io")
-        self.base = "https://gnews.io/api/v4"
+        # DO NOT CRASH ON IMPORT — lazy check
+        pass
 
-    def _get(self, endpoint: str, params: dict) -> List[Dict]:
-        url = f"{self.base}/{endpoint}"
-        params.update({
-            "apikey": self.api_key,
-            "lang": "en",
-            "country": "us",
-            "max": 100
-        })
-        try:
-            r = requests.get(url, params=params, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("articles", [])
-        except Exception as e:
-            logger.error(f"GNews {endpoint} failed: {e}")
-            return []
+    def _get_key(self):
+        key = os.getenv("MEDIASTACK_KEY")
+        if not key:
+            raise ValueError(
+                "MEDIASTACK_KEY not found! Add to your shell:\n"
+                "export MEDIASTACK_KEY=your_actual_key_here\n"
+                "Or run: echo 'export MEDIASTACK_KEY=your_key' >> ~/.bashrc"
+            )
+        return key
 
     def fetch_both(self, query: str = "", limit: int = 40, **filters) -> Dict[str, Any]:
-        # CLEAN QUERY — remove dangerous chars
-        clean_q = ""
-        if query:
-            clean_q = "".join(c for c in query if c.isalnum() or c in " -_").strip()
-            clean_q = clean_q[:100]  # GNews limit
-
-        # ALWAYS fetch fresh gaming news — even for "what is 2+2?"
-        search_articles = []
-        if clean_q:
-            search_articles = self._get("search", {"q": clean_q})
-
-        # THIS IS THE MAGIC: BROAD GAMING FEED — ALWAYS FRESH
-        broad_articles = self._get("top-headlines", {
-            "category": "technology",
-            "q": "gaming OR esports OR nintendo OR playstation OR xbox OR ubisoft OR rockstar OR ea OR activision OR valve OR epic OR indie"
-        })
-
-        # Combine + dedupe by URL
-        seen = set()
-        unique = []
-        for art in search_articles + broad_articles:
-            url = art["url"]
-            if url not in seen:
-                seen.add(url)
-                unique.append(art)
-
-        # Sort newest first
-        unique.sort(key=lambda x: x.get("publishedAt", ""), reverse=True)
-
-        # Format
-        results = []
-        for a in unique[:limit]:
-            results.append({
-                "title": a["title"],
-                "description": a.get("description", "") or "",
-                "body": a.get("content", "")[:1200],
-                "url": a["url"],
-                "publishedAt": a["publishedAt"],
-                "source": a["source"]["name"]
-            })
-
-        logger.info(f"GNews fetched {len(results)} articles (query='{query}')")
-        return {
-            "news": {"results": results},
-            "headlines": {"results": results[:limit//2]}
+        api_key = self._get_key()  # Only now we check + crash if missing
+        
+        params = {
+            "access_key": api_key,
+            "languages": "en",
+            "limit": min(limit, 100),
+            "categories": "technology,entertainment",
+            "keywords": "gaming OR esports OR ubisoft OR rockstar OR nintendo OR playstation OR xbox OR ea OR activision OR valve"
         }
+        if query:
+            # Smart boost: put query first
+            params["keywords"] = f"{query} " + params["keywords"]
+
+        try:
+            r = requests.get("http://api.mediastack.com/v1/news", params=params, timeout=12)
+            r.raise_for_status()
+            data = r.json().get("data", [])
+            
+            results = []
+            for a in data[:limit]:
+                desc = a.get("description") or ""
+                results.append({
+                    "title": a["title"],
+                    "description": desc,
+                    "body": (desc + " " + (a.get("content") or ""))[:1200],
+                    "url": a["url"],
+                    "publishedAt": a["published_at"],
+                    "source": a.get("source", "MediaStack")
+                })
+            logger.info(f"MediaStack → {len(results)} fresh gaming articles")
+            return {
+                "news": {"results": results},
+                "headlines": {"results": results[:limit//2]}
+            }
+        except Exception as e:
+            logger.error(f"MediaStack failed: {e}")
+            return {"news": {}, "headlines": {}}

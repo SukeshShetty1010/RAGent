@@ -1,0 +1,209 @@
+{
+  "recent_games": [
+    {
+      "id": 346850,
+      "first_release_date": 1754611200,
+      "genres": [
+        {
+          "id": 13,
+          "name": "Simulator"
+        }
+      ],
+      "name": "Bobbies Evolution",
+      "platforms": [
+        {
+          "id": 6,
+          "name": "PC (Microsoft Windows)"
+        }
+      ],
+      "summary": "Can you manage a civilisation with taxes, political wars, race wars and pandemics?"
+    },
+    {
+      "id": 343850,
+      "first_release_date": 1747872000,
+      "genres": [
+        {
+          "id": 15,
+          "name": "Strategy"
+        },
+        {
+          "id": 32,
+          "name": "Indie"
+        }
+      ],
+      "name": "Can't You Run?",
+      "platforms": [
+        {
+          "id": 6,
+          "name": "PC (Microsoft Windows)"
+        }
+      ],
+      "summary": "An endless torment"
+    },
+    {
+      "id": 330850,
+      "first_release_date": 1738713600,
+      "genres": [
+        {
+          "id": 5,
+          "name": "Shooter"
+        },
+        {
+          "id": 13,
+          "name": "Simulator"
+        },
+        {
+          "id": 32,
+          "name": "Indie"
+        }
+      ],
+      "name": "American Cooking Simulator",
+      "platforms": [
+        {
+          "id": 6,
+          "name": "PC (Microsoft Windows)"
+        }
+      ],
+      "summary": "What's more American than Fast Food? How about cooking it with guns! Switch between individual weapons to move ingredients, cook and deliver them to your customers before they lose their patience."
+    }
+  ],
+  "searched_games": [
+    {
+      "id": 52189,
+      "age_ratings": [
+        210410
+      ],
+      "alternative_names": [
+        9265,
+        9263,
+        139291,
+        144677
+      ],
+      "artworks": [
+        168663,
+        168664
+      ],
+      "cover": 456072,
+      "created_at": 1501144586,
+      "external_games": [
+        100649
+      ],
+      "first_release_date": 1795046400,
+      "franchises": [
+        493
+      ],
+      "game_engines": [
+        26
+      ],
+      "game_modes": [
+        1,
+        2,
+        3
+      ],
+      "genres": [
+        5,
+        10,
+        31
+      ],
+      "hypes": 684,
+      "involved_companies": [
+        98111,
+        256038
+      ],
+      "keywords": [
+        25,
+        129,
+        221,
+        1669,
+        2424,
+        4353
+      ],
+      "name": "Grand Theft Auto VI",
+      "platforms": [
+        169,
+        167
+      ],
+      "player_perspectives": [
+        1,
+        2
+      ],
+      "release_dates": [
+        831834,
+        831835
+      ],
+      "screenshots": [
+        1526347,
+        1526346,
+        1203595,
+        1203594,
+        1203596,
+        1203597,
+        1365871
+      ],
+      "similar_games": [
+        19164,
+        105011,
+        19561,
+        26574,
+        115785,
+        1877,
+        47823,
+        17548,
+        37419,
+        17379
+      ],
+      "slug": "grand-theft-auto-vi",
+      "storyline": "Vice City, USA.\n\nJason and Lucia have always known the deck is stacked against them. But when an easy score goes wrong, they find themselves on the darkest side of the sunniest place in America, in the middle of a criminal conspiracy stretching across the state of Leonida—forced to rely on each other more than ever if they want to make it out alive.",
+      "summary": "Grand Theft Auto VI heads to the state of Leonida, home to the neon-soaked streets of Vice City and beyond in the biggest, most immersive evolution of the Grand Theft Auto series yet.",
+      "tags": [
+        1,
+        27,
+        33,
+        38,
+        268435461,
+        268435466,
+        268435487,
+        536870937,
+        536871041,
+        536871133,
+        536872581,
+        536873336,
+        536875265
+      ],
+      "themes": [
+        1,
+        27,
+        33,
+        38
+      ],
+      "updated_at": 1762592759,
+      "url": "https://www.igdb.com/games/grand-theft-auto-vi",
+      "videos": [
+        102741,
+        149277
+      ],
+      "websites": [
+        600951,
+        822406,
+        649525,
+        913429,
+        890119,
+        791153,
+        600950,
+        694567,
+        694569,
+        707265
+      ],
+      "checksum": "2ef76f95-4a02-36c9-5677-ac3207890ec5",
+      "language_supports": [
+        861846,
+        861847,
+        861848
+      ],
+      "collections": [
+        847
+      ],
+      "game_type": 0
+    }
+  ]
+}

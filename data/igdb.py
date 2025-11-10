@@ -1,99 +1,65 @@
-# tools/igdb.py
-from typing import Dict, Any, Optional
-from api.igdb_client import igdb_request  # Import the IGDB request function
+from typing import List, Dict, Any, Optional
+from api.igdb_client import igdb_request
 
 class IGDBTool:
-    """
-    A tool for fetching games data from the IGDB API.
-    This tool can perform general game searches or retrieve recent games, with optional limits.
-    """
+    def search_games(self, query: str, limit: int = 10, fields: str = "*") -> List[Dict[str, Any]]:
+        q = query.replace("’", "'").strip()
 
-    def __init__(self):
-        """
-        Initialize the IGDBTool. Authentication is handled internally via igdb_client.
-        """
-        pass
+        body = f'search "{q}"; fields {fields}; limit {limit};'
+        results = igdb_request("games", body)
+        if results:
+            return results
 
-    def run(self, query: str | None = None, recent_games: bool = False, limit: int = 10) -> list[Dict[str, Any]]:
-        """
-        Run the IGDB fetch operation.
-        
-        Args:
-            query (str, optional): The search query for games. Required if not fetching recent games.
-            recent_games (bool): If True, fetch recent games instead of searching. Defaults to False.
-            limit (int): Number of results to return. Defaults to 10.
-        
-        Returns:
-            list[Dict[str, Any]]: List of game data from the API.
-        
-        Raises:
-            ValueError: If query is missing when not fetching recent games.
-        """
-        if recent_games:
-            return self.get_recent_games(limit=limit)
-        else:
-            if not query:
-                raise ValueError("Query is required for game search.")
-            return self.search_games(query=query, limit=limit)
+        body = f'fields {fields}; where name ~ *"{q}"*; limit {limit};'
+        results = igdb_request("games", body)
+        if results:
+            return results
 
-    def get_recent_games(self, limit: int = 20) -> list[Dict[str, Any]]:
-        """
-        Fetch recently released games, sorted by first_release_date descending.
-        
-        Args:
-            limit (int): Number of results to return. Defaults to 20.
-        
-        Returns:
-            list[Dict[str, Any]]: List of recent game data.
-        """
-        query = (
-            f"fields id, name, summary, first_release_date, genres.name, platforms.name;"
-            f"sort first_release_date desc; limit {limit};"
-        )
-        return igdb_request("games", query)
+        last = q.split()[-1]
+        body = f'fields {fields}; where name ~ *"{last}"*; limit {limit};'
+        results = igdb_request("games", body)
+        return results or []
 
-    def search_games(self, query: str, limit: int = 10) -> list[Dict[str, Any]]:
+    def get_recent_games(self, limit: int = 20) -> List[Dict[str, Any]]:
+        body = f"""
+        fields name, summary, first_release_date, genres.name, platforms.name;
+        where first_release_date != null & category = 0;
+        sort first_release_date desc;
+        limit {limit};
         """
-        Search for games by keyword.
-        
-        Args:
-            query (str): The search query.
-            limit (int): Number of results to return. Defaults to 10.
-        
-        Returns:
-            list[Dict[str, Any]]: List of matching game data.
-        """
-        search_query = (
-            f'search "{query}"; '
-            f"fields id, name, summary, first_release_date, genres.name, platforms.name; "
-            f"limit {limit};"
-        )
-        return igdb_request("games", search_query)
+        return igdb_request("games", body.strip())
 
-    def fetch_both(self, query: str, limit: int = 10) -> Dict[str, list[Dict[str, Any]]]:
-        """
-        Fetch both recent games and search results without storing to a file.
-        
-        Args:
-            query (str): The search query for games.
-            limit (int): Number of results to return for both. Defaults to 10.
-        
-        Returns:
-            Dict[str, list[Dict[str, Any]]]: Combined dictionary with 'recent_games' and 'searched_games'.
-        
-        Raises:
-            ValueError: If query is missing.
-        """
-        if not query:
-            raise ValueError("Query is required for fetching both.")
+    def get_game_by_id(self, game_id: int) -> Optional[Dict[str, Any]]:
+        body = f"fields *; where id = {game_id};"
+        results = igdb_request("games", body)
+        return results[0] if results else None
 
-        recent = self.get_recent_games(limit=limit)
-        searched = self.search_games(query=query, limit=limit)
+    def get_expansions_and_dlcs(self, game_id: int) -> List[Dict[str, Any]]:
+        """OFFICIAL IGDB METHOD: Fetch from dlcs + expansions arrays"""
+        base = self.get_game_by_id(game_id)
+        if not base:
+            return []
+
+        all_ids = []
+        if "dlcs" in base and base["dlcs"]:
+            all_ids.extend(base["dlcs"])
+        if "expansions" in base and base["expansions"]:
+            all_ids.extend(base["expansions"])
+
+        if not all_ids:
+            return []
+
+        ids_str = ",".join(str(i) for i in all_ids)
+        body = f"""
+        fields name, summary, first_release_date, category, cover.url;
+        where id = ({ids_str});
+        limit 100;
+        """
+        return igdb_request("games", body.strip())
+
+    def fetch_both(self, query: str = "", limit: int = 10) -> Dict[str, Any]:
+        recent = self.get_recent_games(limit // 2)
+        searched = self.search_games(query, limit // 2) if query else []
         return {"recent_games": recent, "searched_games": searched}
 
-# Example usage (for testing)
-if __name__ == "__main__":
-    tool = IGDBTool()
-    # Example: Fetch both recent and searched games
-    results = tool.fetch_both(query="GTA", limit=5)
-    print(results)
+igdb_tool = IGDBTool()
