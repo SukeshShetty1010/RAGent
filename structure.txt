@@ -1,26 +1,53 @@
 RAG_ent/
 │
-├── auth/
+├── auth/                              # Source data clients (API-level access)
 │   ├── __init__.py
-│   └── rawg_client.py
-│   └── igdb_client.py
+│   ├── rawg_client.py
+│   ├── igdb_client.py
 │   └── gamespot_client.py
 │
-├── data/
+├── data/                              # Data preprocessing and source wrappers
 │   ├── __init__.py
-│   └── rawg_data.py
+│   ├── rawg_data.py
+│   ├── igdb_data.py
+│   ├── gamespot_data.py
 │   └── helper.py
-│   └── igdb_data.py
-│   └── gamespot_data.py
 │
-├── tests/
+├── ingest/                            # Data ingestion and enrichment pipeline
+│   ├── __init__.py
+│   ├── loader.py                     # Loads structured JSON from sources
+│   ├── chunking.py                   # Splits text into semantic chunks
+│   ├── upsert.py                     # Embeds, merges, and upserts into Weaviate
+│
+├── vector/                            # Vector DB, embedding, and schema management
+│   ├── __init__.py
+│   ├── embed.py                      # HuggingFace MiniLM embedding model
+│   ├── index_manager.py              # Weaviate schema creation & connection
+│   ├── search.py                     # Vector search utility (used by retriever)
+│
+├── retriever/                         # Retrieval and reasoning layers
+│   ├── __init__.py
+│   ├── retriever.py                  # Handles Weaviate semantic queries
+│   ├── rag.py                        # RAG pipeline (retriever + LLM)
+│
+├── llm/                               # Remote LLM integration (Modal.com)
+│   ├── __init__.py
+│   ├── modal_llm.py                  # Modal LLM inference deployment code
+│   └── ragent_client.py              # Client for calling Modal LLM endpoint
+│
+├── tests/                             # End-to-end and module-level testing
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── test_rawg_client.py
-│   └── test_rawg_data.py
-│   └── test_igdb_modules.py
-│   └── test_gamespot_modules.py
+│   ├── test_rawg_data.py
+│   ├── test_igdb_modules.py
+│   ├── test_gamespot_modules.py
+│   ├── test_rag_retrieve.py          # RAG retriever + generation test
+│   └── test_ingestion_enrichment.py  # Full ingestion + schema consistency test
 │
-├── .env                  
+├── docker-compose.yml                 # Local Weaviate stack configuration
+├── .env                               # API keys (RAWG, IGDB, GameSpot)
 ├── pyproject.toml
-└── requirements.txt      
+├── requirements.txt
+├── rough_recreate_schema.py           # Schema reset script (Weaviate v4)
+└── gamespot_structured_Far_Cry_6.json # Example structured dataset for testing

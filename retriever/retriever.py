@@ -5,14 +5,14 @@ from langchain_weaviate import WeaviateVectorStore
 from weaviate.classes.query import Filter
 from vector.embed import get_embedding_model
 from vector.index_manager import client
-from utils.gpu_utils import get_device
-from agent.constants import (
-    SOURCE_NEWS, SOURCE_IGDB,
-    DEFAULT_TOP_K,
-    NEWS_SCORE_THRESHOLD,
-    IGDB_SCORE_THRESHOLD,
-    HYBRID_ALPHA
-)
+import os
+
+# Default constants (safe for CPU mode)
+DEFAULT_TOP_K = 5
+NEWS_SCORE_THRESHOLD = 0.2
+IGDB_SCORE_THRESHOLD = 0.3      # relaxed for CPU embeddings
+HYBRID_ALPHA = 0.75
+
 
 def retrieve_similar(
     query: str,
@@ -22,33 +22,33 @@ def retrieve_similar(
     score_threshold: float = IGDB_SCORE_THRESHOLD
 ) -> List[Document]:
     """
-    Hybrid search with smart threshold tuning.
+    Perform a hybrid similarity search against the GameKnowledge index.
+    Compatible with CPU embeddings.
     """
     embeddings = get_embedding_model()
-    device = get_device()
-
-    # Debug GPU
-    try:
-        model_device = next(embeddings.client.model.parameters()).device
-        print(f"[retriever.py] Embeddings on {model_device} ({device.upper()})")
-    except:
-        pass
+    device = os.getenv("DEVICE", "cpu")
+    print(f"[retriever.py] Embeddings running on: {device.upper()}")
 
     vectorstore = WeaviateVectorStore(
         client=client,
-        index_name="KnowledgeBase",
+        index_name="GameKnowledge",   # ✅ Updated name
         text_key="text",
         embedding=embeddings,
-        attributes=["source", "chunk_id", "created_at", "article_id", "content_hash"]
+        attributes=[
+            "source", "game_id", "title", "description", "release_date",
+            "created_at", "chunk_id", "genres", "platforms", "developers",
+            "publishers", "tags", "themes", "franchise", "rating", "metacritic",
+            "esrb_rating", "playtime", "articles_count", "reviews_count", "stores"
+        ]
     )
 
     where_filter = _build_filter(filters or {})
 
-    # Smart threshold: news is noisier → lower bar
-    if filters and filters.get("source") == SOURCE_NEWS:
-        score_threshold = NEWS_SCORE_THRESHOLD  # 0.2
+    # Adjust threshold dynamically
+    if filters and filters.get("source") == "news":
+        score_threshold = NEWS_SCORE_THRESHOLD
     else:
-        score_threshold = IGDB_SCORE_THRESHOLD  # 0.7
+        score_threshold = IGDB_SCORE_THRESHOLD
 
     try:
         results_with_scores = vectorstore.similarity_search_with_relevance_scores(
@@ -70,28 +70,24 @@ def retrieve_similar(
 
 
 def _build_filter(filters: Dict[str, Any]) -> Optional[Filter]:
+    """Construct a Weaviate query filter object."""
     sub_filters = []
 
-    source = filters.get("source")
-    if source:
-        # Normalize just in case
-        if source in ("news", SOURCE_NEWS):
-            source = SOURCE_NEWS
-        elif source in ("igdb", "IGDB", SOURCE_IGDB):
-            source = SOURCE_IGDB
-        sub_filters.append(Filter.by_property("source").equal(source))
+    if "source" in filters and filters["source"]:
+        sub_filters.append(Filter.by_property("source").equal(filters["source"]))
 
-    article_id = filters.get("article_id")
-    if article_id is not None:
-        sub_filters.append(Filter.by_property("article_id").equal(int(article_id)))
+    if "game_id" in filters and filters["game_id"] is not None:
+        sub_filters.append(Filter.by_property("game_id").equal(int(filters["game_id"])))
 
-    created_at = filters.get("created_at")
-    if isinstance(created_at, dict):
-        if "gte" in created_at:
-            sub_filters.append(Filter.by_property("created_at").greater_than_or_equal(created_at["gte"]))
-        if "lte" in created_at:
-            sub_filters.append(Filter.by_property("created_at").less_than_or_equal(created_at["lte"]))
+    if "created_at" in filters and isinstance(filters["created_at"], dict):
+        if "gte" in filters["created_at"]:
+            sub_filters.append(Filter.by_property("created_at")
+                               .greater_than_or_equal(filters["created_at"]["gte"]))
+        if "lte" in filters["created_at"]:
+            sub_filters.append(Filter.by_property("created_at")
+                               .less_than_or_equal(filters["created_at"]["lte"]))
 
     if not sub_filters:
         return None
+
     return Filter.and_(*sub_filters) if len(sub_filters) > 1 else sub_filters[0]

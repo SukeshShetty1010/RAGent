@@ -1,0 +1,58 @@
+                        ┌──────────────────────────┐
+                        │      External APIs       │
+                        │ ───────────────────────  │
+                        │  RAWG  •  IGDB  •  GameSpot
+                        └──────────────┬───────────┘
+                                       │
+                                       ▼
+                        ┌──────────────────────────┐
+                        │      auth/ & data/      │
+                        │  Client + Data Modules  │
+                        │  → Extract structured JSON
+                        └──────────────┬───────────┘
+                                       │
+                                       ▼
+                        ┌──────────────────────────┐
+                        │       ingest/           │
+                        │  loader.py → Load files │
+                        │  chunking.py → Split    │
+                        │  upsert.py → Enrich +   │
+                        │              embed + upsert
+                        └──────────────┬───────────┘
+                                       │
+                          Embeddings   │
+                      (MiniLM-L6-v2)   ▼
+                        ┌──────────────────────────┐
+                        │       vector/           │
+                        │  index_manager.py → Schema
+                        │  embed.py → Model loader
+                        │  search.py → Similarity
+                        └──────────────┬───────────┘
+                                       │
+                                       ▼
+                         ┌────────────────────────┐
+                         │   Weaviate Vector DB   │
+                         │ GameKnowledge schema   │
+                         │ Rich metadata fields   │
+                         └──────────────┬─────────┘
+                                        │
+                                        ▼
+                          ┌────────────────────────┐
+                          │     retriever/        │
+                          │ retriever.py → Vector │
+                          │ rag.py → Query + LLM  │
+                          └──────────────┬────────┘
+                                         │
+                         ┌────────────────────────┐
+                         │     llm/ (Modal.com)   │
+                         │ modal_llm.py           │
+                         │ ragent_client.py       │
+                         └──────────────┬─────────┘
+                                        │
+                                        ▼
+                         ┌────────────────────────┐
+                         │     User Query Flow    │
+                         │ 1. Retrieve top-k docs │
+                         │ 2. Context sent to LLM │
+                         │ 3. Generate final answer│
+                         └────────────────────────┘

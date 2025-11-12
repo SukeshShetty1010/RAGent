@@ -1,0 +1,12 @@
+| Step | Module                    | Description                                            | Output                     |
+| ---- | ------------------------- | ------------------------------------------------------ | -------------------------- |
+| 1️⃣  | `auth/`                   | Pulls data from RAWG, IGDB, GameSpot APIs              | JSON responses             |
+| 2️⃣  | `data/`                   | Normalizes and structures JSON                         | Structured JSON files      |
+| 3️⃣  | `ingest/loader.py`        | Loads structured files into `Document` objects         | LangChain documents        |
+| 4️⃣  | `ingest/chunking.py`      | Chunks text into semantically coherent pieces          | 600+ text chunks           |
+| 5️⃣  | `ingest/upsert.py`        | Embeds, enriches, merges into Weaviate                 | Vectorized chunks          |
+| 6️⃣  | `vector/index_manager.py` | Ensures rich schema with TEXT_ARRAY and NUMERIC fields | `GameKnowledge` collection |
+| 7️⃣  | `retriever/retriever.py`  | Executes semantic search queries                       | Top-k chunks               |
+| 8️⃣  | `retriever/rag.py`        | Builds contextual prompts + calls Modal LLM            | Final answers              |
+| 9️⃣  | `llm/modal_llm.py`        | Runs Llama-3 (Modal hosted) inference                  | Response generation        |
+| 🔟   | `tests/`                  | Validates ingestion, retrieval, and schema consistency | ✅ test pass reports        |
