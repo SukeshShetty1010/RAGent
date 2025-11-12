@@ -1,41 +1,48 @@
-#!/usr/bin/env python3
+# usage.py
 """
-usage.py — Quick test script for IGDB + RAWG integration.
-Checks:
-1. RAWG name correction
-2. IGDB authentication
-3. IGDB text-focused data retrieval
+================================================================================
+🎮  RAGent GameSpot Data Fetch Test
+================================================================================
+Quick interactive script to test the GameSpot client and data module.
+================================================================================
 """
 
+from data.gamespot_data import GameSpotData
 import json
-from data.igdb_data import IGDBData
 
 def main():
     print("=" * 80)
-    print("🎮  RAGent IGDB Data Fetch Test")
+    print("🎮  RAGent GameSpot Data Fetch Test")
     print("=" * 80)
 
-    query = input("Enter game title or keyword: ").strip()
-    if not query:
-        print("No input provided. Exiting.")
+    title = input("Enter game title or keyword: ").strip()
+    if not title:
+        print("❌ Please provide a valid title.")
         return
 
-    print(f"\nFetching structured IGDB data for '{query}'...\n")
+    print(f"\nFetching structured GameSpot data for '{title}'...\n")
 
-    try:
-        data = IGDBData()
-        result = data.get_game_by_name(query)
+    data = GameSpotData()
+    structured = data.get_game_data(title)
 
-        if not result:
-            print("⚠️  No data found.")
-            return
+    if not structured:
+        print("⚠️  No data found for that game.")
+        return
 
-        print("\n✅ SUCCESS — Cleaned, Textual IGDB Data:\n")
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+    # Display a quick preview
+    print("\n✅ SUCCESS — Structured hierarchical data retrieved!\n")
+    print(json.dumps(structured, indent=2, ensure_ascii=False))
 
-    except Exception as e:
-        print("\n❌ ERROR:")
-        print(e)
+    # Save result locally
+    safe_title = "".join(c if c.isalnum() else "_" for c in title)
+    output_path = f"gamespot_structured_{safe_title}.json"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(structured, f, indent=2, ensure_ascii=False)
+
+    print(f"\n💾 Data saved to: {output_path}")
+    print("=" * 80)
+
 
 if __name__ == "__main__":
     main()

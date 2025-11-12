@@ -3,18 +3,24 @@ RAG_ent/
 ├── auth/
 │   ├── __init__.py
 │   └── rawg_client.py
+│   └── igdb_client.py
+│   └── gamespot_client.py
 │
 ├── data/
 │   ├── __init__.py
 │   └── rawg_data.py
 │   └── helper.py
+│   └── igdb_data.py
+│   └── gamespot_data.py
 │
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
 │   ├── test_rawg_client.py
 │   └── test_rawg_data.py
+│   └── test_igdb_modules.py
+│   └── test_gamespot_modules.py
 │
-├── .env                  # RAWG_API_KEY=...
+├── .env                  
 ├── pyproject.toml
-└── requirements.txt      # optional
+└── requirements.txt      
