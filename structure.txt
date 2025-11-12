@@ -7,6 +7,7 @@ RAG_ent/
 ├── data/
 │   ├── __init__.py
 │   └── rawg_data.py
+│   └── helper.py
 │
 ├── tests/
 │   ├── __init__.py
