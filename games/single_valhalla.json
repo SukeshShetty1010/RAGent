@@ -1,0 +1,130 @@
+{
+  "id": 437059,
+  "name": "Assassin's Creed Valhalla",
+  "slug": "assassins-creed-valhalla",
+  "description": "Become Eivor, a mighty Viking raider and lead your clan from the harsh shores of Norway to a new home amid the lush farmlands of ninth-century England. Explore a beautiful, mysterious open world where you'll face brutal enemies, raid fortresses, build your clan's new settlement, and forge alliances to win glory and earn a place in Valhalla.\n\nEngland in the age of the Vikings is a fractured nation of petty lords and warring kingdoms. Beneath the chaos lies a rich and untamed land waiting for a new conqueror. Will it be you?",
+  "released": "2020-11-10",
+  "genres": [
+    "Action",
+    "Adventure",
+    "RPG"
+  ],
+  "tags": [
+    "Singleplayer",
+    "Multiplayer",
+    "Atmospheric",
+    "RPG",
+    "Story Rich",
+    "Open World",
+    "Third Person",
+    "Partial Controller Support",
+    "Fantasy",
+    "Gore",
+    "Female Protagonist",
+    "Violent",
+    "Stealth",
+    "Action-Adventure",
+    "Action RPG",
+    "Nudity",
+    "In-App Purchases",
+    "Captions available",
+    "Historical",
+    "Sexual Content"
+  ],
+  "developers": [
+    "Ubisoft Montreal"
+  ],
+  "publishers": [
+    "Ubisoft Entertainment"
+  ],
+  "platforms": [
+    "PC",
+    "Xbox One",
+    "PlayStation 5",
+    "PlayStation 4",
+    "Xbox Series S/X"
+  ],
+  "website": "https://www.ubisoft.com/en-us/game/assassins-creed/valhalla",
+  "metacritic": 82,
+  "rating": 3.69,
+  "tba": false,
+  "esrb_rating": null,
+  "metacritic_platforms": [
+    84,
+    82,
+    80,
+    82,
+    84
+  ],
+  "system_requirements": {
+    "PC": {
+      "minimum": "Minimum:\nRequires a 64-bit processor and operating system\nOS: Windows 10 (versions 64 bits uniquement)\nProcessor: AMD Ryzen 3 1200 3.1 GHz / Intel Core i5-4460 3.2 GHz\nMemory: 8 GB RAM\nGraphics: AMD R9 380 /NVIDIA GeForce GTX 960\nDirectX: Version 12\nStorage: 160 GB available space",
+      "recommended": "Recommended:\nRequires a 64-bit processor and operating system\nOS: Windows 10 (versions 64 bits uniquement)\nProcessor: AMD Ryzen 5 1600 3.2 GHz / Intel Core i7-4790 3.6 GHz\nMemory: 8 GB RAM\nGraphics: AMD R9 380 /NVIDIA GeForce GTX 960\nDirectX: Version 12\nStorage: 160 GB available space"
+    }
+  },
+  "updated": "2025-11-07T21:16:36",
+  "playtime": 5,
+  "additions": [
+    "Assassin's Creed Valhalla - Dawn Of Ragnarok",
+    "Discovery Tour by Assassin’s Creed: Viking Age",
+    "Assassin's Creed Valhalla - The Siege Of Paris",
+    "Assassin's Creed Valhalla: Wrath of the Druids",
+    "Assassin's Creed Valhalla - Wrath Of The Druids",
+    "Assassin's Creed Valhalla Ultimate"
+  ],
+  "series_related": [
+    "Assassin's Creed Shadows",
+    "Assassin's Creed Nexus VR",
+    "Assassin's Creed Mirage",
+    "Assassin's Creed: Rebellion",
+    "Assassin's Creed Odyssey",
+    "Assassin’s Creed Rogue Remastered",
+    "Assassin's Creed Origins",
+    "Assassin’s Creed The Ezio Collection",
+    "Assassin's Creed Chronicles",
+    "Assassin's Creed Syndicate"
+  ],
+  "achievements": [
+    {
+      "name": "Full Master",
+      "description": "Earn all Gold Medals available in Mastery Challenge"
+    },
+    {
+      "name": "Freedom Fighter",
+      "description": "Reunite the dead within Kaldstad, Døkkerland and Nidheim (The Forgotten Saga)"
+    },
+    {
+      "name": "Pure of Heart",
+      "description": "Defeat Nidhogg without using an Elk Shrine (The Forgotten Saga)"
+    },
+    {
+      "name": "A Favored Customer",
+      "description": "Buy all of Nar's Favors at least once (The Forgotten Saga)"
+    },
+    {
+      "name": "High Kick",
+      "description": "Knock 10 enemies off of ledges using the Kick of Tyr Ability (The Forgotten Saga)"
+    },
+    {
+      "name": "See No Evil",
+      "description": "Teleport-Assassinate two enemies and fly away without being detected (Dawn of Ragnarök)"
+    },
+    {
+      "name": "A True Master",
+      "description": "Earn all Gold Medals available in Mastery Challenge"
+    },
+    {
+      "name": "Over the Hills…",
+      "description": "Complete all territories of Svartalfheim (Dawn of Ragnarök)"
+    },
+    {
+      "name": "Heroes of Ancient Britain",
+      "description": "Complete all Tombs of the Fallen"
+    },
+    {
+      "name": "The Queen's Fall",
+      "description": "Defeat Hel, ruler of Niflheim (The Forgotten Saga)"
+    }
+  ],
+  "stores": []
+}

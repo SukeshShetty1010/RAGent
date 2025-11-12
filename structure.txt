@@ -1,0 +1,19 @@
+RAG_ent/
+│
+├── auth/
+│   ├── __init__.py
+│   └── rawg_client.py
+│
+├── data/
+│   ├── __init__.py
+│   └── rawg_data.py
+│
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── test_rawg_client.py
+│   └── test_rawg_data.py
+│
+├── .env                  # RAWG_API_KEY=...
+├── pyproject.toml
+└── requirements.txt      # optional
