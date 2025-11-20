@@ -1,13 +1,24 @@
 # ingest/upsert.py
+"""
+Native Weaviate batch upsert for RAG_ent.
+
+- Uses deterministic canonical unified_game_id as the Weaviate object UUID for canonical objects.
+- Uses deterministic chunk UUIDs (unified_game_id + "__chunk__" + chunk_uuid) for chunk objects.
+- Preserves array fields as native lists (TEXT_ARRAY in Weaviate).
+- Computes content_hash for deduplication.
+- Embeds canonical.description (if present) as the canonical vector and each chunk text as chunk vectors.
+- Uses the client object from vector.index_manager (expected to be a Weaviate v4-compatible client).
+- Includes a dry-run mode that only logs objects prepared for upsert.
+"""
+
+from __future__ import annotations
 import hashlib
-import logging
 import json
-from typing import List, Dict, Any, Optional
+import logging
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
-from langchain_core.documents import Document
-from langchain_weaviate import WeaviateVectorStore
+
 import weaviate
-import ast
 
 from vector.index_manager import client, COLLECTION_NAME
 from vector.embed import get_embedding_model
@@ -16,411 +27,337 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-def normalize_text_array(value):
-    """Convert messy genre/platform JSON-like strings into clean text arrays."""
-    if not value:
-        return []
-    if isinstance(value, list):
-        clean = []
-        for v in value:
-            # Try to safely parse stringified dicts like "{'name': 'Action'}"
-            if isinstance(v, str):
-                try:
-                    parsed = ast.literal_eval(v)
-                    if isinstance(parsed, dict) and "name" in parsed:
-                        clean.append(parsed["name"])
-                    else:
-                        clean.append(str(parsed))
-                except Exception:
-                    clean.append(v)
-            else:
-                clean.append(str(v))
-        # Remove duplicates and normalize spacing
-        return sorted(set([x.strip() for x in clean if x.strip()]))
-    # if passed a string that looks like a JSON list, try to parse it
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return normalize_text_array(parsed)
-        except Exception:
-            # fallthrough: treat as a single-item list
-            pass
-    return [str(value).strip()]
+# ---------- helpers ----------
+def _now_iso_z() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _compute_content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _iso_utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _normalize_date(value: str) -> Optional[str]:
-    """Convert raw date strings into RFC3339 format (YYYY-MM-DDTHH:MM:SSZ)."""
+def _normalize_date_for_prop(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     try:
-        s = str(value).strip()
-        # If already ISO-ish (has 'T' or timezone), try to normalize
-        if "T" in s or s.endswith("Z") or "+" in s:
-            # Try parse with fromisoformat (py3.11+ robust) or fallback to returning z-normalized
-            try:
-                # Python's fromisoformat accepts many variants; ensure timezone is Z if none present
-                dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-                return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
-            except Exception:
-                # sanitise common patterns
-                v = s.replace(" ", "T")
-                if v.endswith("+00:00"):
-                    v = v.replace("+00:00", "Z")
-                if v.endswith("ZZ"):
-                    v = v.replace("ZZ", "Z")
-                return v
-        # Handle simple "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD"
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-            try:
-                dt = datetime.strptime(s, fmt)
-                return dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
-            except ValueError:
-                continue
-        return None
+        # best-effort: if it's already ISO, return with Z
+        if "T" in value or value.endswith("Z") or "+" in value:
+            # naive normalization; more robust parsing can be added if needed
+            v = value.replace("+00:00", "Z")
+            return v
     except Exception:
-        return None
+        pass
+    return value
 
 
-def _jsonify_list_field(v):
+def _ensure_list(v: Optional[Any]) -> Optional[List[str]]:
+    """
+    Accepts None, list, or string. Returns None or list[str].
+    This keeps arrays as native lists for Weaviate TEXT_ARRAY fields.
+    """
     if v is None:
         return None
-    if isinstance(v, (list, tuple)):
-        return json.dumps([str(x) for x in v])
+    if isinstance(v, list):
+        return [str(x) for x in v if x is not None]
+    # if it's a JSON string of a list, try parse it
     if isinstance(v, str):
-        # if already json-like, try to keep
-        try:
-            parsed = json.loads(v)
-            if isinstance(parsed, list):
-                return json.dumps(parsed)
-        except Exception:
-            # try to split pipes or commas
-            if "|" in v:
-                return json.dumps([s for s in v.split("|") if s])
-            if "," in v:
-                return json.dumps([s.strip() for s in v.split(",") if s.strip()])
-            return json.dumps([v])
-    return json.dumps([str(v)])
+        s = v.strip()
+        if s.startswith("[") and s.endswith("]"):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(x) for x in parsed if x is not None]
+            except Exception:
+                pass
+        # fallback: return single-item list
+        return [s]
+    # fallback
+    return [str(v)]
 
 
-def _prepare_weaviate_object(metadata: Dict[str, Any], text: str) -> Dict[str, Any]:
+def _prepare_object_properties(metadata: Dict[str, Any], text: str) -> Dict[str, Any]:
     """
-    Map chunk metadata -> Weaviate object properties.
-    Accepts partial metadata; missing keys are omitted.
-    Ensures array fields are properly formatted for Weaviate (TEXT_ARRAY).
+    Map metadata -> Weaviate properties dict.
+    Preserve arrays as lists, coerce numerics, and normalize date-like strings minimally.
     """
-    obj = {"text": text}
+    props: Dict[str, Any] = {"text": text}
 
-    # Basic scalar fields
+    # simple scalar fields to copy (if present)
     scalar_fields = [
         "source",
-        "game_id",
-        "unified_game_id",
         "slug",
         "title",
         "description",
-        "release_date",
-        "release_year",
-        "created_at",
-        "updated_at",
-        "content_length",
-        "content_hash",
         "site_detail_url",
-        "esrb_rating",
         "language",
     ]
-    for field in scalar_fields:
-        v = metadata.get(field)
-        if v is None:
-            continue
-        # Normalize date fields for RFC3339
-        if field in ("release_date", "created_at", "updated_at"):
-            v = _normalize_date(str(v))
-            if v is None:
-                continue
-        obj[field] = v
+    for f in scalar_fields:
+        v = metadata.get(f)
+        if v is not None:
+            props[f] = v
 
-    # Normalize and clean array fields
-    array_fields = [
-        "genres",
-        "platforms",
-        "developers",
-        "publishers",
-        "tags",
-        "themes",
-        "stores",
-    ]
-    for field in array_fields:
-        raw = metadata.get(field)
-        if raw is None:
-            continue
-        obj[field] = normalize_text_array(raw)
-
-    # Numeric / float fields
-    numeric_fields = [
-        "rating",
-        "rating_count",
-        "user_rating",
-        "critic_rating",
-        "metacritic",
-        "playtime",
-        "articles_count",
-        "reviews_count",
-    ]
-    for nf in numeric_fields:
-        v = metadata.get(nf)
+    # numeric scalars
+    numeric_fields = ["game_id", "release_year", "rating", "rating_count", "score_normalized", "score_count", "articles_count", "reviews_count"]
+    for f in numeric_fields:
+        v = metadata.get(f)
         if v is not None:
             try:
-                obj[nf] = float(v)
-            except (ValueError, TypeError):
-                pass
+                props[f] = int(v) if isinstance(v, (int, float, str)) else v
+            except Exception:
+                try:
+                    props[f] = float(v)
+                except Exception:
+                    # skip if cannot coerce
+                    pass
 
-    return obj
+    # date-like fields
+    for df in ("release_date", "created_at", "updated_at", "merge_time"):
+        v = metadata.get(df)
+        if v:
+            nv = _normalize_date_for_prop(str(v))
+            if nv:
+                props[df] = nv
+
+    # arrays: keep native lists
+    array_fields = ["genres", "platforms", "developers", "publishers", "tags", "themes", "stores"]
+    for af in array_fields:
+        raw = metadata.get(af)
+        lst = _ensure_list(raw)
+        if lst:
+            # dedupe preserving order
+            seen = set()
+            dedup = []
+            for item in lst:
+                key = str(item).strip()
+                if key and key not in seen:
+                    seen.add(key)
+                    dedup.append(key)
+            props[af] = dedup
+
+    # content metadata
+    if "content_length" in metadata:
+        try:
+            props["content_length"] = int(metadata.get("content_length"))
+        except Exception:
+            props["content_length"] = metadata.get("content_length")
+
+    if "content_hash" in metadata:
+        props["content_hash"] = metadata.get("content_hash")
+    else:
+        # compute fallback hash from text
+        props["content_hash"] = _compute_content_hash(text)
+
+    # keep unified_game_id and chunk identifiers
+    if metadata.get("unified_game_id"):
+        props["unified_game_id"] = metadata.get("unified_game_id")
+    if metadata.get("chunk_uuid"):
+        props["chunk_uuid"] = metadata.get("chunk_uuid")
+    if metadata.get("chunk_type"):
+        props["chunk_type"] = metadata.get("chunk_type")
+
+    return props
 
 
-def _embed_texts(emb_model, texts: List[str], batch_size: int = 64) -> List[List[float]]:
-    vectors = []
+# ---------- Weaviate helpers ----------
+def _get_collection():
+    try:
+        coll = client.collections.get(COLLECTION_NAME)
+        return coll
+    except Exception as e:
+        logger.exception("Failed to get collection '%s': %s", COLLECTION_NAME, e)
+        raise
+
+
+def _object_exists(collection, obj_id: str) -> bool:
+    try:
+        # collection.objects.get may raise if not exists
+        obj = collection.objects.get(obj_id)
+        return obj is not None
+    except Exception:
+        return False
+
+
+# ---------- embedding ----------
+def _embed_texts(texts: List[str], batch_size: int = 64) -> List[List[float]]:
+    emb_model = get_embedding_model()
+    vectors: List[List[float]] = []
+    # support several embedding model interfaces (as in your previous code)
     if hasattr(emb_model, "embed_documents"):
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            batch_vecs = emb_model.embed_documents(batch)
-            vectors.extend(batch_vecs)
+            vectors.extend(emb_model.embed_documents(batch))
         return vectors
     if hasattr(emb_model, "client") and hasattr(emb_model.client, "encode"):
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            batch_vecs = emb_model.client.encode(batch, normalize_embeddings=True)
-            vectors.extend(batch_vecs)
+            vectors.extend(emb_model.client.encode(batch, normalize_embeddings=True).tolist())
         return vectors
-    logger.warning("Embedding model missing bulk API; falling back to single calls.")
+    # fallback single-call
     for t in texts:
-        v = emb_model.embed([t])[0]
-        vectors.append(v)
+        vectors.append(emb_model.embed([t])[0])
     return vectors
 
 
-def _find_existing_by_slug(slug: str) -> Optional[Dict[str, Any]]:
+# ---------- top-level upsert ----------
+def upsert_canonical_and_chunks(
+    canonical: Dict[str, Any],
+    chunks: List[Dict[str, Any]],
+    batch_size: int = 128,
+    dry_run: bool = False,
+) -> None:
     """
-    Query Weaviate for an existing canonical record by slug. Returns first object dict or None.
+    Upsert one canonical object and its chunk objects to Weaviate.
+
+    canonical: merged canonical dict (contains unified_game_id, raw_source_blob etc.)
+    chunks: list of chunk dicts produced by chunking (each: {"text":..., "metadata":{...}})
     """
-    try:
-        collection = client.collections.get(COLLECTION_NAME)
-        resp = collection.query.fetch_objects(
-            filters=weaviate.classes.query.Filter.by_property("slug").equal(slug),
-            limit=1,
-        )
-        # resp may be dict-like
-        objects = None
-        if isinstance(resp, dict):
-            objects = resp.get("objects") or resp.get("data") or []
-        else:
-            objects = getattr(resp, "objects", None)
-        if objects:
-            # try to pluck props
-            obj = objects[0]
-            if isinstance(obj, dict) and "properties" in obj:
-                return obj["properties"]
-            return obj
-    except Exception as e:
-        logger.debug("Existing-by-slug lookup failed: %s", e)
-    return None
-
-
-def _merge_metadata(existing, new_meta):
-    """
-    Merge metadata from an existing Weaviate object and a new document.
-    Keeps arrays unique and concatenates text fields if needed.
-    Handles None values gracefully.
-    """
-    # Handle Weaviate Object (v4) case
-    if hasattr(existing, "properties"):
-        existing = existing.properties
-
-    if not isinstance(existing, dict):
-        existing = {}
-
-    merged = dict(existing)
-
-    for key, val in (new_meta or {}).items():
-        if val is None:
-            continue
-
-        # Merge arrays
-        if key in (
-            "genres",
-            "platforms",
-            "developers",
-            "publishers",
-            "tags",
-            "themes",
-            "stores",
-        ):
-            existing_vals = merged.get(key) or []
-            if isinstance(existing_vals, str):
-                existing_vals = [existing_vals]
-            if isinstance(val, str):
-                val = [val]
-            merged[key] = list({*map(str, existing_vals), *map(str, val)})
-
-        # Merge numeric fields (overwrite if newer)
-        elif isinstance(val, (int, float)):
-            merged[key] = val
-
-        # Merge text fields (append if not identical)
-        elif isinstance(val, str):
-            old = merged.get(key)
-            if not isinstance(old, str):
-                old = ""  # safely handle None or non-string
-            if val not in old:
-                merged[key] = (old + " " + val).strip()
-
-        else:
-            merged[key] = val
-
-    return merged
-
-
-def upsert_chunks(chunks: List[Document], batch_size: int = 100):
-    if not chunks:
-        logger.info("No chunks to upsert.")
+    if not canonical:
+        logger.warning("No canonical provided to upsert.")
         return
 
-    texts = [c.page_content for c in chunks]
-    hashes = [_compute_content_hash(t) for t in texts]
-    for c, h in zip(chunks, hashes):
-        c.metadata = {**(c.metadata or {}), "content_hash": h}
+    collection = _get_collection()
 
-    emb_model = get_embedding_model()
-    logger.info(
-        "Generating embeddings for %d chunks (batch_size=%d)...", len(texts), batch_size
-    )
-    vectors = _embed_texts(emb_model, texts, batch_size=batch_size)
+    unified_id = canonical.get("unified_game_id")
+    if not unified_id:
+        # fallback: generate an id but warn (should be deterministic from loader)
+        slug = canonical.get("slug") or canonical.get("title") or "unknown"
+        year = canonical.get("release_year") or "unknown"
+        unified_id = f"{slug}-{year}-{hashlib.sha1((slug + str(year)).encode()).hexdigest()[:8]}"
+        logger.warning("Canonical missing unified_game_id — generated fallback id: %s", unified_id)
 
-    to_upsert = []
+    # --- Prepare canonical object ---
+    # canonical text to embed: prefer description -> title
+    canonical_text = canonical.get("description") or canonical.get("title") or ""
+    canonical_meta = dict(canonical)  # copy
+    # ensure content_hash and content_length for canonical too
+    canonical_meta["content_hash"] = canonical_meta.get("content_hash") or _compute_content_hash(canonical_text or "")
+    canonical_meta["content_length"] = canonical_meta.get("content_length") or len((canonical_text or "").split())
+
+    canonical_props = _prepare_object_properties(canonical_meta, canonical_text)
+
+    # add raw_source_blob on canonical as a JSON string property (per your decision)
+    raw_blob = canonical.get("raw_source_blob")
+    if raw_blob is not None:
+        # canonical_props stores raw blob as string (Weaviate text property)
+        canonical_props["raw_source_blob"] = raw_blob if isinstance(raw_blob, str) else json.dumps(raw_blob, ensure_ascii=False)
+
+    # compute embedding for canonical
+    to_embed_texts = []
+    if canonical_text:
+        to_embed_texts.append(canonical_text)
+
+    # Prepare chunk texts and metadata for embedding
+    chunk_texts: List[str] = []
+    chunk_props_list: List[Tuple[str, Dict[str, Any], str]] = []  # (text, metadata, object_id)
+    for ch in chunks:
+        txt = ch.get("text") or ""
+        md = dict(ch.get("metadata") or {})
+        # ensure unified_game_id present
+        md.setdefault("unified_game_id", unified_id)
+        # content_hash
+        md["content_hash"] = md.get("content_hash") or _compute_content_hash(txt)
+        md["content_length"] = md.get("content_length") or len(txt.split())
+        # build object id for chunk: unifiedid__chunk__{chunk_uuid or index}
+        chunk_uuid = md.get("chunk_uuid") or md.get("chunk_index") or ""
+        obj_id = f"{unified_id}__chunk__{chunk_uuid}"
+        chunk_props = _prepare_object_properties(md, txt)
+        chunk_texts.append(txt)
+        chunk_props_list.append((txt, chunk_props, obj_id))
+
+    # embed all texts (canonical + chunks) in batches
+    embed_texts_all = []
+    if to_embed_texts:
+        embed_texts_all.extend(to_embed_texts)
+    embed_texts_all.extend(chunk_texts)
+
+    vectors = []
+    if embed_texts_all:
+        logger.info("Generating embeddings for %d texts (canonical + chunks)...", len(embed_texts_all))
+        vectors = _embed_texts(embed_texts_all, batch_size=batch_size)
+    else:
+        vectors = []
+
+    # map vectors back
+    idx = 0
+    if to_embed_texts:
+        canonical_vector = vectors[0]
+        idx = 1
+    else:
+        canonical_vector = None
+
+    chunk_vectors = vectors[idx : idx + len(chunk_texts)] if len(vectors) >= idx else []
+
+    # --- Build upsert payload using native Weaviate batch API ---
+    # We will create objects where canonical has id = unified_game_id
+    # and chunks have id = unified_id__chunk__<chunk_uuid>
+    operations = []
+    # canonical object
+    canonical_obj = {
+        "class": COLLECTION_NAME,
+        "id": unified_id,
+        "properties": canonical_props,
+    }
+    if canonical_vector is not None:
+        canonical_obj["vector"] = canonical_vector
+    operations.append(canonical_obj)
+
+    # chunk objects
+    for i, (txt, props, obj_id) in enumerate(chunk_props_list):
+        obj = {"class": COLLECTION_NAME, "id": obj_id, "properties": props}
+        if i < len(chunk_vectors):
+            obj["vector"] = chunk_vectors[i]
+        operations.append(obj)
+
+    logger.info("Prepared %d objects to upsert (1 canonical + %d chunks).", 1, len(chunk_props_list))
+
+    if dry_run:
+        logger.info("Dry-run enabled — not sending to Weaviate. Printing first 2 prepared objects:")
+        logger.info(json.dumps(operations[:2], ensure_ascii=False, indent=2))
+        return
+
+    # Send batch to Weaviate
     try:
-        collection = client.collections.get(COLLECTION_NAME)
-    except Exception as e:
-        logger.exception("Unable to fetch collection '%s': %s", COLLECTION_NAME, e)
-        raise
+        batch = collection.objects.batch()
+    except Exception:
+        # fallback to client-level batch if collection batch not available
+        batch = client.batch
 
-    for idx, (doc, vec, c_hash) in enumerate(zip(chunks, vectors, hashes)):
-        meta = doc.metadata or {}
-        slug = meta.get("slug") or meta.get("unified_game_id")
-        # check duplicate by content_hash first
-        try:
-            resp = collection.query.fetch_objects(
-                filters=weaviate.classes.query.Filter.by_property("content_hash").equal(
-                    c_hash
-                ),
-                limit=1,
-            )
-            existing_objs = None
-            if isinstance(resp, dict):
-                existing_objs = resp.get("objects") or []
-            else:
-                existing_objs = getattr(resp, "objects", None)
-            if existing_objs:
-                logger.debug("Duplicate detected (hash): %s — skipping", c_hash)
+    try:
+        # Add objects in controlled batches to avoid huge requests
+        B = batch_size if batch_size and batch_size > 0 else 128
+        for i in range(0, len(operations), B):
+            chunk_ops = operations[i : i + B]
+            try:
+                # prefer collection batch add API if available
+                if hasattr(batch, "add"):
+                    for o in chunk_ops:
+                        # some clients accept vector in 'vector' key; add expects (obj, vector?) depending on client
+                        # safe approach: use collection.objects.create with id+props+vector if available
+                        batch.add(o)
+                    # flush the batch if method exists
+                    if hasattr(batch, "flush"):
+                        batch.flush()
+                else:
+                    # fallback: use client.data_object.create for each object (slower)
+                    for o in chunk_ops:
+                        obj_id = o.get("id")
+                        props = o.get("properties")
+                        vec = o.get("vector", None)
+                        if vec is not None:
+                            client.data_object.create(data_object=props, class_name=COLLECTION_NAME, uuid=obj_id, vector=vec)
+                        else:
+                            client.data_object.create(data_object=props, class_name=COLLECTION_NAME, uuid=obj_id)
+            except Exception as e:
+                logger.exception("Failed to add a batch of %d objects: %s", len(chunk_ops), e)
+                # continue trying remaining batches
                 continue
-        except Exception as e:
-            logger.warning(
-                "Hash existence check failed for hash %s: %s — will attempt to upsert",
-                c_hash,
-                e,
-            )
 
-        # try to find canonical by slug and merge metadata if found
-        if slug:
-            existing = _find_existing_by_slug(slug)
-            if existing:
-                merged_props = _merge_metadata(existing, meta)
-                # ensure slug/unified_game_id/title set
-                merged_props["slug"] = slug
-                merged_props["unified_game_id"] = slug
-                # perform a partial update to the existing object (Weaviate update flow)
-                try:
-                    # Weaviate client expects an object id to update; we fetch it via query again
-                    # Here we'll use the langchain_weaviate add_documents flow to upsert; keep merged_props for metadata
-                    meta = {**meta, **merged_props}
-                except Exception as e:
-                    logger.debug(
-                        "Failed to merge existing metadata for slug %s: %s", slug, e
-                    )
-
-        obj_props = _prepare_weaviate_object(meta, doc.page_content)
-
-        # DEBUG: log first two objects so we can confirm types being sent to Weaviate
-        if idx < 2:
-            logger.info("🧩 DEBUG OBJECT PREVIEW (idx=%d):", idx)
-            for k, v in obj_props.items():
-                if k in ("genres", "platforms", "developers", "publishers", "tags", "themes"):
-                    logger.info("  %s: %s (type=%s)", k, v, type(v))
-        to_upsert.append((obj_props, vec))
-
-    if not to_upsert:
-        logger.info("No new chunks to upsert (all duplicates).")
-        return
-
-    try:
-        docs_for_langchain = []
-        vectors_to_send = []
-        for props, vec in to_upsert:
-            d = Document(page_content=props.get("text", ""), metadata=props)
-            docs_for_langchain.append(d)
-            vectors_to_send.append(vec)
-
-        vectorstore = WeaviateVectorStore(
-            client=client,
-            index_name=COLLECTION_NAME,
-            text_key="text",
-            embedding=None,
-            attributes=[
-                "source",
-                "game_id",
-                "unified_game_id",
-                "slug",
-                "title",
-                "description",
-                "release_date",
-                "release_year",
-                "created_at",
-                "updated_at",
-                "genres",
-                "platforms",
-                "developers",
-                "publishers",
-                "tags",
-                "themes",
-                "stores",
-                "rating",
-                "rating_count",
-                "metacritic",
-                "esrb_rating",
-                "playtime",
-                "articles_count",
-                "reviews_count",
-                "language",
-                "content_length",
-                "content_hash",
-                "site_detail_url",
-            ],
-        )
-
-        logger.info("Upserting %d new chunks into '%s'...", len(docs_for_langchain), COLLECTION_NAME)
-        vectorstore.add_documents(docs_for_langchain, vectors=vectors_to_send, batch_size=batch_size)
-        logger.info("Successfully upserted %d chunks.", len(docs_for_langchain))
+        logger.info("Batch upsert completed.")
     except Exception as e:
-        logger.exception("Upsert failed: %s", e)
+        logger.exception("Batch upsert failed: %s", e)
         raise
     finally:
+        # close client connection if client supports it (harmless if not)
         try:
             client.close()
         except Exception:
