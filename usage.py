@@ -1,48 +1,43 @@
-# usage.py
-"""
-================================================================================
-🎮  RAGent GameSpot Data Fetch Test
-================================================================================
-Quick interactive script to test the GameSpot client and data module.
-================================================================================
-"""
-
-from data.gamespot_data import GameSpotData
-import json
+from vector.index_manager import client
+from weaviate.classes.query import Filter
 
 def main():
-    print("=" * 80)
-    print("🎮  RAGent GameSpot Data Fetch Test")
-    print("=" * 80)
+    # 1. Get the collection
+    collection = client.collections.get("GameKnowledge")
 
-    title = input("Enter game title or keyword: ").strip()
-    if not title:
-        print("❌ Please provide a valid title.")
-        return
+    # ==========================================
+    # Task A: Check Existence (Search by Slug Property)
+    # ==========================================
+    # The string you have is likely a "slug", not a UUID.
+    test_slug = "far-cry-3-2012-2012-aa60e468"
+    
+    print(f"Searching for object with slug: '{test_slug}'...")
+    
+    # We use fetch_objects with a filter instead of fetch_object_by_id
+    response = collection.query.fetch_objects(
+        filters=Filter.by_property("slug").equal(test_slug),
+        limit=1
+    )
 
-    print(f"\nFetching structured GameSpot data for '{title}'...\n")
+    if response.objects:
+        obj = response.objects[0]
+        print(f"✅ Found object! System UUID: {obj.uuid}")
+        
+        # ==========================================
+        # Task B: Get Properties
+        # ==========================================
+        print(f"Title: {obj.properties.get('title')}")
+        print(f"Genres: {obj.properties.get('genres')}")
+    else:
+        print(f"❌ No object found with slug '{test_slug}'")
 
-    data = GameSpotData()
-    structured = data.get_game_data(title)
+    # ==========================================
+    # Task C: Count Total Objects
+    # ==========================================
+    count_result = collection.aggregate.over_all(total_count=True)
+    print(f"\nTotal objects in 'GameKnowledge': {count_result.total_count}")
 
-    if not structured:
-        print("⚠️  No data found for that game.")
-        return
-
-    # Display a quick preview
-    print("\n✅ SUCCESS — Structured hierarchical data retrieved!\n")
-    print(json.dumps(structured, indent=2, ensure_ascii=False))
-
-    # Save result locally
-    safe_title = "".join(c if c.isalnum() else "_" for c in title)
-    output_path = f"gamespot_structured_{safe_title}.json"
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(structured, f, indent=2, ensure_ascii=False)
-
-    print(f"\n💾 Data saved to: {output_path}")
-    print("=" * 80)
-
+    client.close()
 
 if __name__ == "__main__":
     main()

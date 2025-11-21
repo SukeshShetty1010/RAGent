@@ -16,7 +16,6 @@ from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from auth.gamespot_client import GameSpotClient
-from data.helper import main as helper_main  # adjust if helper has a dedicated function
 from data.rawg_data import RAWGData  # <-- FIX: Moved import to top level
 
 PAGE_LIMIT = 3

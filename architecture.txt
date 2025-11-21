@@ -1,58 +1,50 @@
-                        ┌──────────────────────────┐
-                        │      External APIs       │
-                        │ ───────────────────────  │
-                        │  RAWG  •  IGDB  •  GameSpot
-                        └──────────────┬───────────┘
-                                       │
-                                       ▼
-                        ┌──────────────────────────┐
-                        │      auth/ & data/      │
-                        │  Client + Data Modules  │
-                        │  → Extract structured JSON
-                        └──────────────┬───────────┘
-                                       │
-                                       ▼
-                        ┌──────────────────────────┐
-                        │       ingest/           │
-                        │  loader.py → Load files │
-                        │  chunking.py → Split    │
-                        │  upsert.py → Enrich +   │
-                        │              embed + upsert
-                        └──────────────┬───────────┘
-                                       │
-                          Embeddings   │
-                      (MiniLM-L6-v2)   ▼
-                        ┌──────────────────────────┐
-                        │       vector/           │
-                        │  index_manager.py → Schema
-                        │  embed.py → Model loader
-                        │  search.py → Similarity
-                        └──────────────┬───────────┘
-                                       │
-                                       ▼
-                         ┌────────────────────────┐
-                         │   Weaviate Vector DB   │
-                         │ GameKnowledge schema   │
-                         │ Rich metadata fields   │
-                         └──────────────┬─────────┘
-                                        │
-                                        ▼
-                          ┌────────────────────────┐
-                          │     retriever/        │
-                          │ retriever.py → Vector │
-                          │ rag.py → Query + LLM  │
-                          └──────────────┬────────┘
+                         ┌──────────────────────────────┐
+                         │         Data Sources          │
+                         │ RAWG | IGDB | GameSpot APIs   │
+                         └───────────────┬──────────────┘
                                          │
-                         ┌────────────────────────┐
-                         │     llm/ (Modal.com)   │
-                         │ modal_llm.py           │
-                         │ ragent_client.py       │
-                         └──────────────┬─────────┘
-                                        │
-                                        ▼
-                         ┌────────────────────────┐
-                         │     User Query Flow    │
-                         │ 1. Retrieve top-k docs │
-                         │ 2. Context sent to LLM │
-                         │ 3. Generate final answer│
-                         └────────────────────────┘
+                                         ▼
+                    ┌─────────────────────────────────────────┐
+                    │                 auth/                    │
+                    │  API Clients (rawg/igdb/gamespot)       │
+                    └───────────────┬─────────────────────────┘
+                                    │
+                                    ▼
+                    ┌─────────────────────────────────────────┐
+                    │                  data/                   │
+                    │  Parsing / Cleaning / Source Wrappers    │
+                    │  (rawg_data, igdb_data, gamespot_data)   │
+                    └───────────────┬─────────────────────────┘
+                                    │
+                                    ▼
+      ┌──────────────────────────────────────────────────────────────────┐
+      │                             ingest/                             │
+      │ ┌──────────────┐ ┌──────────────┐ ┌─────────────────────────┐  │
+      │ │ loader.py     │→│ merge.py      │→│ chunking.py            │  │
+      │ │ (prepare)     │ │ (canonical)   │ │ (split to chunks)      │  │
+      │ └──────────────┘ └──────────────┘ └───┬─────────────────────┘  │
+      │                                        ▼                        │
+      │                            ┌─────────────────────┐              │
+      │                            │     upsert.py       │              │
+      │                            │ (embed + Weaviate)  │              │
+      │                            └─────────┬───────────┘              │
+      └───────────────────────────────────────┼──────────────────────────┘
+                                              ▼
+                            ┌────────────────────────────────┐
+                            │            vector/              │
+                            │ embed.py → embeddings          │
+                            │ index_manager.py → schema      │
+                            │ search.py → vector lookup      │
+                            └─────────────────┬──────────────┘
+                                              ▼
+                              ┌────────────────────────────────┐
+                              │            retriever/           │
+                              │ retriever.py → get chunks       │
+                              │ rag.py → RAG pipeline           │
+                              └─────────────────┬──────────────┘
+                                                ▼
+                              ┌────────────────────────────────┐
+                              │              llm/               │
+                              │ modal_llm.py (deployment)       │
+                              │ ragent_client.py (inference)    │
+                              └────────────────────────────────┘
