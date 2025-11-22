@@ -1,4 +1,3 @@
-# auth/gamespot_client.py
 """
 GameSpotClient — Handles authentication and API communication
 with the GameSpot API.
@@ -47,21 +46,54 @@ class GameSpotClient:
             return None
 
     def fetch(self, endpoint: str, filters: str, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
-        """Fetch a single page of results from a GameSpot endpoint."""
+        """
+        Fetch a single page of results from a GameSpot endpoint.
+        This keeps the original contract (returns just the results list).
+        """
         params = {"filter": filters, "limit": limit, "offset": offset}
         data = self._get(endpoint, params)
         return data.get("results", []) if data else []
 
+    def _fetch_page_with_meta(self, endpoint: str, filters: str, limit: int, offset: int):
+        """
+        Returns a tuple (results_list, meta_dict) from the GameSpot endpoint.
+        Meta may contain 'number_of_total_results' depending on the API response.
+        """
+        params = {"filter": filters, "limit": limit, "offset": offset}
+        data = self._get(endpoint, params)
+        if not data:
+            return [], {}
+        results = data.get("results", [])
+        # the API may include meta fields at top-level
+        meta = {
+            "number_of_total_results": data.get("number_of_total_results") or data.get("total_results") or None
+        }
+        return results, meta
+
     def fetch_all_pages(self, endpoint: str, filters: str, max_pages: int = 3, limit: int = 100) -> List[Dict[str, Any]]:
-        """Fetch results from up to max_pages pages."""
-        all_results, offset = [], 0
+        """
+        Fetch results from up to max_pages pages.
+
+        NOTE: the GameSpot API sometimes returns unexpected results or ignores filters.
+        This function uses the response meta (if present) to correctly handle pagination.
+        """
+        all_results: List[Dict[str, Any]] = []
+        offset = 0
+
         for page in range(max_pages):
-            results = self.fetch(endpoint, filters, limit, offset)
+            results, meta = self._fetch_page_with_meta(endpoint, filters, limit, offset)
             if not results:
                 break
             all_results.extend(results)
             offset += len(results)
-            total = results[-1].get("number_of_total_results")
+
+            total = meta.get("number_of_total_results")
+            # If total is provided and offset >= total we can stop early
             if total and offset >= total:
                 break
+
+            # If the server returns fewer than limit results, assume we've reached the end
+            if len(results) < limit:
+                break
+
         return all_results

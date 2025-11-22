@@ -1,9 +1,0 @@
-[RAWG ERROR] Request failed: HTTPSConnectionPool(host='api.rawg.io', port=443): Read timed out. (read timeout=10)
-[IGDBData] RAWG returned no matches for 'Far Cry 3'.
-[GameSpotData] Corrected search name → 'Far Cry 3'
-[GameSpotData] Using corrected name: Far Cry 3
-[GameSpotData] Found game 'Far Cry 3' with id 107438
-[GameSpotData] game: 1 records fetched
-[GameSpotData] articles: 300 records fetched
-[GameSpotData] releases: 300 records fetched
-[GameSpotData] reviews: 300 records fetched

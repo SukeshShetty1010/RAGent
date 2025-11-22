@@ -9,7 +9,7 @@ Output: list of chunk dicts with metadata enriched for upsert:
     - doc_type = "chunk"
     - parent_unified_id
     - chunk_index
-    - chunk_uuid (8 hex)
+    - chunk_uuid (deterministic & unique)
     - chunk_type preserved/defaulted
     - language (defaults to en)
     - content_length (int words)
@@ -36,8 +36,26 @@ def _word_chunks(text: str, chunk_size: int = 800, overlap: int = 100) -> List[s
     return chunks
 
 
-def _chunk_uuid(parent_id: str, idx: int, n: int = 8) -> str:
-    base = f"{parent_id}__chunk__{idx}"
+def _chunk_uuid(parent_id: str, idx: int, source: str = "", source_game_id: Any = None, text: str = "", n: int = 8) -> str:
+    """
+    Deterministic, source-aware short chunk id.
+
+    Components included (in order):
+     - parent unified id
+     - source (e.g. 'rawg', 'igdb', 'gamespot')
+     - source_game_id (if present)
+     - chunk index
+     - 8-hex text hash (to disambiguate identical-index chunks with different text)
+
+    The function returns the first `n` hex chars from a stable hash produced by make_hash8.
+    """
+    # normalize components (avoid None)
+    s_src = (str(source).lower() or "unknown")[:32]
+    s_sid = str(source_game_id) if source_game_id is not None else ""
+    # use a short text-derived hash to avoid collisions on similar index chunks
+    text_hash = make_hash8(text or "")  # returns hex-like short digest (string)
+    base = f"{parent_id}||{s_src}||{s_sid}||idx:{idx}||th:{text_hash}"
+    # `make_hash8` returns a short digest already; keep it deterministic and return n chars
     return make_hash8(base)[:n]
 
 
@@ -50,6 +68,10 @@ def chunk_document(doc: Dict[str, Any], chunk_size: int = 800, chunk_overlap: in
     parent_unified = meta.get("unified_game_id") or meta.get("parent_unified_id") or meta.get("slug") or "unknown"
     chunk_type = meta.get("chunk_type") or "description"
     language = meta.get("language") or "en"
+
+    # Source-level identifiers help make chunk_uuid unique across sources
+    source = meta.get("source") or meta.get("source_name") or "unknown"
+    source_game_id = meta.get("source_game_id") or meta.get("game_id") or meta.get("id") or ""
 
     raw_chunks = _word_chunks(text, chunk_size=chunk_size, overlap=chunk_overlap)
     out: List[Dict[str, Any]] = []
@@ -69,7 +91,8 @@ def chunk_document(doc: Dict[str, Any], chunk_size: int = 800, chunk_overlap: in
         cm["doc_type"] = "chunk"
         cm["parent_unified_id"] = parent_unified
         cm["chunk_index"] = idx
-        cm["chunk_uuid"] = _chunk_uuid(parent_unified, idx)
+        # new unique chunk uuid
+        cm["chunk_uuid"] = _chunk_uuid(parent_unified, idx, source=source, source_game_id=source_game_id, text=ctext)
         cm["chunk_type"] = chunk_type
         cm["language"] = language
         cm["content_length"] = len(ctext.split())
