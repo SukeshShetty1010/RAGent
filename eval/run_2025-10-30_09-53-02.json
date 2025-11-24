@@ -1,9 +1,0 @@
-{
-    "run_timestamp": "2025-10-30T09:53:02.470011+00:00",
-    "news_latency": 17.417,
-    "igdb_latency": 7.016,
-    "total_latency": 24.433,
-    "news_chunks_upserted": 10,
-    "igdb_chunks_upserted": 10,
-    "automation_depth": 4
-}

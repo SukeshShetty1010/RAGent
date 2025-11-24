@@ -1,438 +1,515 @@
-import os
-import sys
+# rough.py (updated)
+from __future__ import annotations
+from typing import List, Optional, Dict, Any
+from datetime import datetime, date
+from pydantic import BaseModel, Field, AnyUrl
+# conditional import for validator compatibility (pydantic v1 vs v2)
+try:
+    from pydantic import field_validator  # v2 style
+    _HAS_FIELD_VALIDATOR = True
+except Exception:
+    from pydantic import validator  # v1 style (deprecated in v2)
+    _HAS_FIELD_VALIDATOR = False
+
 import json
-import time
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+import pathlib
+import re
 
-import requests
-from dotenv import load_dotenv
-
-# ---------------------------
-# Load environment
-# ---------------------------
-
-load_dotenv()
-
-# RAWG API key (for name correction)
-RAWG_API_KEY = os.getenv("RAWG_API_KEY")
-
-# GameSpot base
-BASE_URL = "https://www.gamespot.com/api"
-USER_AGENT = "RAG-ent-EldenRingFetcher/1.0 (contact: you@example.com)"  # set something non-generic
-
-# Output file; we'll override the name based on the resolved title
-DEFAULT_OUTPUT_FILE = "gamespot_full_textual.json"
-
-# Visual-related key substrings to strip everywhere (case-insensitive)
-VISUAL_KEY_SUBSTRINGS = [
-    "image",
-    "images",
-    "video",
-    "videos",
-    "screenshot",
-    "thumbnail",
-    "thumbnails",
-    "poster",
-    "banner",
-    "icon",
-    "avatar",
-    "logo",
-]
+# ------------------------
+# Pydantic schema for merged record
+# ------------------------
+class Ratings(BaseModel):
+    rawg: Optional[float] = None
+    igdb: Optional[float] = None
+    metacritic: Optional[int] = None
+    # Keep original full-rating objects as provenance if available
+    rawg_detail: Optional[Dict[str, Any]] = None
+    igdb_detail: Optional[Dict[str, Any]] = None
 
 
-# ---------------------------
-# RAWG helper – find correct game name
-# ---------------------------
-
-def get_correct_game_name(query: str) -> str | None:
-    """
-    Searches RAWG for the closest matching game name and returns the official title.
-
-    Args:
-        query (str): Name of the game input by user.
-
-    Returns:
-        str | None: Returns the correct game title if found, otherwise None.
-    """
-    if not RAWG_API_KEY:
-        raise ValueError("Missing RAWG_API_KEY in .env file!")
-
-    url = "https://api.rawg.io/api/games"
-    params = {
-        "key": RAWG_API_KEY,
-        "search": query,
-        "page_size": 1,  # Return the closest match only
-    }
-
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-
-        if data.get("results"):
-            best_match = data["results"][0]
-            return best_match.get("name")
-
-        return None
-
-    except requests.RequestException as e:
-        print(f"Error searching RAWG: {e}")
-        return None
+class SourceProvenance(BaseModel):
+    rawg: Optional[Dict[str, Any]] = None
+    igdb: Optional[Dict[str, Any]] = None
 
 
-def resolve_game_name(raw_query: str) -> str:
-    """
-    Use RAWG to normalize the game name if possible.
-    Falls back to raw_query if RAWG can't help.
-    """
-    try:
-        corrected = get_correct_game_name(raw_query)
-    except ValueError as e:
-        # Missing RAWG_API_KEY – warn and just use the raw name
-        print(f"[WARN] {e}. Using '{raw_query}' as-is.")
-        return raw_query
+class GameMerged(BaseModel):
+    # canonical top-level fields
+    unified_id: Optional[str] = None
+    title: str
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    release_date: Optional[date] = None
 
-    if corrected:
-        print(f"✔ Using RAWG-corrected name: '{corrected}' (from '{raw_query}')")
-        return corrected
+    # ids per source
+    rawg_id: Optional[int] = None
+    igdb_id: Optional[int] = None
 
-    print(f"[INFO] RAWG returned no better match; using '{raw_query}' as-is.")
-    return raw_query
+    platforms: List[str] = Field(default_factory=list)
+    genres: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
 
+    ratings: Ratings = Field(default_factory=Ratings)
+    urls: List[AnyUrl] = Field(default_factory=list)
 
-# ---------------------------
-# Visual-stripping helpers
-# ---------------------------
+    # raw source preserved for provenance and debugging
+    source: SourceProvenance = Field(default_factory=SourceProvenance)
 
-def is_visual_key(key: str) -> bool:
-    """Return True if the key name clearly refers to visual content."""
-    k = key.lower()
-    return any(sub in k for sub in VISUAL_KEY_SUBSTRINGS)
+    merged_from: Optional[Dict[str, Any]] = None
 
-
-def strip_visual_fields(obj):
-    """
-    Recursively remove any dict keys whose name looks visual-related
-    (image/video/etc). Works for nested dicts/lists.
-    """
-    if isinstance(obj, dict):
-        cleaned = {}
-        for k, v in obj.items():
-            if is_visual_key(k):
-                # Drop visual fields entirely
-                continue
-            cleaned[k] = strip_visual_fields(v)
-        return cleaned
-    elif isinstance(obj, list):
-        return [strip_visual_fields(x) for x in obj]
+    # conditional validator compatible with Pydantic v1 & v2
+    if _HAS_FIELD_VALIDATOR:
+        @field_validator("title")
+        @classmethod
+        def _title_validator(cls, v):
+            if not v or not str(v).strip():
+                raise ValueError("title must be a non-empty string")
+            return str(v).strip()
     else:
-        return obj
+        @validator("title")
+        @classmethod
+        def _title_validator(cls, v):
+            if not v or not str(v).strip():
+                raise ValueError("title must be a non-empty string")
+            return str(v).strip()
 
 
-# ---------------------------
-# URL & pagination helpers
-# ---------------------------
+# ------------------------
+# Utility helpers
+# ------------------------
+def load_json(path: str) -> Dict[str, Any]:
+    p = pathlib.Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    return json.loads(p.read_text(encoding="utf-8"))
 
-def add_api_params_to_url(url: str, api_key: str, extra_params=None) -> str:
+def save_json(data: Dict[str, Any], path: str) -> None:
+    """Saves a dictionary to a JSON file with indentation."""
+    p = pathlib.Path(path)
+    # default=str helps if any date objects slipped through without conversion
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+
+
+def _iso_date_from_rawg(rawg_date: Optional[str]) -> Optional[date]:
+    """RAWG uses YYYY-MM-DD in `released` typically. Return date object or None."""
+    if not rawg_date:
+        return None
+    try:
+        # Accept YYYY-MM-DD or YYYY
+        dt = datetime.fromisoformat(rawg_date)
+        return dt.date()
+    except Exception:
+        # Try partial parse
+        try:
+            return datetime.strptime(rawg_date, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+
+def _date_from_unix(ts: Optional[int]) -> Optional[date]:
+    if not ts:
+        return None
+    try:
+        return datetime.utcfromtimestamp(int(ts)).date()
+    except Exception:
+        return None
+
+
+def _list_union_normalize(a: Optional[List[Any]], b: Optional[List[Any]]) -> List[str]:
+    """Union two lists of strings/objects; when objects, try to extract `name` key."""
+    out = []
+    if a:
+        for item in a:
+            name = _extract_name_from_item(item)
+            if name:
+                out.append(name)
+    if b:
+        for item in b:
+            name = _extract_name_from_item(item)
+            if name:
+                out.append(name)
+    # normalize & dedupe preserving first-seen capitalization
+    seen = set()
+    result = []
+    for v in out:
+        key = v.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(v.strip())
+    return result
+
+def _extract_name_from_item(item: Any) -> Optional[str]:
+    """Extract a human-readable name from various possible item shapes.
+
+    Returns None for numeric-only ids (we don't want '48' leaking into platforms list).
     """
-    Safely append api_key, format=json and any extra_params to a URL that
-    may already contain query parameters.
+    if item is None:
+        return None
+    # dicts with 'name' or nested 'platform'/'genre' objects
+    if isinstance(item, dict):
+        # RAWG platform object: { "platform": { "id": 4, "name": "PC", ... }, ... }
+        if item.get("name") and isinstance(item.get("name"), str):
+            return item.get("name").strip()
+        if item.get("platform") and isinstance(item.get("platform"), dict) and item["platform"].get("name"):
+            return item["platform"]["name"].strip()
+        if item.get("genre") and isinstance(item.get("genre"), dict) and item["genre"].get("name"):
+            return item["genre"]["name"].strip()
+        if item.get("url") and isinstance(item.get("url"), str):
+            # not a name, skip
+            return None
+        # fallback: try slug
+        if item.get("slug") and isinstance(item.get("slug"), str):
+            slug = item.get("slug").strip()
+            if not slug.isdigit():
+                return slug
+        return None
+    # strings that are not purely numeric are OK
+    if isinstance(item, str):
+        s = item.strip()
+        if s and not re.fullmatch(r"\d+", s):
+            return s
+        return None
+    # ints / floats => numeric id, return None (do not include)
+    return None
+
+
+# ------------------------
+# Helpers to unwrap wrappers & detect content types
+# ------------------------
+def _looks_like_rawg(rec: Any) -> bool:
+    """Heuristic to decide whether a dict looks like a RAWG record."""
+    if not isinstance(rec, dict):
+        return False
+    if rec.get("description_raw") or rec.get("released") or rec.get("metacritic"):
+        return True
+    # RAWG often has platforms as list of dicts with a 'platform' key
+    platforms = rec.get("platforms")
+    if isinstance(platforms, list) and any(isinstance(p, dict) and p.get("platform") for p in platforms):
+        return True
+    return False
+
+def _looks_like_igdb(wrapper: Any) -> bool:
+    """Heuristic to decide whether wrapper is IGDB style (has records[0].clean)."""
+    if not isinstance(wrapper, dict):
+        return False
+    recs = wrapper.get("records")
+    if isinstance(recs, list) and recs:
+        first = recs[0]
+        if isinstance(first, dict) and isinstance(first.get("clean"), list):
+            return True
+        # IGDB records may have aggregated_rating or first_release_date on first-level
+        if isinstance(first, dict) and (first.get("aggregated_rating") or first.get("first_release_date")):
+            return True
+    # fallback: presence of numeric genre ids (list of ints) suggests IGDB un-resolved ids
+    if isinstance(wrapper.get("genres"), list) and wrapper.get("genres") and all(isinstance(x, int) for x in wrapper.get("genres")):
+        return True
+    return False
+
+def _get_rawg_record(rawg_wrapper: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the best candidate RAWG record from a wrapper or return the input if it already is a record."""
+    if not rawg_wrapper:
+        return {}
+    # If the wrapper contains an array of records, pick the first that looks like RAWG
+    if isinstance(rawg_wrapper, dict) and "records" in rawg_wrapper and isinstance(rawg_wrapper["records"], list) and rawg_wrapper["records"]:
+        for candidate in rawg_wrapper["records"]:
+            if _looks_like_rawg(candidate):
+                return candidate
+        return rawg_wrapper["records"][0]
+    # If this dict itself looks like RAWG, return it
+    if _looks_like_rawg(rawg_wrapper):
+        return rawg_wrapper
+    # fallback: return as-is
+    return rawg_wrapper
+
+def choose_igdb_clean_record(igdb_wrapper: Dict[str, Any], rawg_name: str = "", rawg_slug: str = "") -> Dict[str, Any]:
+    """Choose the best IGDB 'clean' record corresponding to the RAWG game.
+
+    Heuristics:
+    1) exact name match (case-insensitive)
+    2) exact slug match
+    3) substring name match
+    4) highest aggregated_rating / total_rating fallback
     """
-    if extra_params is None:
-        extra_params = {}
-
-    parsed = urlparse(url)
-    query = parse_qs(parsed.query)
-
-    # Flatten existing query values & add required params
-    merged = {k: v[-1] if isinstance(v, list) else v for k, v in query.items()}
-    merged.setdefault("format", "json")
-    merged.setdefault("api_key", api_key)
-
-    # Add/override with extra_params
-    merged.update(extra_params)
-
-    new_query = urlencode(merged, doseq=False)
-    new_parsed = parsed._replace(query=new_query)
-    return urlunparse(new_parsed)
-
-
-def fetch_all_pages_from_url(
-    raw_url: str,
-    api_key: str,
-    params=None,
-    delay_sec: float = 0.5,
-    max_retries: int = 3,
-):
-    """
-    Generic pagination helper for GameSpot-style endpoints that return:
-      - limit
-      - offset
-      - number_of_page_results
-      - number_of_total_results
-      - results
-
-    Robust to:
-      - Timeouts / connection errors
-      - 5xx (including 503 Service Unavailable)
-      - JSON decode errors (invalid / truncated JSON)
-
-    On repeated failure for a given endpoint, returns partial results
-    instead of crashing the whole run.
-    """
-    if params is None:
-        params = {}
-
-    all_results = []
-    offset = 0
-    limit = params.get("limit", 100)  # sensible default
-
-    while True:
-        page_params = dict(params)
-        page_params["offset"] = offset
-        page_params["limit"] = limit
-
-        url = add_api_params_to_url(raw_url, api_key, page_params)
-
-        # --- retry loop for this page ---
-        attempt = 0
-        backoff = 1.0
-        last_error = None
-        data = None
-
-        while attempt < max_retries:
-            try:
-                resp = requests.get(
-                    url,
-                    headers={"User-Agent": USER_AGENT},
-                    timeout=30,
-                )
-
-                # Retry explicitly on 503
-                if resp.status_code == 503:
-                    last_error = f"503 Service Unavailable for {url}"
-                    attempt += 1
-                    print(f"[WARN] {last_error} (attempt {attempt}/{max_retries}), retrying...")
-                    time.sleep(backoff)
-                    backoff *= 2
-                    continue
-
-                resp.raise_for_status()
-
-                # JSON decode can fail even if status is 200
-                try:
-                    data = resp.json()
-                except ValueError as e:  # includes JSONDecodeError
-                    last_error = f"JSON decode error for {url}: {e}"
-                    attempt += 1
-                    print(f"[WARN] {last_error} (attempt {attempt}/{max_retries}), retrying...")
-                    time.sleep(backoff)
-                    backoff *= 2
-                    continue
-
-                # If we got here, we have valid JSON
-                break
-
-            except (requests.exceptions.Timeout,
-                    requests.exceptions.ConnectionError) as e:
-                last_error = f"{type(e).__name__} while fetching {url}: {e}"
-                attempt += 1
-                print(f"[WARN] {last_error} (attempt {attempt}/{max_retries}), retrying...")
-                time.sleep(backoff)
-                backoff *= 2
-
-            except requests.exceptions.HTTPError as e:
-                status = getattr(e.response, "status_code", None)
-                if status in (500, 502, 503, 504):
-                    last_error = f"HTTP {status} while fetching {url}: {e}"
-                    attempt += 1
-                    print(f"[WARN] {last_error} (attempt {attempt}/{max_retries}), retrying...")
-                    time.sleep(backoff)
-                    backoff *= 2
-                else:
-                    # Non-retryable HTTP error (e.g. 404, 403, 400...)
-                    print(f"[ERROR] Non-retryable HTTP error {status} for {url}: {e}")
-                    print("[INFO] Returning partial results for this endpoint.")
-                    return all_results
-
+    if not igdb_wrapper:
+        return {}
+    clean_list = []
+    if isinstance(igdb_wrapper, dict) and isinstance(igdb_wrapper.get("records"), list) and igdb_wrapper["records"]:
+        first = igdb_wrapper["records"][0]
+        if isinstance(first, dict) and isinstance(first.get("clean"), list):
+            clean_list = first["clean"]
         else:
-            # Retries exhausted for this page
-            print(f"[ERROR] Failed to fetch/parse page after {max_retries} attempts: {raw_url}")
-            if last_error:
-                print(f"        Last error: {last_error}")
-            print("[INFO] Returning partial results for this endpoint.")
-            return all_results
+            # records may already be clean records
+            clean_list = igdb_wrapper["records"]
+    elif isinstance(igdb_wrapper, list):
+        clean_list = igdb_wrapper
 
-        # --- normal pagination logic once we have valid `data` ---
-        page_results = data.get("results", []) or []
-        all_results.extend(page_results)
+    if not clean_list:
+        return {}
 
-        number_of_page_results = data.get("number_of_page_results", len(page_results))
-        number_of_total_results = data.get("number_of_total_results", len(page_results))
+    rawg_name_l = (rawg_name or "").strip().lower()
+    rawg_slug_l = (rawg_slug or "").strip().lower()
 
-        if number_of_page_results == 0:
-            # No more results
-            break
+    # 1) exact name match
+    for r in clean_list:
+        if isinstance(r, dict) and r.get("name") and r["name"].strip().lower() == rawg_name_l:
+            return r
+    # 2) exact slug match
+    for r in clean_list:
+        if isinstance(r, dict) and r.get("slug") and r["slug"].strip().lower() == rawg_slug_l:
+            return r
+    # 3) substring match
+    for r in clean_list:
+        if isinstance(r, dict) and r.get("name") and rawg_name_l and rawg_name_l in r["name"].strip().lower():
+            return r
+    # 4) pick highest scored record
+    def score(r: Dict[str, Any]) -> float:
+        if not isinstance(r, dict):
+            return 0.0
+        return float(r.get("aggregated_rating") or r.get("total_rating") or r.get("rating") or 0.0)
+    best = max(clean_list, key=score)
+    return best if isinstance(best, dict) else {}
 
-        offset += number_of_page_results
-        if offset >= number_of_total_results:
-            # Reached the end
-            break
+def _get_igdb_record(igdb_wrapper: Dict[str, Any], rawg_rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a canonical IGDB cleaned record from the wrapper using selection heuristics."""
+    if not igdb_wrapper:
+        return {}
+    # If wrapper includes a 'clean' list, choose the best matching clean record
+    igdb_choice = choose_igdb_clean_record(igdb_wrapper, rawg_rec.get("name", ""), rawg_rec.get("slug", ""))
+    if igdb_choice:
+        return igdb_choice
+    # fallback: pick first record if looks like an IGDB record
+    if isinstance(igdb_wrapper, dict) and isinstance(igdb_wrapper.get("records"), list) and igdb_wrapper["records"]:
+        first = igdb_wrapper["records"][0]
+        # if first is a wrapper with .clean handled earlier, else if first itself is game record return first
+        if isinstance(first, dict) and not isinstance(first.get("clean"), list):
+            return first
+    # fallback to returning wrapper unchanged
+    return igdb_wrapper
 
-        time.sleep(delay_sec)
 
-    return all_results
+# ------------------------
+# Lightweight merge implementation (fixed)
+# ------------------------
+def merge_records(rawg: Dict[str, Any], igdb: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge two source dictionaries into a canonical dict that fits GameMerged.
 
-# ---------------------------
-# GameSpot fetchers
-# ---------------------------
-
-def fetch_games_by_name(api_key: str, name: str):
+    This implementation:
+    - detects which wrapper contains RAWG-style vs IGDB-style data
+    - unwraps wrapper(s) and picks the correct IGDB clean record matching RAWG
+    - normalizes lists to drop numeric-only ids
+    - properly prefixes unified_id based on which id is used
     """
-    Fetch all games matching the given name from /games/.
-    """
-    url = f"{BASE_URL}/games/"
-    params = {
-        "format": "json",
-        "api_key": api_key,
-        "filter": f"name:{name}",
-        "limit": 100,
-        "offset": 0,
+    merged: Dict[str, Any] = {}
+
+    # preserve raw wrappers for provenance
+    merged["source"] = {"rawg": rawg, "igdb": igdb}
+
+    # Detect if wrappers are swapped or which contains RAWG/IGDB
+    # Prefer to find RAWG-like content inside either wrapper
+    rawg_candidate = None
+    igdb_candidate = None
+
+    # First try to find RAWG-style content
+    if _looks_like_rawg(rawg):
+        rawg_candidate = rawg
+    elif _looks_like_rawg(igdb):
+        rawg_candidate = igdb
+
+    # Find IGDB-style wrapper
+    if _looks_like_igdb(igdb):
+        igdb_candidate = igdb
+    elif _looks_like_igdb(rawg):
+        igdb_candidate = rawg
+
+    # If detection failed, fallback to given labels
+    if rawg_candidate is None:
+        rawg_candidate = rawg
+    if igdb_candidate is None:
+        igdb_candidate = igdb
+
+    # Unwrap to actual record objects
+    rawg_rec = _get_rawg_record(rawg_candidate)
+    igdb_rec = _get_igdb_record(igdb_candidate, rawg_rec)
+
+    # IDs
+    merged["rawg_id"] = rawg_rec.get("id")
+    merged["igdb_id"] = igdb_rec.get("id")
+    # Build unified_id from the actual ID we have (prefer RAWG if present)
+    if merged["rawg_id"]:
+        merged["unified_id"] = f"rawg:{merged['rawg_id']}"
+    elif merged["igdb_id"]:
+        merged["unified_id"] = f"igdb:{merged['igdb_id']}"
+    else:
+        merged["unified_id"] = None
+
+    # Title / slug (prefer RAWG title but keep fallback to IGDB)
+    title = (
+        rawg_rec.get("name_original")
+        or rawg_rec.get("name")
+        or igdb_rec.get("name")
+        or igdb_rec.get("resolved_name")
+        or igdb_rec.get("slug")
+        or rawg_rec.get("slug")
+        or ""
+    )
+    merged["title"] = title.strip() if isinstance(title, str) else str(title)
+
+    merged["slug"] = (igdb_rec.get("slug") or rawg_rec.get("slug") or None)
+
+    # Description (prefer RAWG description_raw -> RAWG description -> IGDB summary -> IGDB storyline)
+    desc = None
+    if isinstance(rawg_rec, dict):
+        desc = rawg_rec.get("description_raw") or rawg_rec.get("description")
+    if not desc:
+        desc = igdb_rec.get("summary") or igdb_rec.get("storyline")
+    merged["description"] = desc.strip() if isinstance(desc, str) else None
+
+    # Release date: prefer RAWG 'released' (ISO string), else IGDB unix ts
+    rd = _iso_date_from_rawg(rawg_rec.get("released")) if isinstance(rawg_rec, dict) else None
+    if not rd:
+        rd = _date_from_unix(igdb_rec.get("first_release_date"))
+    merged["release_date"] = rd.isoformat() if rd else None
+
+    # Platforms, genres, tags: union and dedupe, with object-aware extraction
+    merged["platforms"] = _list_union_normalize(rawg_rec.get("platforms") if isinstance(rawg_rec, dict) else None,
+                                                igdb_rec.get("platforms") if isinstance(igdb_rec, dict) else None)
+    merged["genres"] = _list_union_normalize(rawg_rec.get("genres") if isinstance(rawg_rec, dict) else None,
+                                             igdb_rec.get("genres") if isinstance(igdb_rec, dict) else None)
+    merged["tags"] = _list_union_normalize(rawg_rec.get("tags") if isinstance(rawg_rec, dict) else None,
+                                           igdb_rec.get("tags") if isinstance(igdb_rec, dict) else None)
+
+    # Ratings
+    merged["ratings"] = {
+        "rawg": rawg_rec.get("rating") if isinstance(rawg_rec, dict) else None,
+        "igdb": (igdb_rec.get("aggregated_rating") or igdb_rec.get("total_rating") or igdb_rec.get("rating"))
+                if isinstance(igdb_rec, dict) else None,
+        "metacritic": rawg_rec.get("metacritic") if isinstance(rawg_rec, dict) else None,
+        "rawg_detail": rawg_rec.get("ratings") if isinstance(rawg_rec, dict) else None,
+        "igdb_detail": {k: igdb_rec.get(k) for k in ["aggregated_rating", "total_rating", "rating", "rating_count", "total_rating_count"] if isinstance(igdb_rec, dict) and igdb_rec.get(k) is not None}
     }
 
-    resp = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    # URLs collection
+    urls = set()
+    if isinstance(rawg_rec, dict):
+        if rawg_rec.get("website"):
+            urls.add(rawg_rec.get("website"))
+        if rawg_rec.get("metacritic_url"):
+            urls.add(rawg_rec.get("metacritic_url"))
+        for s in (rawg_rec.get("stores") or []):
+            if isinstance(s, dict) and s.get("url"):
+                urls.add(s.get("url"))
+    if isinstance(igdb_rec, dict):
+        if igdb_rec.get("url"):
+            urls.add(igdb_rec.get("url"))
+        # igdb may store `websites` as list of dicts or strings
+        for w in (igdb_rec.get("websites") or []):
+            if isinstance(w, dict) and w.get("url"):
+                urls.add(w.get("url"))
+            elif isinstance(w, str):
+                urls.add(w)
+    # filter out None and empty strings
+    merged["urls"] = [u for u in list(urls) if u]
 
-    games = data.get("results", []) or []
-
-    total = data.get("number_of_total_results", len(games))
-    page_count = data.get("number_of_page_results", len(games))
-    offset = data.get("offset", 0)
-    limit = data.get("limit", len(games))
-
-    all_games = list(games)
-    while offset + page_count < total:
-        offset += page_count
-        params["offset"] = offset
-        params["limit"] = limit
-
-        resp = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        games = data.get("results", []) or []
-        page_count = data.get("number_of_page_results", len(games))
-        all_games.extend(games)
-
-        if page_count == 0:
-            break
-
-        time.sleep(0.5)
-
-    return all_games
-
-
-def fetch_related_textual_data_for_game(game_obj: dict, api_key: str):
-    """
-    Given a single game object from /games/, fetch its related textual data:
-      - reviews
-      - articles
-      - releases
-    We intentionally skip purely visual collections (images, videos).
-    """
-    related = {}
-
-    reviews_url = game_obj.get("reviews_api_url")
-    articles_url = game_obj.get("articles_api_url")
-    releases_url = game_obj.get("releases_api_url")
-    # images_url = game_obj.get("images_api_url")   # skipped (visual)
-    # videos_url = game_obj.get("videos_api_url")   # skipped (visual)
-
-    if reviews_url:
-        related["reviews"] = fetch_all_pages_from_url(reviews_url, api_key)
-    else:
-        related["reviews"] = []
-
-    if articles_url:
-        related["articles"] = fetch_all_pages_from_url(articles_url, api_key)
-    else:
-        related["articles"] = []
-
-    if releases_url:
-        related["releases"] = fetch_all_pages_from_url(releases_url, api_key)
-    else:
-        related["releases"] = []
-
-    return related
-
-
-# ---------------------------
-# Main entry point
-# ---------------------------
-
-def main():
-    # Re-load env to be safe if run as module
-    load_dotenv()
-
-    gamespot_api_key = os.getenv("GAMESPOT_API_KEY")
-    if not gamespot_api_key:
-        raise RuntimeError("Please set GAMESPOT_API_KEY in your .env file")
-
-    # Determine the raw query:
-    # - If called like: python -m usage "Dark souls"
-    #   use that as input
-    # - Otherwise default to "Elden Ring"
-    if len(sys.argv) > 1:
-        raw_query = " ".join(sys.argv[1:])
-    else:
-        raw_query = "Elden Ring"
-
-    # Use RAWG to get normalized name
-    query_name = resolve_game_name(raw_query)
-
-    print(f"Fetching GameSpot data for '{query_name}' (textual only)...")
-
-    # 1. Fetch all matching games
-    games = fetch_games_by_name(gamespot_api_key, query_name)
-    print(f"Found {len(games)} game entries for query '{query_name}'.")
-
-    merged = {
-        "query": {
-            "requested": raw_query,
-            "resolved": query_name,
-        },
-        "games_count": len(games),
-        "games": [],
+    # merged_from: compute after unwrapping so decision is correct
+    merged["merged_from"] = {
+        "title_from": "rawg" if (isinstance(rawg_rec, dict) and (rawg_rec.get("name") or rawg_rec.get("name_original"))) else "igdb",
+        "description_from": "rawg" if (isinstance(rawg_rec, dict) and (rawg_rec.get("description_raw") or rawg_rec.get("description"))) else "igdb",
     }
 
-    # 2. For each game, fetch related textual endpoints
-    for game in games:
-        game_id = game.get("id")
-        game_name = game.get("name")
-        print(f"Processing game id={game_id}, name={game_name!r}...")
-
-        related_textual = fetch_related_textual_data_for_game(game, gamespot_api_key)
-
-        merged["games"].append(
-            {
-                "game": game,
-                "related": related_textual,
-            }
-        )
-
-    # 3. Strip all visual-related fields from the final structure
-    cleaned = strip_visual_fields(merged)
-
-    # Output file name based on resolved title (optional, safe filename)
-    safe_name = query_name.lower().replace(" ", "_")
-    output_file = f"{safe_name}_gamespot_full_textual.json"
-
-    # 4. Save to JSON
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(cleaned, f, ensure_ascii=False, indent=2)
-
-    print(f"\nDone. Saved merged textual data to: {output_file}")
+    return merged
 
 
+# ------------------------
+# Unit tests (pytest)
+# ------------------------
+def test_merge_and_schema_validation():
+    """Load the two sample JSONs and ensure the merged object conforms to GameMerged model."""
+    # Adjust paths if running locally without these specific /mnt paths
+    try:
+        rawg_path = "/mnt/data/far_cry_5_rawg.json"
+        igdb_path = "/mnt/data/far_cry_5_igdb.json"
+        rawg = load_json(rawg_path)
+        igdb = load_json(igdb_path)
+    except FileNotFoundError:
+        # Fallback for local testing if files are in CWD
+        rawg = load_json("far_cry_5_rawg.json")
+        igdb = load_json("far_cry_5_igdb.json")
+
+    merged_dict = merge_records(rawg, igdb)
+
+    # Basic sanity asserts before Pydantic validation
+    assert merged_dict.get("title"), "Merged title must be present"
+    # parse and validate
+    gm = GameMerged.parse_obj({
+        "unified_id": merged_dict.get("unified_id"),
+        "title": merged_dict.get("title"),
+        "slug": merged_dict.get("slug"),
+        "description": merged_dict.get("description"),
+        "release_date": merged_dict.get("release_date"),
+        "rawg_id": merged_dict.get("rawg_id"),
+        "igdb_id": merged_dict.get("igdb_id"),
+        "platforms": merged_dict.get("platforms"),
+        "genres": merged_dict.get("genres"),
+        "tags": merged_dict.get("tags"),
+        "ratings": merged_dict.get("ratings"),
+        "urls": merged_dict.get("urls"),
+        "source": merged_dict.get("source"),
+        "merged_from": merged_dict.get("merged_from"),
+    })
+
+    # Validate a few expectations
+    assert gm.title.lower().startswith("far cry") or "far cry" in gm.title.lower()
+    
+    if gm.release_date:
+        assert isinstance(gm.release_date, date)
+
+    # Ratings keeps per-source keys
+    assert hasattr(gm.ratings, "rawg")
+    assert hasattr(gm.ratings, "igdb")
+
+
+def test_key_merge_tactics_applied():
+    """Test that preferred sources were used for title/description when present."""
+    try:
+        rawg = load_json("/mnt/data/far_cry_5_rawg.json")
+        igdb = load_json("/mnt/data/far_cry_5_igdb.json")
+    except FileNotFoundError:
+        rawg = load_json("far_cry_5_rawg.json")
+        igdb = load_json("far_cry_5_igdb.json")
+
+    merged = merge_records(rawg, igdb)
+
+    # If RAWG provided description_raw we should have taken it
+    # But because the wrapper may be present, inspect rawg wrapper for description_raw if top-level missing
+    rawg_rec = _get_rawg_record(rawg)
+    if isinstance(rawg_rec, dict) and rawg_rec.get("description_raw"):
+        assert merged.get("description") == rawg_rec.get("description_raw").strip()
+
+    # Slug should prefer IGDB if present
+    igdb_rec = _get_igdb_record(igdb, rawg_rec)
+    if isinstance(igdb_rec, dict) and igdb_rec.get("slug"):
+        assert merged.get("slug") == igdb_rec.get("slug")
+
+    # Platforms should be a list
+    assert isinstance(merged.get("platforms"), list)
+
+
+# If module run directly, execute merge and save file
 if __name__ == "__main__":
-    main()
+    try:
+        # Ensure these files exist in your directory (fallback order preserved)
+        try:
+            rawg = load_json("/mnt/data/far_cry_5_rawg.json")
+            igdb = load_json("/mnt/data/far_cry_5_igdb.json")
+        except FileNotFoundError:
+            rawg = load_json("far_cry_5_rawg.json")
+            igdb = load_json("far_cry_5_igdb.json")
+        
+        merged = merge_records(rawg, igdb)
+        
+        output_filename = "merged_far_cry_5.json"
+        save_json(merged, output_filename)
+        
+        print(f"Success! Merged data saved to: {output_filename}")
+        
+    except Exception as e:
+        print(f"Error: {e}")

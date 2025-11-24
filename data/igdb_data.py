@@ -161,7 +161,7 @@ def fetch_igdb_game_data(
     return {
         "query_name": query,
         "resolved_name": resolved,
-        "raw": raw_records,
+        #"raw": raw_records,
         "clean": clean_records,
     }
 

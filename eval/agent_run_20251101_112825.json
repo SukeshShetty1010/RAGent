@@ -1,9 +1,0 @@
-{
-  "timestamp": "2025-11-01T05:58:25.591752+00:00",
-  "query": "What are the latest headlines about GTA VI?",
-  "latency_total": 403.598,
-  "citations_count": 0,
-  "automation_depth": 5,
-  "grounding_fidelity": 0.94,
-  "task_completion": 1.0
-}

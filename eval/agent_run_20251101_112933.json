@@ -1,9 +1,0 @@
-{
-  "timestamp": "2025-11-01T05:59:33.841049+00:00",
-  "query": "Tell me about the newest shooter games released this month.",
-  "latency_total": 67.852,
-  "citations_count": 0,
-  "automation_depth": 5,
-  "grounding_fidelity": 0.94,
-  "task_completion": 1.0
-}
