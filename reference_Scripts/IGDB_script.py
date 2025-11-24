@@ -1,68 +1,160 @@
 import os
+import json
+import time
 import requests
 from dotenv import load_dotenv
 
+# ======================================
+# Load environment variables
+# ======================================
+
 load_dotenv()
-CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
-CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 
-if not CLIENT_ID or not CLIENT_SECRET:
-    raise RuntimeError("Missing Twitch credentials")
+# RAWG API
+RAWG_API_KEY = os.getenv("RAWG_API_KEY")
 
-def get_token():
-    url = "https://id.twitch.tv/oauth2/token"
+# IGDB API
+TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
+TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
+
+TOKEN_URL = "https://id.twitch.tv/oauth2/token"
+IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
+
+# Visual/media keys to remove
+VISUAL_KEYS = {"artworks", "cover", "screenshots", "videos"}
+
+
+# ======================================
+# RAWG — Find Correct Game Name
+# ======================================
+
+def get_correct_game_name(query: str) -> str | None:
+    """Return the official game name using RAWG search."""
+
+    if not RAWG_API_KEY:
+        raise ValueError("Missing RAWG_API_KEY in .env file!")
+
+    url = "https://api.rawg.io/api/games"
     params = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "client_credentials"
+        "key": RAWG_API_KEY,
+        "search": query,
+        "page_size": 1,
     }
-    resp = requests.post(url, params=params)
+
+    try:
+        res = requests.get(url, params=params)
+        res.raise_for_status()
+        data = res.json()
+
+        if data.get("results"):
+            return data["results"][0].get("name")
+
+        return None
+
+    except Exception as e:
+        print(f"RAWG error: {e}")
+        return None
+
+
+# ======================================
+# IGDB — Authentication + Request
+# ======================================
+
+def get_twitch_token() -> str:
+    """Get OAuth token for IGDB."""
+    resp = requests.post(
+        TOKEN_URL,
+        data={
+            "client_id": TWITCH_CLIENT_ID,
+            "client_secret": TWITCH_CLIENT_SECRET,
+            "grant_type": "client_credentials",
+        },
+        timeout=30,
+    )
     resp.raise_for_status()
     return resp.json()["access_token"]
 
-def fetch_game_data(query, limit=3):
-    token = get_token()
+
+def igdb_fetch(query: str, token: str):
+    """POST to IGDB /games with the given query."""
     headers = {
-        "Client-ID": CLIENT_ID,
-        "Authorization": f"Bearer {token}"
+        "Client-ID": TWITCH_CLIENT_ID,
+        "Authorization": f"Bearer {token}",
     }
-    endpoint = "https://api.igdb.com/v4/games"
+    resp = requests.post(IGDB_GAMES_URL, headers=headers, data=query, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
 
-    # 1) Try exact search
-    body1 = f'search "{query}"; fields *; limit {limit};'
-    resp1 = requests.post(endpoint, headers=headers, data=body1)
-    if resp1.status_code == 200:
-        results1 = resp1.json()
-        if results1:
-            return results1
 
-    # 2) Try wildcard / partial match
-    normalized = query.replace("’", "'").strip()
-    body2 = f'fields *; where name ~ *"{normalized}"*; limit {limit};'
-    resp2 = requests.post(endpoint, headers=headers, data=body2)
-    if resp2.status_code == 200:
-        results2 = resp2.json()
-        if results2:
-            return results2
+# ======================================
+# Cleaning logic (strip visual fields)
+# ======================================
 
-    # 3) Fallback to last word keyword
-    keywords = normalized.split()
-    if keywords:
-        key = keywords[-1]
-        body3 = f'fields *; where name ~ *"{key}"*; limit {limit};'
-        resp3 = requests.post(endpoint, headers=headers, data=body3)
-        if resp3.status_code == 200:
-            return resp3.json()
+def strip_visual_fields(records, visual_keys):
+    cleaned = []
+    for item in records:
+        cleaned_item = {k: v for k, v in item.items() if k not in visual_keys}
+        cleaned.append(cleaned_item)
+    return cleaned
 
-    # No result
-    return []
+
+# ======================================
+# Main workflow
+# ======================================
+
+def full_pipeline(user_input_name: str):
+    # 1. RAWG → Correct name
+    print(f"🔍 Searching RAWG for correct name for: {user_input_name}")
+    correct_name = get_correct_game_name(user_input_name)
+
+    if not correct_name:
+        print("❌ No matching game found on RAWG.")
+        return
+
+    print(f"✔ Correct RAWG name found: {correct_name}")
+
+    # 2. IGDB → OAuth Token
+    print("🔐 Getting Twitch/IGDB auth token...")
+    token = get_twitch_token()
+    print("✔ Token received.")
+
+    # 3. IGDB Query (fields *)
+    print("🎮 Fetching FULL IGDB data...")
+    query = f"""
+        fields *;
+        search "{correct_name}";
+        limit 500;
+    """
+
+    data = igdb_fetch(query=query, token=token)
+    print(f"✔ Retrieved {len(data)} game records from IGDB.")
+
+    # File names
+    timestamp = int(time.time())
+    raw_file = f"{correct_name.lower().replace(' ', '_')}_igdb_full_{timestamp}.json"
+    clean_file = f"{correct_name.lower().replace(' ', '_')}_igdb_clean_{timestamp}.json"
+
+    # 4. Save raw data
+    with open(raw_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"💾 Raw IGDB data saved → {raw_file}")
+
+    # 5. Strip visual fields
+    cleaned_data = strip_visual_fields(data, VISUAL_KEYS)
+
+    with open(clean_file, "w", encoding="utf-8") as f:
+        json.dump(cleaned_data, f, indent=2, ensure_ascii=False)
+    print(f"💾 Cleaned IGDB metadata saved → {clean_file}")
+
+    print("\n🎉 Pipeline complete!")
+    print("Raw file :", raw_file)
+    print("Clean file:", clean_file)
+
+
+# ======================================
+# Run
+# ======================================
 
 if __name__ == "__main__":
-    q = input("Enter game title or keyword: ").strip()
-    print(f"\nFetching full IGDB data for '{q}' …\n")
-    results = fetch_game_data(q, limit=3)
-    if not results:
-        print("No results found.")
-    else:
-        import json
-        print(json.dumps(results, indent=2))
+    game_input = input("Enter game name: ")
+    full_pipeline(game_input)
