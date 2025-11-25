@@ -1,29 +1,11 @@
-# merge.py
-"""
-merge.py
-
-CLI + functions to:
-  - call loader.fetch_all_sources(game_name)
-  - merge the returned RAWG / IGDB / GameSpot payloads using merge_three_sources
-  - validate/coerce with GameMerged (pydantic)
-  - save merged JSON to disk
-
-Usage:
-  python merge.py --game "Elden Ring" --outdir ./out
-"""
+# merge_three_sources.py
 from __future__ import annotations
-
-import argparse
 import json
-import os
-import re
 import pathlib
+import re
 from typing import Any, Dict, List, Optional
 from datetime import datetime, date
 from pydantic import BaseModel, Field, AnyUrl
-
-# Import the loader that fetches per-source payloads
-from ingest.loader import fetch_all_sources, _safe_name  # reuse _safe_name helper for filenames
 
 # reuse helpers & parts of your rough.py design (validators + normalization)
 try:
@@ -33,6 +15,7 @@ except Exception:
     from pydantic import validator
     _HAS_FIELD_VALIDATOR = False
 
+# ---------- Pydantic schema (extended) ----------
 class Ratings(BaseModel):
     rawg: Optional[float] = None
     igdb: Optional[float] = None
@@ -47,9 +30,6 @@ class SourceProvenance(BaseModel):
     igdb: Optional[Dict[str, Any]] = None
     gamespot: Optional[Dict[str, Any]] = None
 
-def save_json(data: Any, path: str) -> None:
-    p = pathlib.Path(path)
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
 
 class GameMerged(BaseModel):
     # canonical top-level fields
@@ -109,6 +89,41 @@ class GameMerged(BaseModel):
                 raise ValueError("title must be a non-empty string")
             return str(v).strip()
 
+
+# ---------- Utilities (based on your rough.py helpers) ----------
+def load_json(path: str) -> Dict[str, Any]:
+    p = pathlib.Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def save_json(data: Any, path: str) -> None:
+    p = pathlib.Path(path)
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+
+
+def _iso_date_from_rawg(rawg_date: Optional[str]) -> Optional[date]:
+    if not rawg_date:
+        return None
+    try:
+        return datetime.fromisoformat(rawg_date).date()
+    except Exception:
+        try:
+            return datetime.strptime(rawg_date, "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+
+def _date_from_unix(ts: Optional[int]) -> Optional[date]:
+    if not ts:
+        return None
+    try:
+        return datetime.utcfromtimestamp(int(ts)).date()
+    except Exception:
+        return None
+
+
 def _extract_name_from_item(item: Any) -> Optional[str]:
     if item is None:
         return None
@@ -134,49 +149,6 @@ def _extract_name_from_item(item: Any) -> Optional[str]:
     return None
 
 
-def _strip_html(html: Optional[str]) -> Optional[str]:
-    if not html or not isinstance(html, str):
-        return None
-    # extremely simple html stripper (conservative)
-    text = re.sub(r"<[^>]+>", "", html)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text or None
-
-
-def _parse_gamespot_date(val: Optional[str]) -> Optional[str]:
-    if not val:
-        return None
-    # try ISO parse, else try common formats, else return raw
-    try:
-        dt = datetime.fromisoformat(val)
-        return dt.date().isoformat()
-    except Exception:
-        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d %b %Y"):
-            try:
-                return datetime.strptime(val, fmt).date().isoformat()
-            except Exception:
-                continue
-    return val  # fallback: keep original
-
-def _iso_date_from_rawg(rawg_date: Optional[str]) -> Optional[date]:
-    if not rawg_date:
-        return None
-    try:
-        return datetime.fromisoformat(rawg_date).date()
-    except Exception:
-        try:
-            return datetime.strptime(rawg_date, "%Y-%m-%d").date()
-        except Exception:
-            return None
-
-def _date_from_unix(ts: Optional[int]) -> Optional[date]:
-    if not ts:
-        return None
-    try:
-        return datetime.utcfromtimestamp(int(ts)).date()
-    except Exception:
-        return None
-
 def _list_union_normalize(*lists: Optional[List[Any]]) -> List[str]:
     out = []
     for a in lists:
@@ -194,6 +166,8 @@ def _list_union_normalize(*lists: Optional[List[Any]]) -> List[str]:
             result.append(v.strip())
     return result
 
+
+# ---------- GameSpot helpers ----------
 def _collect_gamespot_buckets(gamespot_wrapper: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract normalized gamespot structure:
@@ -250,6 +224,32 @@ def _collect_gamespot_buckets(gamespot_wrapper: Dict[str, Any]) -> Dict[str, Any
                 "notes": rel.get("notes") or None
             })
     return out
+
+
+def _strip_html(html: Optional[str]) -> Optional[str]:
+    if not html or not isinstance(html, str):
+        return None
+    # extremely simple html stripper (conservative)
+    text = re.sub(r"<[^>]+>", "", html)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
+def _parse_gamespot_date(val: Optional[str]) -> Optional[str]:
+    if not val:
+        return None
+    # try ISO parse, else try common formats, else return raw
+    try:
+        dt = datetime.fromisoformat(val)
+        return dt.date().isoformat()
+    except Exception:
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d %b %Y"):
+            try:
+                return datetime.strptime(val, fmt).date().isoformat()
+            except Exception:
+                continue
+    return val  # fallback: keep original
+
 
 # ---------- Merge logic (three sources) ----------
 def merge_three_sources(rawg: Dict[str, Any], igdb: Dict[str, Any], gamespot: Dict[str, Any]) -> Dict[str, Any]:
@@ -567,150 +567,56 @@ def merge_three_sources(rawg: Dict[str, Any], igdb: Dict[str, Any], gamespot: Di
 
     return merged
 
-# Helper: ensure we pass wrappers the merger expects
-def _normalize_loader_payloads(results: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    loader.fetch_all_sources returns:
-      { "rawg": [ ... ], "igdb": [ ... ], "gamespot": [ ... ] }
 
-    merge_three_sources expects wrappers that are dict-like (it contains heuristics
-    that will handle dicts shaped like {"records": [...] } or raw dict objects).
-    We'll wrap the lists into `{"records": ...}` for RAWG/IGDB, and pick the
-    first GameSpot entry (gamespot fetch returns merged 'game' wrappers).
-    """
-    rawg_list = results.get("rawg") or []
-    igdb_list = results.get("igdb") or []
-    gamespot_list = results.get("gamespot") or []
-
-    rawg_wrapper = {}
-    igdb_wrapper = {}
-    gamespot_wrapper = {}
-
-    if isinstance(rawg_list, list):
-        # Some fetchers return a single dict; if so, wrap appropriately.
-        if len(rawg_list) == 1 and isinstance(rawg_list[0], dict):
-            # RAWG fetcher returns the detailed RAWG object in a single element
-            rawg_wrapper = rawg_list[0]
-        else:
-            rawg_wrapper = {"records": rawg_list}
-
-    if isinstance(igdb_list, list):
-        if len(igdb_list) == 1 and isinstance(igdb_list[0], dict) and (
-            "raw" in igdb_list[0] or "clean" in igdb_list[0] or "records" in igdb_list[0]
-        ):
-            # igdb_data.fetch_igdb_game_data returns a dict with 'raw' and 'clean'
-            igdb_wrapper = igdb_list[0]
-        elif len(igdb_list) == 1 and isinstance(igdb_list[0], dict):
-            igdb_wrapper = igdb_list[0]
-        else:
-            igdb_wrapper = {"records": igdb_list}
-
-    # gamespot fetch returns list of one merged wrapper, take the first dict if present
-    if isinstance(gamespot_list, list) and gamespot_list:
-        # gamespot_data.fetch_gamespot_data returns merged structure inside the first element
-        gp = gamespot_list[0]
-        # If the loader already returned a dict shaped like {"games": [...]}, keep it
-        if isinstance(gp, dict) and ("games" in gp or "query" in gp or "games_count" in gp):
-            gamespot_wrapper = gp
-        else:
-            # otherwise wrap
-            gamespot_wrapper = {"games": gamespot_list}
-
-    return {"rawg": rawg_wrapper, "igdb": igdb_wrapper, "gamespot": gamespot_wrapper}
-
-
-def merge_and_save(game_name: str, outdir: str = ".", validate: bool = True) -> str:
-    """
-    Fetches all sources for game_name, merges them, validates using GameMerged,
-    and writes a merged JSON file to outdir. Returns the path to the saved file.
-    """
-    os.makedirs(outdir, exist_ok=True)
-
-    # 1) Fetch the source payloads using loader helper
-    print(f"[fetch] Pulling RAWG / IGDB / GameSpot data for: {game_name!r}")
-    results = fetch_all_sources(game_name, strip_visual=True)
-
-    # 2) Normalize wrappers for merger
-    wrapped = _normalize_loader_payloads(results)
-
-    # 3) Merge using your merge_three_sources logic
-    merged = merge_three_sources(wrapped.get("rawg"), wrapped.get("igdb"), wrapped.get("gamespot"))
-
-    # 4) Validate/coerce with GameMerged (if available and requested)
-    if validate and "GameMerged" in globals():
-        try:
-            gm = GameMerged.parse_obj({
-                "unified_id": merged.get("unified_id"),
-                "title": merged.get("title"),
-                "slug": merged.get("slug"),
-                "description": merged.get("description"),
-                "release_date": merged.get("release_date"),
-                "release_year": merged.get("release_year"),
-                "release_dates": merged.get("release_dates"),
-                "rawg_id": merged.get("rawg_id"),
-                "igdb_id": merged.get("igdb_id"),
-                "gamespot_id": merged.get("gamespot_id"),
-                "platforms": merged.get("platforms"),
-                "genres": merged.get("genres"),
-                "tags": merged.get("tags"),
-                "themes": merged.get("themes"),
-                "developers": merged.get("developers"),
-                "publishers": merged.get("publishers"),
-                "age_ratings": merged.get("age_ratings"),
-                "esrb_rating": merged.get("esrb_rating"),
-                "ratings": merged.get("ratings"),
-                "urls": merged.get("urls"),
-                "websites": merged.get("websites"),
-                "stores": merged.get("stores"),
-                "gamespot": merged.get("gamespot"),
-                "documents": merged.get("documents"),
-                "source": merged.get("source"),
-                "merged_from": merged.get("merged_from"),
-            })
-            to_save = gm.dict()
-        except Exception as e:
-            # Validation failed — fall back to raw merged dict but warn
-            print("[warning] Validation with GameMerged failed:", e)
-            to_save = merged
-    else:
-        to_save = merged
-
-    # 5) Safe filename and save
-    safe = _safe_name(game_name)
-    out_path = os.path.join(outdir, f"{safe}_merged.json")
-    # If CMP_Merge provided save_json helper, use it (it keeps default=str and nice encoding)
-    try:
-        # CMP_Merge's save_json signature: save_json(data, path)
-        save_json(to_save, out_path)  # type: ignore
-    except Exception:
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(to_save, f, indent=2, ensure_ascii=False, default=str)
-
-    print(f"[saved] Merged file written to: {out_path}")
-    return out_path
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Fetch + merge RAWG, IGDB, GameSpot into unified JSON")
-    parser.add_argument("--game", "-g", help="Game name to fetch and merge")
-    parser.add_argument("--outdir", "-o", default=".", help="Output directory")
-    parser.add_argument("--no-validate", dest="validate", action="store_false", help="Skip pydantic validation")
+# ---------- CLI / convenience runner ----------
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Merge RAWG + IGDB + GameSpot JSON into unified schema")
+    parser.add_argument("--rawg", default="far_cry_5_rawg.json", help="Path to RAWG JSON")
+    parser.add_argument("--igdb", default="far_cry_5_igdb.json", help="Path to IGDB JSON")
+    parser.add_argument("--gamespot", default="far_cry_5_gamespot_full_textual.json", help="Path to GameSpot full textual JSON")
+    parser.add_argument("--out", default="merged_three_sources.json", help="Output filename")
     args = parser.parse_args()
 
-    game = args.game
-    if not game:
-        try:
-            game = input("Enter game name to fetch & merge: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nExiting.")
-            return
+    try:
+        rawg = load_json(args.rawg)
+        igdb = load_json(args.igdb)
+        gamespot = load_json(args.gamespot)
+    except FileNotFoundError as e:
+        print("File missing:", e)
+        raise SystemExit(1)
 
-    if not game:
-        print("Game name required.")
-        return
+    merged = merge_three_sources(rawg, igdb, gamespot)
 
-    merge_and_save(game, outdir=args.outdir, validate=args.validate)
+    # Validate with Pydantic (coerce types) and save
+    gm = GameMerged.parse_obj({
+        "unified_id": merged.get("unified_id"),
+        "title": merged.get("title"),
+        "slug": merged.get("slug"),
+        "description": merged.get("description"),
+        "release_date": merged.get("release_date"),
+        "release_year": merged.get("release_year"),
+        "release_dates": merged.get("release_dates"),
+        "rawg_id": merged.get("rawg_id"),
+        "igdb_id": merged.get("igdb_id"),
+        "gamespot_id": merged.get("gamespot_id"),
+        "platforms": merged.get("platforms"),
+        "genres": merged.get("genres"),
+        "tags": merged.get("tags"),
+        "themes": merged.get("themes"),
+        "developers": merged.get("developers"),
+        "publishers": merged.get("publishers"),
+        "age_ratings": merged.get("age_ratings"),
+        "esrb_rating": merged.get("esrb_rating"),
+        "ratings": merged.get("ratings"),
+        "urls": merged.get("urls"),
+        "websites": merged.get("websites"),
+        "stores": merged.get("stores"),
+        "gamespot": merged.get("gamespot"),
+        "documents": merged.get("documents"),
+        "source": merged.get("source"),
+        "merged_from": merged.get("merged_from"),
+    })
 
-
-if __name__ == "__main__":
-    main()
+    save_json(gm.dict(), args.out)
+    print("Merged file saved to:", args.out)

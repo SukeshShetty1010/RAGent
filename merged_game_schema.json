@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "file:///mnt/data/merged_three_sources.json",
+  "title": "MergedGame",
+  "description": "Unified JSON schema for merged RAWG + IGDB + GameSpot game records.",
+  "type": "object",
+  "required": ["title"],
+  "additionalProperties": false,
+  "properties": {
+    "unified_id": {
+      "type": ["string", "null"],
+      "description": "Canonical merged id (e.g. 'rawg:12345' or 'igdb:5678')."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical game title (non-empty)."
+    },
+    "slug": {
+      "type": ["string", "null"],
+      "description": "Canonical slug (prefer IGDB or computed)."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Long-form description (HTML stripped where applicable)."
+    },
+
+    "release_date": {
+      "type": ["string", "null"],
+      "format": "date",
+      "description": "Primary release date (ISO format)."
+    },
+    "release_year": {
+      "type": ["integer", "null"],
+      "minimum": 1950,
+      "maximum": 2100
+    },
+    "release_dates": {
+      "type": "array",
+      "description": "List of release date records: platform, region, date, source.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "platform": { "type": ["string", "null"] },
+          "region": { "type": ["string", "null"] },
+          "date": { "type": ["string", "null"], "format": "date" },
+          "source": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "rawg_id": { "type": ["integer", "null"] },
+    "igdb_id": { "type": ["integer", "null"] },
+    "gamespot_id": { "type": ["string", "null"] },
+
+    "platforms": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "genres": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "themes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+
+    "developers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "publishers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+
+    "age_ratings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "esrb_rating": {
+      "type": ["string", "null"]
+    },
+
+    "ratings": {
+      "type": "object",
+      "properties": {
+        "rawg": { "type": ["number", "null"] },
+        "igdb": { "type": ["number", "null"] },
+        "metacritic": { "type": ["integer", "null"] },
+
+        "rawg_detail": {
+          "description": "RAWG rating breakdown; can be list or dict.",
+          "anyOf": [
+            { "type": "object", "additionalProperties": true },
+            { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+          ]
+        },
+        "igdb_detail": {
+          "description": "IGDB rating detail; can be list or dict.",
+          "anyOf": [
+            { "type": "object", "additionalProperties": true },
+            { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+          ]
+        },
+
+        "normalized_0_100": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "urls": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "format": "uri" }
+    },
+    "websites": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "format": "uri" }
+    },
+    "stores": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+
+    "gamespot": {
+      "type": "object",
+      "description": "Normalized GameSpot buckets.",
+      "properties": {
+        "game_info": {
+          "type": ["object", "null"],
+          "additionalProperties": true
+        },
+        "articles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": ["string", "integer", "null"] },
+              "title": { "type": ["string", "null"] },
+              "authors": {
+                "type": ["string", "array", "null"],
+                "items": { "type": "string" }
+              },
+              "deck": { "type": ["string", "null"] },
+              "body_html": { "type": ["string", "null"] },
+              "body_text": { "type": ["string", "null"] },
+              "site_detail_url": { "type": ["string", "null"], "format": "uri" },
+              "categories": {
+                "type": "array",
+                "items": { "type": "object", "additionalProperties": true }
+              },
+              "associations": {
+                "type": "array",
+                "items": { "type": "object", "additionalProperties": true }
+              },
+              "published_at": { "type": ["string", "null"], "format": "date" },
+              "updated_at": { "type": ["string", "null"], "format": "date" }
+            }
+          }
+        },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": ["string", "integer", "null"] },
+              "title": { "type": ["string", "null"] },
+              "author": { "type": ["string", "null"] },
+              "site_detail_url": { "type": ["string", "null"], "format": "uri" },
+              "review_text": { "type": ["string", "null"] },
+              "score": { "type": ["number", "null"] },
+              "published_at": { "type": ["string", "null"], "format": "date" }
+            }
+          }
+        },
+        "releases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "platform": { "type": ["string", "null"] },
+              "region": { "type": ["string", "null"] },
+              "date": { "type": ["string", "null"], "format": "date" },
+              "notes": { "type": ["string", "null"] }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "documents": {
+      "type": "array",
+      "description": "Flattened textual documents for RAG ingestion.",
+      "items": {
+        "type": "object",
+        "required": ["source"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": ["string", "integer", "null"] },
+          "source": { "type": "string" },
+          "title": { "type": ["string", "null"] },
+          "content": { "type": ["string", "null"] },
+          "excerpt": { "type": ["string", "null"] },
+          "created_at": { "type": ["string", "null"], "format": "date" },
+          "meta": { "type": ["object", "null"], "additionalProperties": true }
+        }
+      }
+    },
+
+    "source": {
+      "type": "object",
+      "description": "Raw source payloads (RAWG, IGDB, GameSpot).",
+      "properties": {
+        "rawg": { "type": ["object", "null"], "additionalProperties": true },
+        "igdb": { "type": ["object", "null"], "additionalProperties": true },
+        "gamespot": { "type": ["object", "null"], "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+
+    "merged_from": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Tracks which source each field was taken from."
+    }
+  }
+}
