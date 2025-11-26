@@ -1,20 +1,11 @@
 RAG_ent/
 │
-├── auth/                               # API Client Layer
-│   ├── __init__.py
-│   ├── rawg_client.py                  # RAWG API client
-│   ├── igdb_client.py                  # IGDB API client
-│   └── gamespot_client.py              # GameSpot API client
-│
 ├── data/                               # Source Data Wrappers & Processing
-│   ├── __init__.py
 │   ├── rawg_data.py                    # Parse RAWG → structured fields
 │   ├── igdb_data.py                    # Parse IGDB → structured fields
 │   ├── gamespot_data.py                # Parse GameSpot → structured fields
-│   └── helper.py                       # Utility fns (slugify, normalize, etc.)
 │
 ├── ingest/                             # Ingestion + Transformation Pipeline
-│   ├── __init__.py
 │   ├── loader.py                       # Load + normalize per-source canonical & docs
 │   ├── merge.py                        # Merge RAWG/IGDB/GameSpot → single canonical
 │   ├── chunking.py                     # Split long docs into semantic chunks
