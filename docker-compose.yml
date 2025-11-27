@@ -1,40 +1,48 @@
-# docker-compose.yml
+version: "3.8"
+
 services:
   weaviate:
     image: semitechnologies/weaviate:1.27.0
     container_name: weaviate
     ports:
-      - "8080:8080"
-      - "50051:50051"
-
+      - "8080:8080"     # HTTP API / console
+      - "50051:50051"   # gRPC (optional; some clients use it)
     environment:
-      QUERY_DEFAULTS_LIMIT: 25
-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
-      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
-      DEFAULT_VECTORIZER_MODULE: 'none'
-      ENABLE_MODULES: ''
-      CLUSTER_GOSSIP_BIND_PORT: 7000
-      CLUSTER_DATA_BIND_PORT: 7001
-      WEAVIATE_SERVER_MAX_MEMORY: 8G
-
+      # Core config
+      - QUERY_DEFAULTS_LIMIT=25
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - DEFAULT_VECTORIZER_MODULE=none
+      - ENABLE_MODULES=
+      # Networking / clustering (single node)
+      - CLUSTER_GOSSIP_BIND_PORT=7000
+      - CLUSTER_DATA_BIND_PORT=7001
+      # Resource hint (Weaviate respects available container memory; this sets a soft cap)
+      - WEAVIATE_SERVER_MAX_MEMORY=8G
+      # OPTIONAL: tune runtime behavior (uncomment if needed)
+      # - CACHE_SIZE=1000000
     volumes:
       - weaviate_data:/var/lib/weaviate
     restart: unless-stopped
+    # Basic healthcheck — returns healthy when Weaviate readiness endpoint responds 200
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/.well-known/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
-  # Optional: GPU-accelerated embedding service (future)
+  # Optional external embedder (commented). Use if you want an in-container embedding API.
   # embedder:
   #   image: ghcr.io/huggingface/text-embeddings-inference:latest
+  #   container_name: embedder
   #   ports:
-  #     - "8081:80"
+  #     - "8081:80"        # expose inference HTTP API
   #   environment:
   #     - MODEL_ID=sentence-transformers/all-MiniLM-L6-v2
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: 1
-  #             capabilities: [gpu]
+  #   restart: unless-stopped
+  #   # If you want GPU support you must run with the correct runtime (nvidia) and
+  #   # configure resources on your host.
 
 volumes:
   weaviate_data:

@@ -1,0 +1,22 @@
+{
+  "class": "GameChunk",
+  "vectorizer": "none",
+  "description": "Chunks of merged game documents with metadata for retrieval and citation.",
+  "properties": [
+    { "name": "unified_id", "dataType": ["string"], "description": "merged_game unified_id (if available)" },
+    { "name": "doc_id", "dataType": ["string"], "description": "original document id (source-specific)" },
+    { "name": "source", "dataType": ["string"], "description": "source name: rawg | igdb | gamespot | merged" },
+    { "name": "title", "dataType": ["string"], "description": "game title" },
+    { "name": "chunk_index", "dataType": ["int"], "description": "index of chunk within document" },
+    { "name": "text", "dataType": ["text"], "description": "actual chunk text (if you want DB to hold it)" },
+    { "name": "char_length", "dataType": ["int"], "description": "length of chunk in chars" },
+    { "name": "content_hash", "dataType": ["string"], "description": "dedupe hash computed at chunking time" },
+    { "name": "release_date", "dataType": ["string"], "description": "release_date if present" },
+    { "name": "release_year", "dataType": ["int"], "description": "release_year (for filtering)" },
+    { "name": "platforms", "dataType": ["string[]"], "description": "platforms list" },
+    { "name": "genres", "dataType": ["string[]"], "description": "genres list" },
+    { "name": "developers", "dataType": ["string[]"], "description": "developers list" },
+    { "name": "publishers", "dataType": ["string[]"], "description": "publishers list" },
+    { "name": "meta", "dataType": ["string"], "description": "free-form JSON string of remaining metadata" }
+  ]
+}
