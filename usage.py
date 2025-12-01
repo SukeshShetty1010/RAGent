@@ -1,226 +1,326 @@
 #!/usr/bin/env python3
 """
-inspect_weaviate.py
+retriever/simple_retriever.py
 
-Small Weaviate inspector utility.
+Vector-only retriever for Weaviate Python client v4, schema-aware and aligned with
+the GameChunk schema provided by the user (see weaviate_gamechunk_schema.json).
 
-Usage examples:
-  python tools/inspect_weaviate.py --weaviate http://localhost:8080 --class GameChunk --limit 3 --parse-meta
-  python tools/inspect_weaviate.py --weaviate http://localhost:8080 --class GameChunk --where 'source=gamespot:article' --limit 5
-  python tools/inspect_weaviate.py --weaviate http://localhost:8080 --class GameChunk --near 'open world,cult' --limit 5
-  python tools/inspect_weaviate.py --weaviate http://localhost:8080 --class GameChunk --raw
+Usage:
+    python retriever/simple_retriever.py --query "Far Cry 5 gameplay" --k 5 --weaviate http://localhost:8080
+    python retriever/simple_retriever.py --dump-schema --weaviate http://localhost:8080
 
-Notes:
- - The script will always request _additional { id } for each object.
- - If your schema stores `meta` as a JSON string, use --parse-meta to print it parsed.
+Requirements:
+    pip install "weaviate-client>=4" sentence-transformers numpy
 """
+
+from __future__ import annotations
 import argparse
 import json
-import requests
+import logging
 import sys
-import textwrap
+from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse
 
-DEFAULT_TIMEOUT = 30
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
-def get_schema(weaviate_url):
-    url = weaviate_url.rstrip("/") + "/v1/schema"
-    r = requests.get(url, timeout=DEFAULT_TIMEOUT)
-    r.raise_for_status()
-    return r.json()
+# Weaviate v4 client imports
+try:
+    import weaviate
+    from weaviate.classes.init import AdditionalConfig, Timeout
+    from weaviate.classes.query import MetadataQuery
+except Exception:
+    weaviate = None  # handled at runtime
 
-def find_class(schema_json, class_name):
-    for c in schema_json.get("classes", []):
-        if c.get("class") == class_name:
-            return c
-    return None
+LOG = logging.getLogger("simple_retriever")
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
-def pretty_print_schema_class(c):
-    print(f"\nClass: {c.get('class')}\nDescription: {c.get('description')}\n")
-    print("Properties:")
-    for p in c.get("properties", []):
-        name = p.get("name")
-        dtype = p.get("dataType")
-        desc = p.get("description") or ""
-        dtype_str = ", ".join(dtype) if isinstance(dtype, list) else str(dtype)
-        flags = []
-        if p.get("indexFilterable"): flags.append("filterable")
-        if p.get("indexSearchable"): flags.append("searchable")
-        if p.get("indexRangeFilters"): flags.append("range")
-        print(f"  - {name:18} {dtype_str:20} {' '.join(flags):20} {('- ' + desc) if desc else ''}")
-    print("")
+DEFAULT_MODEL = "all-MiniLM-L6-v2"
+DEFAULT_CLASS = "GameChunk"
 
-def build_safe_graphql(class_name, properties, limit=3, where=None, near=None, order=None):
-    select_props = ["_additional { id }"]
-    for p in properties:
-        name = p.get("name")
-        if not name:
-            continue
-        select_props.append(name)
-    select_block = " ".join(select_props)
+# Preferred properties based on the uploaded schema (weaviate_gamechunk_schema.json).
+# See uploaded schema for exact property names. :contentReference[oaicite:1]{index=1}
+PREFERRED_PROPS = [
+    "unified_id",
+    "doc_id",
+    "source",
+    "title",
+    "chunk_index",
+    "text",
+    "char_length",
+    "content_hash",
+    "release_date",
+    "release_year",
+    "platforms",
+    "genres",
+    "developers",
+    "publishers",
+    "meta",
+]
 
-    where_clause = ""
-    if where:
-        where_clause = f"where: {{ operator: {where['operator']} path: {json.dumps(where['path'])} valueString: {json.dumps(where['valueString'])} }}"
 
-    near_clause = ""
-    if near:
-        concepts_json = json.dumps(near['concepts'])
-        near_clause = f"nearText: {{ concepts: {concepts_json} }}"
-        if near.get("certainty") is not None:
-            near_clause = f"nearText: {{ concepts: {concepts_json} certainty: {near['certainty']} }}"
+# -----------------------------
+# SBERT embedding utilities
+# -----------------------------
+def _load_model(model_name: str = DEFAULT_MODEL) -> SentenceTransformer:
+    LOG.info("Loading sentence-transformers model: %s", model_name)
+    return SentenceTransformer(model_name)
 
-    order_clause = ""
-    if order:
-        order_clause = f"order: {{ path: {json.dumps(order['path'])}, direction: {order['direction']} }}"
 
-    args = []
-    if where_clause:
-        args.append(where_clause)
-    if near_clause:
-        args.append(near_clause)
-    if order_clause:
-        args.append(order_clause)
-    args.append(f"limit: {limit}")
-    args_str = ", ".join(args)
+def _embed_query(model: SentenceTransformer, query: str) -> List[float]:
+    vec = model.encode([query], convert_to_numpy=True)[0]
+    vec = vec.astype(float)
+    norm = np.linalg.norm(vec)
+    if norm == 0 or np.isnan(norm):
+        return vec.tolist()
+    return (vec / norm).tolist()
 
-    q = f'{{ Get {{ {class_name}({args_str}) {{ {select_block} }} }} }}'
-    return q
 
-def run_graphql(weaviate_url, query):
-    url = weaviate_url.rstrip("/") + "/v1/graphql"
-    payload = {"query": query}
-    r = requests.post(url, json=payload, timeout=DEFAULT_TIMEOUT)
-    r.raise_for_status()
-    return r.json()
-
-def truncate_text(s, max_len=500):
-    if s is None:
-        return None
-    if not isinstance(s, str):
-        return s
-    if len(s) <= max_len:
-        return s
-    return s[:max_len] + "... (truncated, len=" + str(len(s)) + ")"
-
-def pretty_print_objects(data_list, properties, parse_meta=False, raw=False):
-    if not data_list:
-        print("No objects returned.")
-        return
-
-    prop_names = [p.get("name") for p in properties if p.get("name")]
-    for i, obj in enumerate(data_list, start=1):
-        print("\n" + "-"*30)
-        print(f"Object #{i}:")
-        additional = obj.get("_additional", {})
-        if additional and additional.get("id"):
-            print("  id:", additional.get("id"))
-        for name in prop_names:
-            if name not in obj:
-                continue
-            val = obj[name]
-            if name == "meta" and parse_meta and isinstance(val, str):
-                try:
-                    parsed = json.loads(val)
-                    print(f"  {name}:")
-                    for k,v in parsed.items():
-                        print(f"    {k}: {repr(v)}")
-                except Exception:
-                    print(f"  {name}: (failed to parse as JSON string) {repr(val[:200])}...")
-                continue
-
-            if raw:
-                print(f"  {name}: {repr(val)}")
-            else:
-                if isinstance(val, str) and len(val) > 500:
-                    print(f"  {name}: {truncate_text(val, 500)}")
-                else:
-                    print(f"  {name}: {repr(val)}")
-    print("\n" + "="*30 + "\n")
-
-def parse_where_arg(where_arg):
-    if not where_arg:
-        return None
-    if "=" not in where_arg:
-        raise ValueError("where must be of form key=value")
-    k, v = where_arg.split("=", 1)
-    return {"operator": "Equal", "path": [k], "valueString": v}
-
-def main():
-    ap = argparse.ArgumentParser(description="Inspect Weaviate class contents and schema.")
-    ap.add_argument("--weaviate", required=True, help="Weaviate base URL (e.g. http://localhost:8080)")
-    ap.add_argument("--class", dest="classname", default="GameChunk", help="Weaviate class to inspect")
-    ap.add_argument("--limit", type=int, default=3, help="How many objects to fetch")
-    ap.add_argument("--where", type=str, default=None, help="Simple where clause like 'source=gamespot:article'")
-    ap.add_argument("--near", type=str, default=None, help="nearText concepts (comma separated), e.g. 'open world,cult'")
-    ap.add_argument("--parse-meta", action="store_true", help="Attempt to parse 'meta' field as JSON string")
-    ap.add_argument("--raw", action="store_true", help="Print raw fields without truncation")
-    ap.add_argument("--order", type=str, default=None, help="Order clause like 'chunk_index:asc' or 'chunk_index:desc'")
-    args = ap.parse_args()
-
-    try:
-        schema = get_schema(args.weaviate)
-    except Exception as e:
-        print("Failed to fetch schema from Weaviate:", e, file=sys.stderr)
-        sys.exit(1)
-
-    cls = find_class(schema, args.classname)
-    if not cls:
-        print(f"Class '{args.classname}' not found. Available classes:")
-        for c in schema.get("classes", []):
-            print("  -", c.get("class"))
-        sys.exit(1)
-
-    pretty_print_schema_class(cls)
-    props = cls.get("properties", [])
-
-    where_clause = None
-    if args.where:
+# -----------------------------
+# Weaviate helper utilities
+# -----------------------------
+def _parse_weaviate_url(weaviate_url: str) -> Dict[str, Any]:
+    """
+    Accepts:
+      - http://localhost:8080
+      - https://host:port
+      - host:port
+      - localhost:8080
+    Returns dict with host (str) and port (int)
+    """
+    if weaviate_url.startswith("http://") or weaviate_url.startswith("https://"):
+        parsed = urlparse(weaviate_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        return {"host": host, "port": int(port)}
+    if ":" in weaviate_url:
+        host, port = weaviate_url.split(":", 1)
         try:
-            where_clause = parse_where_arg(args.where)
-        except Exception as e:
-            print("Invalid --where value:", e, file=sys.stderr)
-            sys.exit(1)
+            return {"host": host, "port": int(port)}
+        except Exception:
+            return {"host": host, "port": 8080}
+    return {"host": weaviate_url, "port": 8080}
 
-    near_clause = None
-    if args.near:
-        concepts = [c.strip() for c in args.near.split(",") if c.strip()]
-        if concepts:
-            near_clause = {"concepts": concepts}
 
-    order_clause = None
-    if args.order:
-        if ":" not in args.order:
-            print("--order must be like 'chunk_index:asc' or 'chunk_index:desc'", file=sys.stderr)
-            sys.exit(1)
-        p, d = args.order.split(":", 1)
-        d_up = d.strip().lower()
-        if d_up not in ("asc", "desc"):
-            print("order direction must be 'asc' or 'desc'", file=sys.stderr)
-            sys.exit(1)
-        order_clause = {"path": [p.strip()], "direction": d_up}
-
-    query = build_safe_graphql(args.classname, props, limit=args.limit, where=where_clause, near=near_clause, order=order_clause)
-    print("Constructed GraphQL query:\n")
-    print(textwrap.fill(query, width=120))
-    print("\nRunning GraphQL query...\n")
+def _get_class_properties_from_schema(client, class_name: str) -> List[str]:
+    """
+    Query the running Weaviate schema and return the property names for the given class.
+    This reads client.schema.get() output and extracts properties for the requested class.
+    """
+    props: List[str] = []
 
     try:
-        res = run_graphql(args.weaviate, query)
+        schema = client.schema.get()
     except Exception as e:
-        print("GraphQL request failed:", e, file=sys.stderr)
-        sys.exit(1)
+        LOG.warning("Unable to fetch schema via client.schema.get(): %s", e)
+        # Best-effort fallback: try to inspect collection metadata
+        try:
+            collection = client.collections.get(class_name)
+            meta = getattr(collection, "meta", None) or getattr(collection, "schema", None) or {}
+            if isinstance(meta, dict):
+                class_props = meta.get("properties") or []
+                for p in class_props:
+                    if isinstance(p, dict) and p.get("name"):
+                        props.append(p["name"])
+        except Exception:
+            pass
+        return props
 
-    if args.raw:
-        print(json.dumps(res, indent=2, ensure_ascii=False))
+    classes = schema.get("classes") or []
+    for c in classes:
+        cname = c.get("class") or c.get("name") or ""
+        if cname and cname.lower() == class_name.lower():
+            for p in c.get("properties", []) or []:
+                pn = p.get("name")
+                if pn:
+                    props.append(pn)
+            break
+    return props
+
+
+# -----------------------------
+# Response parsing
+# -----------------------------
+def _parse_v4_objects(objects) -> List[Dict[str, Any]]:
+    """
+    Convert v4 response.objects list to our standard list of dicts.
+    Each entry includes: id (uuid), title, site_detail_url (if present), content (500 chars), score {certainty,distance}
+    """
+    out = []
+    for o in objects:
+        uuid = getattr(o, "uuid", None) or getattr(o, "id", None) or None
+        props = getattr(o, "properties", None) or {}
+
+        # Prefer the 'text' field (schema has 'text') otherwise use 'meta' or dump props
+        content = (
+            props.get("text")
+            or (lambda: (json.loads(props.get("meta")) if isinstance(props.get("meta"), str) else (props.get("meta") or None)))()
+            if props.get("meta")
+            else None
+        )
+        # If content is still not a string (meta might be dict), try other fields
+        if not content:
+            content = props.get("content") or props.get("excerpt") or props.get("body") or None
+
+        title = props.get("title") or props.get("name") or None
+
+        # We don't have 'site_detail_url' in the schema by default; still attempt to fetch if available
+        site_detail_url = props.get("site_detail_url") or props.get("url") or None
+
+        if content is None:
+            try:
+                content = json.dumps(props, ensure_ascii=False)
+            except Exception:
+                content = str(props)
+
+        metadata = getattr(o, "metadata", None)
+        certainty = None
+        distance = None
+        if metadata:
+            if isinstance(metadata, dict):
+                certainty = metadata.get("certainty")
+                distance = metadata.get("distance")
+            else:
+                certainty = getattr(metadata, "certainty", None)
+                distance = getattr(metadata, "distance", None)
+
+        out.append({
+            "id": uuid,
+            "title": title,
+            "site_detail_url": site_detail_url,
+            "content": content[:500] if isinstance(content, str) else content,
+            "score": {"certainty": certainty, "distance": distance},
+            "_raw_properties": props,
+            "_raw_metadata": metadata,
+        })
+    return out
+
+
+# -----------------------------
+# Main retrieval function
+# -----------------------------
+def retrieve(
+    query: str,
+    k: int = 5,
+    weaviate_url: str = "http://localhost:8080",
+    class_name: str = DEFAULT_CLASS,
+    model_name: str = DEFAULT_MODEL,
+    timeout_init: int = 5,
+    timeout_query: int = 30,
+    dump_schema: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Encode query with SBERT, query Weaviate v4 collection.near_vector, return top-K chunks.
+    """
+    if weaviate is None:
+        raise RuntimeError("weaviate client v4 not installed. Install with: pip install 'weaviate-client>=4'")
+
+    # load model and embed
+    model = _load_model(model_name)
+    q_vec = _embed_query(model, query)
+
+    # parse host/port
+    parsed = _parse_weaviate_url(weaviate_url)
+    host = parsed["host"]
+    port = parsed["port"]
+
+    LOG.info("Connecting to Weaviate at %s:%s (parsed from %s)", host, port, weaviate_url)
+    client = weaviate.connect_to_local(
+        host=host,
+        port=port,
+        grpc_port=50051,
+        additional_config=AdditionalConfig(timeout=Timeout(init=timeout_init, query=timeout_query)),
+    )
+
+    # Determine which properties exist on the class
+    class_props = _get_class_properties_from_schema(client, class_name)
+    LOG.info("Detected properties for class '%s': %s", class_name, class_props)
+
+    if dump_schema:
+        # If user asked to dump schema, print and exit early
+        client.close()
+        print(json.dumps({"class": class_name, "properties": class_props}, indent=2, ensure_ascii=False))
+        return []
+
+    # Intersect preferred props with discovered props, preserving order
+    return_props = [p for p in PREFERRED_PROPS if p in class_props]
+
+    # If none of the preferred props exist, request the first available properties
+    if not return_props:
+        if class_props:
+            LOG.warning("No preferred properties present; requesting first %d available properties from schema.", min(10, len(class_props)))
+            return_props = class_props[:10]
+        else:
+            LOG.warning("No properties discovered for class '%s'; requesting no explicit properties.", class_name)
+            return_props = []
+
+    LOG.info("Running near_vector query, top_k=%d, class=%s; return_properties=%s", k, class_name, return_props)
+    try:
+        collection = client.collections.get(class_name)
+    except Exception as e:
+        client.close()
+        raise RuntimeError(f"Failed to access collection '{class_name}': {e}") from e
+
+    try:
+        if return_props:
+            response = collection.query.near_vector(
+                near_vector=q_vec,
+                limit=k,
+                return_properties=return_props,
+                return_metadata=MetadataQuery(distance=True, certainty=True),
+            )
+        else:
+            response = collection.query.near_vector(
+                near_vector=q_vec,
+                limit=k,
+                return_metadata=MetadataQuery(distance=True, certainty=True),
+            )
+    except Exception as e:
+        client.close()
+        raise RuntimeError(f"Weaviate query failed: {e}") from e
+
+    objects = getattr(response, "objects", []) or []
+    results = _parse_v4_objects(objects)
+
+    client.close()
+    return results
+
+
+# -------------------------
+# CLI
+# -------------------------
+def main(argv: Optional[List[str]] = None):
+    parser = argparse.ArgumentParser(prog="simple_retriever", description="Vector-only retriever using SBERT + Weaviate v4 (schema-aware)")
+    parser.add_argument("--query", "-q", required=False, help="Text query")
+    parser.add_argument("--k", type=int, default=5, help="Top-K results")
+    parser.add_argument("--weaviate", default="http://localhost:8080", help="Weaviate endpoint (http://host:port or host:port)")
+    parser.add_argument("--class-name", default=DEFAULT_CLASS, help="Weaviate collection/class name (default: GameChunk)")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="SentenceTransformer model to use for query encoding")
+    parser.add_argument("--dump-schema", action="store_true", help="Print detected properties for the class and exit")
+    args = parser.parse_args(argv)
+
+    if not args.query and not args.dump_schema:
+        parser.error("Either --query or --dump-schema must be provided.")
+
+    try:
+        results = retrieve(
+            query=args.query or "",
+            k=args.k,
+            weaviate_url=args.weaviate,
+            class_name=args.class_name,
+            model_name=args.model,
+            dump_schema=args.dump_schema,
+        )
+    except Exception as e:
+        LOG.exception("Retrieval failed: %s", e)
+        sys.exit(2)
+
+    if args.dump_schema:
+        # already printed in retrieve()
         return
 
-    if "errors" in res:
-        print("GraphQL returned errors:")
-        print(json.dumps(res["errors"], indent=2, ensure_ascii=False))
-        sys.exit(1)
+    print(json.dumps(results, ensure_ascii=False, indent=2))
 
-    data_list = res.get("data", {}).get("Get", {}).get(args.classname)
-    pretty_print_objects(data_list, props, parse_meta=args.parse_meta, raw=args.raw)
 
 if __name__ == "__main__":
     main()
