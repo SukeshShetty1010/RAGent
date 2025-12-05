@@ -1,10 +1,8 @@
 # ingest/embeddings.py
-
 '''
 python -m ingest.embeddings --game "Far Cry 5" --outdir ./out
 python -m ingest.embeddings --merged ./out/far_cry_5_merged.json --outdir ./out
 '''
-
 
 from __future__ import annotations
 import argparse
@@ -233,8 +231,13 @@ def embed_and_save(
 
             vectors = vectors.astype(float).tolist()
 
-            for bid, vec, meta in zip(ids, vectors, metas):
-                out_obj = {"id": bid, "embedding": vec, "meta": meta}
+            # --- CHANGE: include chunk text inside meta so downstream upsert gets the body ---
+            for bid, vec, meta, text in zip(ids, vectors, metas, texts):
+                meta_with_text = dict(meta or {})
+                if not meta_with_text.get("text") and text:
+                    # carry forward the chunk body into meta
+                    meta_with_text["text"] = text
+                out_obj = {"id": bid, "embedding": vec, "meta": meta_with_text}
                 out_fh.write(json.dumps(out_obj, ensure_ascii=False) + "\n")
                 processed_ids.add(bid)
                 written += 1
