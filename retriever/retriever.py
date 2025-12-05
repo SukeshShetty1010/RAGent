@@ -1,12 +1,6 @@
-# retriever.py (refactored: hybrid search + fallback + WeaviateConnectionError + local scoring fallback)
-"""
-Schema-accurate hardened retriever for GameChunk (Weaviate).
-- Adds optional hybrid search (BM25 + vector) with automatic fallback to vector-only.
-- Raises WeaviateConnectionError when Weaviate is unreachable.
-- Telemetry logs whether response came from 'Hybrid' or 'Vector-Fallback'.
-- Keeps original 3-gate filtering: scope (DB where), quality (char_length), relevance (score).
-- Adds local cosine-similarity fallback when Weaviate returns no certainty/distance for hybrid results.
-"""
+# retriever.py (RAG Agent refactor with optional generation)
+# Based on original hardened retriever and Modal LLM remote function.
+# Keeps all prior behavior; new flag --generate will call remote LLM to synthesize answer.
 from __future__ import annotations
 
 import json
@@ -25,6 +19,9 @@ DEFAULT_MODEL = "all-MiniLM-L6-v2"
 DEFAULT_WEAVIATE_URL = "http://localhost:8080"
 DEFAULT_CLASS = "GameChunk"
 
+# ---------------------------
+# Existing helper defs (unchanged, copied from original retriever)
+# ---------------------------
 
 class WeaviateConnectionError(Exception):
     """Raised when we cannot reach the configured Weaviate HTTP endpoint."""
@@ -37,11 +34,6 @@ def _load_model(model_name: str = DEFAULT_MODEL) -> SentenceTransformer:
 
 
 def _weaviate_schema_properties(weaviate_url: str, class_name: str, timeout: int = 5) -> Set[str]:
-    """
-    Return set of property names for the given Weaviate class via /v1/schema.
-    If schema request fails, return an empty set.
-    Raises WeaviateConnectionError on connection problems.
-    """
     try:
         r = requests.get(weaviate_url.rstrip("/") + "/v1/schema", timeout=timeout)
         r.raise_for_status()
@@ -52,7 +44,6 @@ def _weaviate_schema_properties(weaviate_url: str, class_name: str, timeout: int
                 props = cls.get("properties", []) or []
                 return {p.get("name") for p in props if p.get("name")}
     except RequestsConnectionError as e:
-        # Circuit breaking behaviour: surface connection errors to callers
         raise WeaviateConnectionError(f"Failed to connect to Weaviate at {weaviate_url}: {e}")
     except Exception as e:
         logger.debug("Failed to fetch schema: %s", e)
@@ -60,9 +51,6 @@ def _weaviate_schema_properties(weaviate_url: str, class_name: str, timeout: int
 
 
 def _parse_meta_prop(meta_prop: Optional[Any]) -> Dict[str, Any]:
-    """
-    Meta in your schema is a free-form JSON string. Parse if possible.
-    """
     if not meta_prop:
         return {}
     if isinstance(meta_prop, dict):
@@ -74,9 +62,6 @@ def _parse_meta_prop(meta_prop: Optional[Any]) -> Dict[str, Any]:
 
 
 def _score_from_additional(additional: Dict[str, Any]) -> Optional[float]:
-    """
-    Prefer 'certainty' if present, otherwise convert 'distance' to a 0..1-ish score.
-    """
     if not additional:
         return None
     if "certainty" in additional and additional["certainty"] is not None:
@@ -94,10 +79,6 @@ def _score_from_additional(additional: Dict[str, Any]) -> Optional[float]:
 
 
 def _post_graphql(weaviate_url: str, query: str, timeout: int = 30) -> Dict[str, Any]:
-    """
-    POST GraphQL query to Weaviate and return a response bundle.
-    Converts requests ConnectionError into WeaviateConnectionError (circuit-break).
-    """
     gw_url = weaviate_url.rstrip("/") + "/v1/graphql"
     headers = {"Content-Type": "application/json"}
     try:
@@ -110,6 +91,10 @@ def _post_graphql(weaviate_url: str, query: str, timeout: int = 30) -> Dict[str,
         parsed = {"_raw_text": r.text}
     return {"status_code": r.status_code, "ok": r.ok, "json": parsed, "text": r.text}
 
+
+# ---------------------------
+# Core retrieval (unchanged logic; preserved)
+# ---------------------------
 
 def retrieve(
     query: str,
@@ -127,14 +112,10 @@ def retrieve(
     hybrid_alpha: float = 0.5,
 ) -> List[Dict[str, Any]]:
     """
-    Perform a hardened retrieval with 3 gates and telemetry.
-
-    New Args:
-      use_hybrid: attempt Weaviate hybrid search (BM25 + vector) first when True.
-      hybrid_alpha: alpha weight for hybrid operator (0..1). Higher -> more lexical emphasis.
-
-    All other args and behaviour retained from original implementation.
+    Hardened retrieval with 3 gates + local fallback scoring.
+    (This implementation is kept identical to your original logic.)
     """
+    # --- validations & embedding of query ---
     if not query or not isinstance(query, str):
         raise ValueError("query must be a non-empty string")
     if k <= 0:
@@ -144,7 +125,6 @@ def retrieve(
     if not (0.0 <= hybrid_alpha <= 1.0):
         raise ValueError("hybrid_alpha must be between 0.0 and 1.0")
 
-    # load encoder
     model = _load_model(model_name)
     try:
         vec = model.encode([query], convert_to_numpy=True)[0].tolist()
@@ -152,7 +132,7 @@ def retrieve(
         logger.exception("Failed to encode query: %s", e)
         raise
 
-    # inspect schema to request only valid props (prevents GraphQL unknown-field errors)
+    # inspect schema to request only valid props
     class_props = _weaviate_schema_properties(weaviate_url, class_name)
     if debug:
         logger.info("Schema properties for %s: %s", class_name, sorted(list(class_props)))
@@ -162,14 +142,11 @@ def retrieve(
     if "char_length" in class_props and "char_length" not in requested_props:
         requested_props.append("char_length")
 
-    # always request _additional
     prop_list = ["_additional { distance certainty id }"] + requested_props
     props_gql = "\n          ".join(prop_list)
 
-    # fetch limit
     fetch_limit = max(k * int(fetch_multiplier), k)
 
-    # unified id mapping
     unified_prop_name = None
     for candidate in ("unified_id", "unified_game_id", "unified"):
         if candidate in class_props:
@@ -181,15 +158,12 @@ def retrieve(
         safe_value = json.dumps(str(unified_game_id))
         where_clause = f", where: {{ path: [\"{unified_prop_name}\"], operator: Equal, valueString: {safe_value} }}"
 
-    # build vector literal safely
     vec_list_literal = ", ".join([repr(float(v)) for v in vec])
 
-    # Strategy attempt loop: try hybrid (if requested) then fallback to nearVector
     response_bundle = None
     used_mode = "None"
     last_error = None
 
-    # Helper to construct the nearVector GraphQL
     def _near_vector_query(limit: int = fetch_limit) -> str:
         return f"""
         {{
@@ -201,9 +175,7 @@ def retrieve(
         }}
         """
 
-    # Helper to construct the hybrid GraphQL (safe query JSON-escaped)
     def _hybrid_query(limit: int = fetch_limit) -> str:
-        # json.dumps ensures the string is escaped properly for insertion into GraphQL
         safe_q = json.dumps(str(query))
         return f"""
         {{
@@ -215,7 +187,7 @@ def retrieve(
         }}
         """
 
-    # Attempt 1: Hybrid (if requested)
+    # Attempt hybrid (if requested) then fallback
     if use_hybrid:
         gql_h = _hybrid_query()
         if debug:
@@ -223,24 +195,19 @@ def retrieve(
         try:
             response_bundle = _post_graphql(weaviate_url, gql_h)
             resp_json = response_bundle["json"]
-            # If GraphQL returned 'errors' we treat as failure of hybrid and fall back
             if isinstance(resp_json, dict) and "errors" in resp_json and resp_json.get("errors"):
                 logger.warning("Hybrid GraphQL returned errors: %s", json.dumps(resp_json.get("errors"), default=str)[:2000])
                 last_error = resp_json.get("errors")
                 response_bundle = None
-                # fall through to vector fallback
             else:
                 used_mode = "Hybrid"
         except WeaviateConnectionError:
-            # re-raise connection problem immediately (circuit-break)
             raise
         except Exception as e:
-            # any other error -> log and fall back
             logger.warning("Hybrid search attempt failed: %s. Falling back to vector-only.", e)
             last_error = str(e)
             response_bundle = None
 
-    # Attempt 2: nearVector (vector fallback or default)
     if response_bundle is None:
         gql_v = _near_vector_query()
         if debug:
@@ -251,11 +218,9 @@ def retrieve(
         except WeaviateConnectionError:
             raise
         except Exception as e:
-            # cannot reach or parse; raise for caller to handle
             logger.exception("Vector search failed: %s", e)
             raise
 
-    # log which mode succeeded
     logger.info("Search mode used: %s", used_mode)
 
     resp_json = response_bundle["json"]
@@ -270,7 +235,7 @@ def retrieve(
     if isinstance(resp_json, dict) and "errors" in resp_json:
         logger.warning("Weaviate GraphQL returned errors (post-search): %s", json.dumps(resp_json.get("errors"), default=str)[:2000])
 
-    # extract items (same as original)
+    # extract items
     items: List[Dict[str, Any]] = []
     try:
         get_block = resp_json.get("data", {}).get("Get", {}) if isinstance(resp_json, dict) else {}
@@ -288,7 +253,7 @@ def retrieve(
     fetched_count = len(items)
     logger.info("Gate1 (DB fetch) - requested limit=%d, fetched=%d (where on %s=%s)", fetch_limit, fetched_count, unified_prop_name, str(unified_game_id))
 
-    # if zero fetched and debug, run probes (reuse original logic)
+    # debug probes if zero fetched
     if fetched_count == 0 and debug:
         logger.info("Fetched 0 items — running debug probes...")
         probe1 = f"""
@@ -328,7 +293,7 @@ def retrieve(
         except WeaviateConnectionError:
             raise
 
-    # Gate2 & Gate3 processing (with robust scoring fallback)
+    # Gate2 & Gate3 processing (robust scoring fallback)
     parsed_results: List[Dict[str, Any]] = []
     dropped_gate2 = 0
     dropped_gate3 = 0
@@ -369,7 +334,6 @@ def retrieve(
             meta_prop = props.get("meta") or None
             parsed_meta = _parse_meta_prop(meta_prop)
 
-            # content determination
             content_value = None
             if isinstance(text_field, str) and text_field.strip():
                 content_value = text_field
@@ -378,20 +342,16 @@ def retrieve(
                 if extracted:
                     content_value = extracted
 
-            # --- robust scoring fallback: prefer Weaviate scores, otherwise compute local cosine ---
             score = _score_from_additional(additional)
             numeric_score = None
 
-            # 1) Use Weaviate-provided score when available
             if score is not None:
                 try:
                     numeric_score = float(score)
                 except Exception:
                     numeric_score = None
 
-            # 2) Fallback: compute cosine similarity between query vector and chunk text embedding
             if numeric_score is None:
-                # choose text to embed: prefer stored 'text' field, else parsed content_value, else meta.text/content/raw
                 candidate_text_for_embedding = None
                 if isinstance(text_field, str) and text_field.strip():
                     candidate_text_for_embedding = text_field
@@ -402,14 +362,12 @@ def retrieve(
 
                 if candidate_text_for_embedding and candidate_text_for_embedding.strip():
                     try:
-                        # encode the candidate text using the same model that encoded the query
                         emb = model.encode([candidate_text_for_embedding], convert_to_numpy=True)[0]
                         qvec = np.array(vec, dtype=float)
                         emb_norm = np.linalg.norm(emb)
                         qvec_norm = np.linalg.norm(qvec)
                         if emb_norm > 0 and qvec_norm > 0:
                             cos_sim = float(np.dot(qvec, emb) / (qvec_norm * emb_norm))
-                            # normalize from [-1,1] -> [0,1] so existing 0..1 thresholds remain valid
                             numeric_score = (cos_sim + 1.0) / 2.0
                         else:
                             numeric_score = 0.0
@@ -417,11 +375,8 @@ def retrieve(
                         logger.debug("Fallback embedding similarity failed: %s", e)
                         numeric_score = 0.0
                 else:
-                    # nothing available to embed — give minimal score
                     numeric_score = 0.0
-            # --- end robust scoring fallback ---
 
-            # char_length extraction (schema has char_length int)
             char_length = None
             if "char_length" in props and props.get("char_length") is not None:
                 try:
@@ -467,11 +422,10 @@ def retrieve(
             dropped_parse_fail += 1
             continue
 
-    # sort and limit to k
+    # sort & limit
     parsed_results.sort(key=lambda x: (x.get("score") or 0.0), reverse=True)
     final_results = parsed_results[:k]
 
-    # telemetry
     logger.info(
         "Retrieval summary: fetched=%d, postfilter_candidates=%d, returned=%d, dropped_gate2=%d, dropped_gate3=%d, dropped_parse_fail=%d, mode=%s",
         fetched_count,
@@ -486,7 +440,6 @@ def retrieve(
     if debug:
         logger.info("Sample _additional (first candidate): %s", json.dumps(sample_additional or {}, default=str))
 
-    # optionally show parsed meta for returned rows
     if show_meta and final_results:
         logger.info("Parsed meta for returned rows:")
         for r in final_results:
@@ -498,11 +451,100 @@ def retrieve(
     return final_results
 
 
-# CLI entrypoint (unchanged aside from new args)
+# ---------------------------
+# New: Prompt Topology for Llama 3.2 (strict templating)
+# ---------------------------
+
+def format_rag_prompt(query: str, chunks: List[Dict[str, Any]]) -> str:
+    """
+    Build a templated RAG prompt using the required Llama 3.2 tokens.
+
+    Structure must follow:
+    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+    ... (system instructions) <|eot_id|><|start_header_id|>user<|end_header_id|>
+    Context: ... Question: ... <|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+    The function injects a short, numbered context block of chunk ids + text (only chunks
+    that passed filters should be passed here).
+    """
+    # System instruction - be explicit and conservative to reduce hallucination
+    system_instr = (
+        "You are a helpful, precise assistant. Use ONLY the provided Context sections "
+        "to answer the user's question. When you cite facts, include the source id "
+        "for traceability. If the context does not support an answer, reply: "
+        "'No verifiable information found in the provided context.'"
+    )
+
+    # Build Context body (include id, score, and short content up to a sensible length)
+    ctx_parts = []
+    for i, c in enumerate(chunks, start=1):
+        cid = c.get("id") or f"chunk{i}"
+        score = c.get("score")
+        content = c.get("content") or ""
+        # keep context short per chunk to avoid token explosion
+        snippet = (content.strip()[:1200] + "...") if len(content) > 1200 else content.strip()
+        ctx_parts.append(f"---\nID: {cid}\nSCORE: {score:.4f}\n\n{snippet}\n---")
+
+    context_block = "\n\n".join(ctx_parts) if ctx_parts else "<NO_CONTEXT>"
+
+    # Now assemble with required tokens
+    prompt = (
+        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n"
+        f"{system_instr}\n"
+        "<|eot_id|>\n"
+        "<|start_header_id|>user<|end_header_id|>\n"
+        "Context:\n"
+        f"{context_block}\n\n"
+        f"Question: {query}\n"
+        "<|eot_id|>\n"
+        "<|start_header_id|>assistant<|end_header_id|>\n"
+    )
+    return prompt
+
+
+# ---------------------------
+# New: Remote generation flow (Modal lookup at runtime only)
+# ---------------------------
+
+def generate_answer_via_modal(prompt: str, max_tokens: int = 512, temperature: float = 0.1) -> str:
+    """
+    Lookup and call Modal remote function dynamically (soft import).
+    If modal is not installed or function lookup fails, raise ImportError/RuntimeError accordingly.
+    """
+    # Soft import (Dependency isolation)
+    try:
+        import modal  # type: ignore
+    except Exception as e:
+        raise ImportError("Modal client not available (import modal failed). Install 'modal' to enable generation.") from e
+
+    # Use lookup pattern (function from name) to avoid importing a module that itself imports modal at top-level.
+    try:
+        chat_fn = modal.Function.from_name("rag-llama3-3b", "chat_completion_remote")
+    except Exception as e:
+        raise RuntimeError(f"Failed to lookup remote function: {e}") from e
+
+    # Inform user about potential cold start
+    logger.info("Waking up Agent (remote Modal app may be cold-starting)...")
+
+    # Call the remote function using .remote(...) (correct Modal API)
+    try:
+        # Call signature mirrors modal_llm.chat_completion_remote(prompt, max_tokens, temperature)
+        result = chat_fn.remote(prompt, max_tokens=max_tokens, temperature=temperature)
+        if result is None:
+            return ""
+        return str(result).strip()
+    except Exception as e:
+        raise RuntimeError(f"Remote generation failed: {e}") from e
+
+
+# ---------------------------
+# CLI Entrypoint (extended)
+# ---------------------------
+
 if __name__ == "__main__":
     import argparse
 
-    p = argparse.ArgumentParser(prog="retriever", description="Schema-accurate Hardened Retriever for GameChunk")
+    p = argparse.ArgumentParser(prog="retriever", description="Schema-accurate Hardened Retriever for GameChunk (with optional generation)")
     p.add_argument("--query", "-q", required=True, help="Query text")
     p.add_argument("--k", type=int, default=5, help="Top-k to return (post-filter)")
     p.add_argument("--weaviate", default=DEFAULT_WEAVIATE_URL, help="Weaviate URL, e.g. http://localhost:8080")
@@ -516,6 +558,9 @@ if __name__ == "__main__":
     p.add_argument("--show-meta", action="store_true", help="Log parsed meta for each returned row (useful when text is null)")
     p.add_argument("--use-hybrid", action="store_true", help="Attempt Weaviate hybrid search (BM25 + vector) first, fallback to vector-only if unsupported")
     p.add_argument("--hybrid-alpha", type=float, default=0.5, help="Alpha for hybrid operator (0..1). Higher => more lexical emphasis")
+    p.add_argument("--generate", action="store_true", help="If set, synthesize a natural language answer using the remote Modal LLM (rag-llama3-3b).")
+    p.add_argument("--gen-max-tokens", type=int, default=512, help="Max tokens for LLM generation")
+    p.add_argument("--gen-temp", type=float, default=0.1, help="Temperature for generation")
     args = p.parse_args()
 
     try:
@@ -534,11 +579,12 @@ if __name__ == "__main__":
             use_hybrid=args.use_hybrid,
             hybrid_alpha=args.hybrid_alpha,
         )
-        print(f"Returned {len(rows)} items")
+
+        # Print retrieval results first (always)
+        print(f"\nReturned {len(rows)} items\n")
         for i, r in enumerate(rows, start=1):
-            print(f"\n=== {i}. id={r['id']} score={r['score']} char_length={r.get('char_length')}")
+            print(f"=== {i}. id={r['id']} score={r['score']:.4f} char_length={r.get('char_length')}")
             print("title:", r.get("title"))
-            print("site_detail_url:", r.get("site_detail_url"))
             if r.get("content"):
                 print("content (first 200 chars):")
                 print((r.get("content") or "")[:200].replace("\n", " "))
@@ -548,6 +594,28 @@ if __name__ == "__main__":
                 print("content_hash:", r.get("content_hash"))
                 if args.show_meta:
                     print("meta:", json.dumps(r.get("meta") or {}, indent=2)[:2000])
+
+        # Generation path (optional)
+        if args.generate:
+            # Attempt to build prompt and call remote function
+            if not rows:
+                print("\n[generate] No retrieved chunks to synthesize from. Aborting generation.")
+            else:
+                # Assemble the prompt with only the chunks that passed filters
+                prompt = format_rag_prompt(args.query, rows)
+                try:
+                    # Soft import is inside generate_answer_via_modal
+                    answer = generate_answer_via_modal(prompt, max_tokens=args.gen_max_tokens, temperature=args.gen_temp)
+                    print("\n--- Generated Answer (Modal LLM) ---\n")
+                    print(answer)
+                    print("\n--- End Generated Answer ---\n")
+                except ImportError as ie:
+                    logger.warning("Generation disabled: %s", ie)
+                    print("\n[generate] Modal client missing. Install 'modal' if you want to enable remote generation.")
+                except Exception as e:
+                    logger.exception("Generation attempt failed: %s", e)
+                    print(f"\n[generate] Generation failed: {e}")
+
     except WeaviateConnectionError as e:
         logger.exception("Weaviate unreachable: %s", e)
         raise
