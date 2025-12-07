@@ -7,6 +7,10 @@
 #  - Keeps all argparse flags and Weaviate GraphQL retrieval logic.
 # ------------------------------------------------------------
 
+"""
+python -m retriever.retriever --query "What are the problems with Far Cry 5" --k 10 --weaviate http://localhost:8080 --debug --show-meta --generate --show-prompt --stream
+"""
+
 from __future__ import annotations
 
 import argparse
