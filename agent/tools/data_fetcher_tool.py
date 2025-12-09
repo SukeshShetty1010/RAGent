@@ -5,10 +5,8 @@ agent/tools/data_fetcher_tool.py
 Tool wrapper around the project's ingest pipeline that programmatically
 orchestrates: fetch/merge -> chunk -> embed -> upsert.
 
-Usage example:
-    from agent.tools.data_fetcher_tool import DataFetcherTool
-    t = DataFetcherTool(weaviate_url="http://localhost:8080")
-    res = t.execute({"game_name": "Far Cry 5"})
+This variant adds an optional `min_char_length` arg to filter out very short
+chunks before embedding/upsert. This is optional and backwards-compatible.
 """
 
 from __future__ import annotations
@@ -80,6 +78,7 @@ class DataFetcherTool(Tool):
             - game_name: str (required)
             - outdir: Optional[str] (overrides base_outdir if provided)
             - chunk_tokens / overlap_tokens / model_name / batch_size / resume: optional args forwarded to embed_and_save
+            - min_char_length: Optional[int] -- if provided, chunks shorter than this will be removed BEFORE embedding/upsert
 
         Returns:
             A dict containing success status, game name, chunks_upserted, and a summary or error.
@@ -105,6 +104,11 @@ class DataFetcherTool(Tool):
             resume = bool(args.get("resume", True))
             vectors_filename = args.get("vectors_filename")  # optional override
 
+            # optional: drop very short chunks before embedding/upsert
+            min_char_length = args.get("min_char_length", None)
+            if min_char_length is not None:
+                min_char_length = int(min_char_length)
+
             logger.info("Starting ingestion pipeline for game=%s outdir=%s", game_name, outdir)
 
             # -------------------------
@@ -123,7 +127,6 @@ class DataFetcherTool(Tool):
             # -------------------------
             logger.info("Step 2: chunking (build_chunks_from_merged)")
             # load merged object (build_chunks_from_merged expects merged obj; but also accepts the merged dict)
-            # The ingest.chunking.build_chunks_from_merged function signature expects a merged_obj (dict)
             import json
 
             with open(merged_path, "r", encoding="utf-8") as fh:
@@ -140,9 +143,24 @@ class DataFetcherTool(Tool):
             if not isinstance(chunks, list):
                 raise RuntimeError("chunking.build_chunks_from_merged returned unexpected type")
 
+            original_chunk_count = len(chunks)
+
+            # Optional filtering of short chunks before saving / embedding
+            filtered_out_count = 0
+            if min_char_length is not None:
+                kept_chunks = []
+                for c in chunks:
+                    clen = c.get("char_length") or len((c.get("text") or ""))
+                    if clen >= min_char_length:
+                        kept_chunks.append(c)
+                    else:
+                        filtered_out_count += 1
+                chunks = kept_chunks
+                logger.info("Filtered %d chunks shorter than min_char_length=%d; remaining=%d", filtered_out_count, min_char_length, len(chunks))
+
             chunks_path = os.path.join(outdir, f"{(merged_obj.get('title') or game_name).strip().lower().replace(' ', '_')}_chunks.jsonl")
             ingest_chunking.save_chunks_jsonl(chunks, chunks_path)
-            logger.info("Chunks saved to %s (count=%d)", chunks_path, len(chunks))
+            logger.info("Chunks saved to %s (count=%d, original=%d)", chunks_path, len(chunks), original_chunk_count)
 
             # -------------------------
             # Step 3: Embed
@@ -183,7 +201,7 @@ class DataFetcherTool(Tool):
 
             summary = (
                 f"Ingestion completed for '{game_name}'. "
-                f"Merged: {merged_path}. Chunks: {chunks_path} ({len(chunks)} chunks). "
+                f"Merged: {merged_path}. Chunks: {chunks_path} ({len(chunks)} chunks, original={original_chunk_count}). "
                 f"Vectors: {vectors_path}. Upsert processed={processed} success={success_count} failed={failed_count}."
             )
 
@@ -199,6 +217,8 @@ class DataFetcherTool(Tool):
                 "merged_path": merged_path,
                 "chunks_path": chunks_path,
                 "vectors_path": vectors_path,
+                "original_chunk_count": original_chunk_count,
+                "filtered_out_count": filtered_out_count,
             }
 
         except Exception as exc:

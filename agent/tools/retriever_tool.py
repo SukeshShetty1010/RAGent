@@ -3,6 +3,10 @@ agent/tools/retriever_tool.py
 
 Wrapper that adapts the Retriever class (retriever.retriever.Retriever) to the
 agent Tool interface.
+
+This updated wrapper respects an explicit 'similarity_threshold' key in the
+args dict (including None) so callers (the agent) can request unthresholded
+results by passing {"similarity_threshold": None}.
 """
 
 from __future__ import annotations
@@ -66,7 +70,11 @@ class RetrieverTool(Tool):
             - query: str (required)
             - k: int (optional, default 5)
             - min_char_length: int (optional)
-            - similarity_threshold: float (optional)
+            - similarity_threshold: float | None (optional). IMPORTANT:
+                If the 'similarity_threshold' key is present and its value is None,
+                the retriever will NOT apply the similarity gate and will return all
+                hits that pass the minimum-char-length filter. If the key is omitted,
+                the wrapper uses the default 0.6 (backwards-compatible).
             - unified_game_id: str (optional)
             - fetch_multiplier: int (optional)
             - debug: bool (optional)
@@ -89,10 +97,18 @@ class RetrieverTool(Tool):
         # Extract optional parameters with sensible defaults (mirror Retriever defaults)
         k = int(args.get("k", 5))
         min_char_length = int(args.get("min_char_length", 50))
-        similarity_threshold = args.get("similarity_threshold", 0.6)
-        # allow None for similarity_threshold
-        if similarity_threshold is not None:
-            similarity_threshold = float(similarity_threshold)
+
+        # IMPORTANT: respect explicit presence of similarity_threshold in args.
+        # If the key is present and set to None, we pass None -> no thresholding.
+        if "similarity_threshold" in args:
+            similarity_threshold = args.get("similarity_threshold")
+            # keep None as-is; otherwise coerce to float
+            if similarity_threshold is not None:
+                similarity_threshold = float(similarity_threshold)
+        else:
+            # backwards-compatible default if not provided
+            similarity_threshold = 0.6
+
         unified_game_id = args.get("unified_game_id")
         fetch_multiplier = int(args.get("fetch_multiplier", 2))
         debug = bool(args.get("debug", False))
