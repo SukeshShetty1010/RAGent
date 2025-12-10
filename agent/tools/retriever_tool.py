@@ -1,14 +1,3 @@
-"""
-agent/tools/retriever_tool.py
-
-Wrapper that adapts the Retriever class (retriever.retriever.Retriever) to the
-agent Tool interface.
-
-This updated wrapper respects an explicit 'similarity_threshold' key in the
-args dict (including None) so callers (the agent) can request unthresholded
-results by passing {"similarity_threshold": None}.
-"""
-
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional

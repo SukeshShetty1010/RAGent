@@ -1,264 +1,426 @@
 # agent/core.py
 """
-Agent core: MinimalAgent
+Refactored MinimalAgent — more robust LLM relevance grading with single-retry
+for wrapper/boilerplate-only responses.
 
-This version adds score-threshold based decisioning:
- - initial retrieval requests unthresholded results so the agent can inspect scores
- - if top_score_before < score_threshold the agent triggers ingestion via data_fetcher
- - retries retrieval once and returns results; if top_score_after still < score_threshold,
-   the trace includes low_confidence=True and both scores are returned alongside the results.
+Key behavior:
+ - Uses a short Chain-of-Thought style "Reasoning Validator" prompt requiring:
+       Reasoning: <one-sentence explanation>
+       Relevant: YES or NO
+ - If the LLM returns a known wrapper/boilerplate message (e.g. "Do not provide additional context..."),
+   the grader performs one immediate retry with an even stricter instruction.
+ - Parsing strips common assistant boilerplate lines before searching for the 'Relevant:' line.
+ - If still ambiguous, returns None → caller falls back to score-threshold logic.
 """
 
 from __future__ import annotations
 
 import logging
-import re
+import traceback
 from typing import Any, Dict, List, Optional
-
-from agent.tools.registry import ToolRegistry
-from agent.base import Tool
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 
+class Tool:
+    """Minimal Tool stub for typing when running the module outside the full project."""
+    name: str
+    description: str
+
+    def execute(self, args: Dict[str, Any]) -> Any:
+        raise NotImplementedError()
+
+
 class MinimalAgent:
     """
-    Minimal rule-based agent that coordinates retrieval and, when necessary,
-    a data-fetching ingestion pipeline to populate the vector DB.
-
-    Parameters
-    ----------
-    registry : ToolRegistry
-        Registry containing 'retriever' and 'data_fetcher' tools.
-    score_threshold : float
-        Minimum top score required to consider retrieval high-quality. Default 0.65
-    top_k_for_score : int
-        The k used when computing top score (default 10).
+    Minimal agent skeleton focused on the relevance grading improvements.
     """
 
-    def __init__(self, registry: ToolRegistry, score_threshold: float = 0.65, top_k_for_score: int = 10) -> None:
-        if not isinstance(registry, ToolRegistry):
-            raise TypeError("registry must be a ToolRegistry instance")
+    def __init__(self, registry=None):
+        # configuration defaults
         self.registry = registry
+        self.grade_top_n = 3
+        self.top_k_for_score = 20
+        self.score_threshold = 0.6
         self._retriever_tool_name = "retriever"
         self._data_fetcher_tool_name = "data_fetcher"
-        self.score_threshold = float(score_threshold)
-        self.top_k_for_score = int(top_k_for_score)
 
+    # ----------------------------
+    # Logging helper
+    # ----------------------------
     def _log(self, msg: str) -> None:
-        logger.info("[AGENT] %s", msg)
+        logger.info(f"[AGENT] {msg}")
 
-    def _heuristically_extract_game_name(self, query: str) -> str:
+    # ----------------------------
+    # LLM call wrapper (Modal-backed)
+    # ----------------------------
+    def _call_llm(self, prompt: str, max_tokens: int = 256, temperature: float = 0.0) -> str:
         """
-        Heuristic extraction of a game name from a question/query.
+        Call the remote Modal LLM function.
+
+        Raises ImportError if 'modal' package is unavailable.
         """
-        if not query or not isinstance(query, str):
-            return ""
+        FUNCTION_APP_NAME = "rag-llama3-3b"
+        FUNCTION_NAME = "chat_completion_remote"
 
-        q = query.strip()
+        try:
+            import modal  # type: ignore
+        except Exception as e:
+            raise ImportError("Modal client not available (import modal failed).") from e
 
-        # 1) quoted phrase
-        m = re.search(r'["“”\'\u2018\u2019](.+?)["“”\'\u2018\u2019]', q)
-        if m:
-            name = m.group(1).strip()
-            if name:
-                return name
+        try:
+            chat_fn = modal.Function.from_name(FUNCTION_APP_NAME, FUNCTION_NAME)
+        except Exception as e:
+            raise RuntimeError(f"Failed to lookup remote function {FUNCTION_APP_NAME}/{FUNCTION_NAME}: {e}") from e
 
-        # 2) Who made / Who developed / Who created
-        m = re.search(r'who (?:made|created|developed|published|built|produced)\s+(.+?)[\?\.]?$', q, flags=re.I)
-        if m:
-            return m.group(1).strip().strip('?"\'')
+        try:
+            self._log("Invoking remote Modal function for LLM call...")
+            result = chat_fn.remote(prompt, max_tokens=max_tokens, temperature=temperature)
+            if result is None:
+                return ""
+            return str(result)
+        except Exception as e:
+            raise RuntimeError(f"Modal remote invocation failed: {e}") from e
 
-        # 3) tell me about / info about / details about / what is
-        m = re.search(r'(?:tell me about|info(?:rmation)? about|details about|what is|what\'s)\s+(.+?)[\?\.]?$', q, flags=re.I)
-        if m:
-            return m.group(1).strip().strip('?"\'')
+    # ----------------------------
+    # LLM-based entity extraction
+    # ----------------------------
+    def _llm_extract_entity(self, query: str) -> Optional[str]:
+        """
+        Extract single core subject from query (game title/entity) or None.
+        """
+        system = (
+            "You are a concise information-extraction helper. "
+            "Given a user's question, extract the single most likely core subject (game title, company, or entity). "
+            "If there is no clear specific subject, respond with 'NONE'."
+        )
 
-        # 4) look for "for <Game>" or "about <Game>"
-        m = re.search(r'(?:for|about)\s+([A-Z][\w\'\s:&-]{2,})', q)
-        if m:
-            cand = m.group(1).strip()
-            return cand.strip('?"\'')
+        examples = (
+            "Examples:\n"
+            "- Question: \"What are the minimum requirements for Assassin's Creed Valhalla?\"\n"
+            "  Subject: Assassin's Creed Valhalla\n"
+            "- Question: \"Tell me about Ubisoft's recent layoffs\"\n"
+            "  Subject: Ubisoft\n"
+            "- Question: \"How do I fix shader compilation errors on PC?\"\n"
+            "  Subject: NONE\n"
+        )
 
-        # 5) capitalized run of words (e.g., "Far Cry 5")
-        capitalized_runs = re.findall(r'(?:[A-Z][\w\'’-]+(?:\s+[A-Z][\w\'’-]+)+)', q)
-        if capitalized_runs:
-            capitalized_runs.sort(key=lambda s: len(s), reverse=True)
-            return capitalized_runs[0].strip()
+        prompt = (
+            f"{system}\n\n{examples}\n\nQuestion: \"{query.strip()}\"\n\n"
+            "Answer with ONLY the subject on a single line, or EXACTLY the word NONE if there is no specific subject."
+        )
 
-        # 6) fallback to last 3 words
-        tokens = re.findall(r"\w+'?\w+|\w+", q)
-        if len(tokens) >= 3:
-            return " ".join(tokens[-3:]).strip()
-        elif tokens:
-            return " ".join(tokens).strip()
+        try:
+            self._log("LLM extracting entity from query.")
+            resp = self._call_llm(prompt, max_tokens=64, temperature=0.0)
+            if not resp:
+                return None
+            ans = resp.strip().splitlines()[0].strip()
+            if not ans:
+                return None
+            if ans.upper() in ("NONE", "NO", "N/A", "NONE FOUND"):
+                return None
+            for prefix in ("Subject:", "subject:", "Answer:", "answer:"):
+                if ans.startswith(prefix):
+                    ans = ans[len(prefix):].strip()
+            if not ans:
+                return None
+            return ans
+        except ImportError as ie:
+            self._log(f"LLM extract failed (modal missing): {ie}")
+            return None
+        except Exception as e:
+            self._log(f"LLM extract failed: {e}; falling back to None")
+            return None
 
-        return ""
+    # ----------------------------
+    # Internal: detect wrapper/boilerplate responses
+    # ----------------------------
+    def _is_wrapper_only_response(self, text: str) -> bool:
+        """
+        Heuristic to detect common wrapper/boilerplate-only replies that are NOT the expected two-line output.
+        Example observed: "Do not provide additional context or explanations beyond the requested format."
+        """
+        if not text:
+            return False
+        low = text.strip().lower()
+        # common patterns that appear when a system wrapper is echoed
+        patterns = [
+            "do not provide additional context",
+            "do not provide additional context or explanations",
+            "do not include additional context",
+            "only respond with",
+            "do not provide any additional",
+            "do not provide any other text",
+            "please only respond with",
+        ]
+        for p in patterns:
+            if p in low:
+                return True
+        return False
 
+    # ----------------------------
+    # LLM-based relevance grading (Chain-of-Thought style) with retry
+    # ----------------------------
+    def _llm_grade_relevance(self, query: str, chunks: List[Dict[str, Any]]) -> Optional[bool]:
+        """
+        Improved LLM-based relevance grading.
+
+        Required LLM output (two-line):
+            Reasoning: <one-sentence explanation>
+            Relevant: YES or NO
+
+        Robustness:
+         - If LLM returns wrapper/boilerplate-only message, retry once with stricter prompt.
+         - Strip common boilerplate lines before parsing.
+         - If still ambiguous, return None to trigger fallback behavior.
+        """
+        top_chunks = (chunks or [])[: self.grade_top_n]
+        if not top_chunks:
+            return False
+
+        # Build concise context
+        ctx_parts = []
+        for i, c in enumerate(top_chunks, start=1):
+            tid = c.get("id") or c.get("doc_id") or f"chunk{i}"
+            title = c.get("title") or ""
+            content = (c.get("content") or c.get("text") or "")
+            snippet = (content or "").strip().replace("\n", " ")
+            if len(snippet) > 600:
+                snippet = snippet[:600].rsplit(" ", 1)[0] + " ..."
+            score = c.get("score")
+            ctx_parts.append(f"CHUNK {i} ID:{tid} SCORE:{score}\nTITLE: {title}\nTEXT: {snippet}")
+
+        context_combined = "\n\n---\n\n".join(ctx_parts)
+
+        system = (
+            "You are a Reasoning Validator. Step 1: Read the user's request precisely. "
+            "Step 2: Check whether the provided text contains the exact information required to answer it "
+            "(not just mentions, sales, or other loosely related facts). "
+            "If the context contains the specific factual items needed (e.g. explicit minimum system requirements: OS, CPU, GPU, RAM), mark Relevant: YES. "
+            "If the context lacks the specific facts and only mentions the title, sales, release dates, etc., mark Relevant: NO."
+        )
+
+        few_shot = (
+            "Examples:\n"
+            "- User: \"What are the specs for Game X?\"\n"
+            "  Context: \"Game X is on sale for $20.\"\n"
+            "  Assistant: Reasoning: The text mentions Game X and prices but does not list hardware specifications (CPU, GPU).\n"
+            "             Relevant: NO\n\n"
+            "- User: \"What are the minimum system requirements for AmazingGame?\"\n"
+            "  Context: \"Minimum: OS Windows 10; CPU Intel i5-2400; GPU GTX 970; RAM 8GB\"\n"
+            "  Assistant: Reasoning: The context lists explicit minimum OS, CPU, GPU and RAM values.\n"
+            "             Relevant: YES\n"
+        )
+
+        base_prompt = (
+            f"{system}\n\n{few_shot}\nUser question: {query.strip()}\n\n"
+            f"Context (top {len(top_chunks)} chunks):\n{context_combined}\n\n"
+            "Answer EXACTLY in the following two-line format (NO additional text):\n"
+            "Reasoning: <one-sentence explanation>\n"
+            "Relevant: YES or NO\n"
+            "If unsure, respond with Relevant: NO."
+        )
+
+        # send prompt and possibly retry once
+        try:
+            self._log("LLM grading relevance of top chunks (Reasoning Validator).")
+            resp = self._call_llm(base_prompt, max_tokens=180, temperature=0.0)
+        except ImportError as ie:
+            self._log(f"LLM grade call failed (modal missing): {ie}")
+            return None
+        except Exception as e:
+            self._log(f"LLM grade call failed: {e}\n{traceback.format_exc()}")
+            return None
+
+        # If the model returned a wrapper-only string, attempt a single retry with even stricter instruction
+        if self._is_wrapper_only_response(resp):
+            self._log("Detected wrapper/boilerplate-only LLM response; retrying once with stricter prompt.")
+            strict_prompt = (
+                "STRICT INSTRUCTIONS: You MUST reply with EXACTLY two non-empty lines and nothing else.\n"
+                "Line1: Reasoning: <one-sentence explanation>\n"
+                "Line2: Relevant: YES or NO\n"
+                "Do NOT include any other text, disclaimers, or meta-instructions. If you cannot comply, answer:\n"
+                "Reasoning: Could not comply with formatting\nRelevant: NO\n\n"
+            ) + base_prompt
+            try:
+                resp_retry = self._call_llm(strict_prompt, max_tokens=120, temperature=0.0)
+                # prefer retry if it looks usable
+                if resp_retry and not self._is_wrapper_only_response(resp_retry):
+                    resp = resp_retry
+                else:
+                    self._log("Retry did not produce usable judgment; proceeding to parse what we have.")
+            except Exception as e:
+                self._log(f"Retry failed: {e}")
+
+        # Normalize and filter out common assistant boilerplate lines before parsing
+        def sanitize_lines(raw_text: str) -> List[str]:
+            if not raw_text:
+                return []
+            lines = [ln.strip() for ln in raw_text.strip().splitlines() if ln.strip()]
+            filtered = []
+            for ln in lines:
+                low = ln.lower()
+                # remove assistant wrapper-like sentences
+                if (
+                    "do not provide additional context" in low
+                    or "do not include additional context" in low
+                    or "only respond with" in low
+                    or "please only respond with" in low
+                    or low.startswith("assistant:")
+                ):
+                    # skip boilerplate
+                    continue
+                filtered.append(ln)
+            return filtered
+
+        lines = sanitize_lines(resp)
+
+        # Primary parsing: look for explicit 'Relevant:' line
+        relevant_val: Optional[bool] = None
+        for ln in lines:
+            up = ln.upper()
+            if up.startswith("RELEVANT:"):
+                try:
+                    val = ln.split(":", 1)[1].strip().upper()
+                    if val.startswith("YES"):
+                        relevant_val = True
+                        break
+                    if val.startswith("NO"):
+                        relevant_val = False
+                        break
+                except Exception:
+                    continue
+
+        # Fallback tolerant parsing if no explicit line
+        if relevant_val is None:
+            combined = " ".join(lines).upper()
+            tokens = [t.strip(".,;:") for t in combined.split()]
+            if "RELEVANT: YES" in combined:
+                relevant_val = True
+            elif "RELEVANT: NO" in combined:
+                relevant_val = False
+            else:
+                # conservative rule: require explicit YES token and no NO token
+                if "YES" in tokens and "NO" not in tokens:
+                    relevant_val = True
+                elif "NO" in tokens:
+                    relevant_val = False
+
+        if relevant_val is not None:
+            return relevant_val
+
+        # Still ambiguous: log and return None for fallback
+        self._log(f"Ambiguous LLM relevance output after parsing; raw response: {resp!r}")
+        return None
+
+    # ----------------------------
+    # Helper: compute top raw score (simple stub)
+    # ----------------------------
     def _top_score_from_results(self, results: List[Dict[str, Any]]) -> float:
-        """
-        Compute the top per-chunk score from results defensively.
-        """
+        top = 0.0
         if not results:
             return 0.0
-        top = 0.0
         for r in results:
-            s = r.get("score")
-            if s is None:
-                # if no explicit score, attempt to read from _raw._additional.certainty/distance
-                add = r.get("_raw", {}).get("_additional", {}) if isinstance(r.get("_raw"), dict) else {}
-                s = None
-                if isinstance(add, dict):
-                    if add.get("certainty") is not None:
-                        try:
-                            s = float(add.get("certainty"))
-                        except Exception:
-                            s = None
-                    elif add.get("distance") is not None:
-                        try:
-                            d = float(add.get("distance"))
-                            if d and d > 0 and d != float("inf"):
-                                s = 1.0 / (1.0 + d)
-                        except Exception:
-                            s = None
+            s = r.get("score", 0.0)
             try:
-                sval = float(s) if s is not None else 0.0
+                s = float(s)
             except Exception:
-                sval = 0.0
-            if sval > top:
-                top = sval
-        return float(top)
+                s = 0.0
+            if s > top:
+                top = s
+        return top
 
+    # ----------------------------
+    # MAIN AGENT LOOP (simplified)
+    # ----------------------------
     def run(self, query: str, k: int = 10) -> Dict[str, Any]:
-        """
-        Execute the agent loop with score-threshold decisioning.
-
-        Returns a trace dict with:
-          - status: "success" | "success_after_fetch" | "low_confidence" | "failure" | "error"
-          - steps: list of steps executed
-          - results: final list of chunks (may be empty)
-          - top_score_before, top_score_after
-          - did_fetch: bool
-          - low_confidence: bool
-        """
         steps: List[str] = []
         final_results: List[Dict[str, Any]] = []
-        status = "failure"
-        top_score_before = 0.0
-        top_score_after = 0.0
         did_fetch = False
-        low_confidence = False
 
-        self._log("Retrieving initial results (unthresholded) to evaluate top score...")
+        self._log("Retrieving initial results (no similarity threshold)...")
         steps.append("retriever")
+
         try:
             retriever_tool: Tool = self.registry.get(self._retriever_tool_name)
         except Exception as e:
-            msg = f"Retriever tool not found in registry: {e}"
-            logger.exception(msg)
-            return {"status": "error", "error": msg, "steps": steps, "results": []}
+            return {"status": "error", "error": f"Missing retriever tool: {e}", "steps": steps}
 
-        # Request unthresholded results so we can inspect score distribution
         try:
-            results = retriever_tool.execute({"query": query, "k": self.top_k_for_score, "similarity_threshold": None})
+            results = retriever_tool.execute(
+                {"query": query, "k": self.top_k_for_score, "similarity_threshold": None}
+            )
             if not isinstance(results, list):
-                logger.warning("Retriever returned non-list result; coercing to list")
-                results = list(results) if results is not None else []
-        except Exception as e:
-            logger.exception("Retriever execution failed: %s", e)
+                results = list(results) if results else []
+        except Exception:
+            logger.exception("Retriever failed")
             results = []
 
         top_score_before = self._top_score_from_results(results)
-        self._log(f"Top score before decision: {top_score_before:.4f} (threshold={self.score_threshold:.4f})")
+        self._log(f"Top score before: {top_score_before:.4f} (threshold={self.score_threshold})")
 
-        # If we already have sufficiently confident results, return top-k (user-requested k)
-        if results and top_score_before >= self.score_threshold:
-            self._log(f"Retriever returned high-confidence top score {top_score_before:.4f}. Returning top {k} results.")
-            # Get final top-k (may re-run with threshold if desired; here we return existing results trimmed to k)
-            final_results = results[:k]
-            status = "success"
+        graded_relevance: Optional[bool] = None
+        try:
+            graded_relevance = self._llm_grade_relevance(query, results)
+            if graded_relevance is True:
+                self._log("LLM judged retrieved chunks RELEVANT to the question.")
+            elif graded_relevance is False:
+                self._log("LLM judged retrieved chunks NOT relevant to the question.")
+            else:
+                self._log("LLM returned ambiguous/no judgement; will fallback to score threshold.")
+        except Exception as e:
+            self._log(f"Relevance grading failed with exception: {e}; will fallback to score threshold.")
+
+        # If LLM explicitly says relevant -> return results
+        if graded_relevance is True and results:
+            self._log("Returning top results per LLM relevance judgment.")
             return {
-                "status": status,
+                "status": "success",
                 "steps": steps,
-                "results": final_results,
+                "results": results[:k],
                 "top_score_before": top_score_before,
-                "top_score_after": top_score_after,
-                "did_fetch": did_fetch,
-                "low_confidence": low_confidence,
+                "top_score_after": top_score_before,
+                "did_fetch": False,
+                "low_confidence": False,
+                "fetch_info": None,
+                "llm_judgement": "relevant",
             }
 
-        # Otherwise, we treat as a miss and attempt to fetch external data
-        self._log("Low retrieval hits / low confidence. Attempting to fetch external data.")
-        extracted_name = self._heuristically_extract_game_name(query)
-        if not extracted_name:
-            self._log("Could not heuristically extract a game name from the query. Will attempt fetch with the query string.")
-            extracted_name = query
-
-        # Call data_fetcher tool if available
-        try:
-            data_fetcher_tool: Tool = self.registry.get(self._data_fetcher_tool_name)
-            steps.append("data_fetcher")
-            did_fetch = True
-            self._log(f"Invoking data_fetcher to ingest data for: {extracted_name}")
+        # If LLM explicitly said NOT relevant OR (ambiguous and top score low) -> fetch
+        if graded_relevance is False or (graded_relevance is None and top_score_before < self.score_threshold):
+            self._log("Determined that retrieval is insufficient — will attempt data fetching.")
+            steps.append("data_fetch")
             try:
-                # pass through optional hints (agent might pass min_char_length to reduce noise)
-                fetch_args = {"game_name": extracted_name}
-                # If we want, we could pass min_char_length here; keep minimal for now.
-                fetch_res = data_fetcher_tool.execute(fetch_args)
-                if isinstance(fetch_res, dict):
-                    fetch_success = bool(fetch_res.get("success", False))
-                    self._log(f"data_fetcher finished: success={fetch_success}")
-                else:
-                    self._log("data_fetcher returned non-dict response; continuing to retry retrieval.")
-            except Exception as fe:
-                logger.exception("DataFetcherTool execution failed: %s", fe)
-                self._log("DataFetcherTool raised an exception; proceeding to retry retrieval anyway.")
-        except KeyError:
-            self._log("No data_fetcher tool registered; skipping ingestion step.")
-            did_fetch = False
-        except Exception as e:
-            logger.exception("Failed to access data_fetcher tool: %s", e)
-            self._log("Proceeding to retry retrieval despite missing data_fetcher.")
-            did_fetch = False
+                fetch_tool: Tool = self.registry.get(self._data_fetcher_tool_name)
+            except Exception as e:
+                return {"status": "error", "error": f"Missing data_fetcher tool: {e}", "steps": steps}
 
-        # Retry retrieval once more (unthresholded to measure score)
-        self._log("Retrying retrieval after ingestion attempt (unthresholded)...")
-        steps.append("retriever_retry")
-        try:
-            retry_results = retriever_tool.execute({"query": query, "k": self.top_k_for_score, "similarity_threshold": None})
-            if not isinstance(retry_results, list):
-                retry_results = list(retry_results) if retry_results is not None else []
-        except Exception as e:
-            logger.exception("Retry retriever execution failed: %s", e)
-            retry_results = []
+            try:
+                entity = self._llm_extract_entity(query)
+                fetch_args = {"game_name": entity or query}
+                fetch_res = fetch_tool.execute(fetch_args)
+                did_fetch = True
+                steps.append("retriever_after_fetch")
+                try:
+                    results = retriever_tool.execute({"query": query, "k": k})
+                except Exception:
+                    logger.exception("Retriever failed after fetch")
+                    results = []
+            except Exception as e:
+                self._log(f"Data fetch failed: {e}")
 
-        top_score_after = self._top_score_from_results(retry_results)
-        self._log(f"Top score after fetch: {top_score_after:.4f}")
-
-        # Decide final outcome
-        if retry_results and top_score_after >= self.score_threshold:
-            status = "success_after_fetch"
-            final_results = retry_results[:k]
-            self._log(f"Retry retrieved high-confidence results (top_score={top_score_after:.4f}). Returning top {k}.")
-        elif retry_results and len(retry_results) > 0:
-            # Low confidence but return best hits anyway
-            status = "low_confidence"
-            final_results = retry_results[:k]
-            low_confidence = True
-            self._log("Retry returned results but top score remains below threshold; returning top hits with low_confidence flag.")
-        else:
-            status = "failure"
-            final_results = []
-            self._log("Retry retrieval returned no results.")
-
-        trace = {
-            "status": status,
+        top_score_after = self._top_score_from_results(results)
+        low_confidence = top_score_after < self.score_threshold
+        return {
+            "status": "success",
             "steps": steps,
-            "results": final_results,
+            "results": results[:k],
             "top_score_before": top_score_before,
             "top_score_after": top_score_after,
             "did_fetch": did_fetch,
             "low_confidence": low_confidence,
+            "fetch_info": None,
+            "llm_judgement": "unknown" if graded_relevance is None else ("relevant" if graded_relevance else "not_relevant"),
         }
-        return trace
