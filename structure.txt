@@ -5,6 +5,14 @@ RAG_ent/
 │   ├── igdb_data.py                    # Parse IGDB → structured fields
 │   └── gamespot_data.py                # Parse GameSpot → structured fields
 │
+├── agent/                             # Vector DB + Embedding Infrastructure
+│   ├── tools/
+│   │   ├── data_fetcher_tool.py
+│   │   ├── registry.py
+│   │   └── retriever_tool.py
+│   ├── base.py
+│   └── core.py
+│
 ├── ingest/                             # Ingestion + Transformation Pipeline
 │   ├── loader.py                       # Load + normalize per-source canonical & docs
 │   ├── merge.py                        # Merge RAWG/IGDB/GameSpot → single canonical
