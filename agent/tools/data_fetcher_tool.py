@@ -1,12 +1,15 @@
-# agent/tools/data_fetcher_tool.py
 """
 agent/tools/data_fetcher_tool.py
 
 Tool wrapper around the project's ingest pipeline that programmatically
 orchestrates: fetch/merge -> chunk -> embed -> upsert.
 
-This variant adds an optional `min_char_length` arg to filter out very short
-chunks before embedding/upsert. This is optional and backwards-compatible.
+This updated variant returns a canonical/resolved game name when available
+(the RAWG-corrected / merged title) and, when possible, will relocate
+intermediate artifacts into a canonical outdir so downstream consumers
+(agents, logs, filenames) can rely on a stable, normalized title.
+
+See: original file uploaded by user for context. :contentReference[oaicite:0]{index=0}
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
+import shutil
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +42,14 @@ class DataFetcherTool(Tool):
       4) upsert_vectors
 
     The tool stores intermediate artifacts under a base_outdir (default "temp_data/").
+
+    Returns a dict with keys including (when available):
+      - success: bool
+      - game: original game_name argument
+      - canonical_name: name discovered in merged metadata (preferred for downstream use)
+      - chunks_upserted / processed / failed
+      - merged_path / chunks_path / vectors_path
+      - summary, notes
     """
 
     def __init__(
@@ -65,7 +77,7 @@ class DataFetcherTool(Tool):
 
     def _safe_outdir_for_game(self, game_name: str) -> str:
         # create a safe subdirectory for outputs per game
-        safe = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in game_name).strip().replace(" ", "_")
+        safe = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in (game_name or "")).strip().replace(" ", "_")
         outdir = os.path.join(self.base_outdir, safe or "game")
         os.makedirs(outdir, exist_ok=True)
         return outdir
@@ -81,7 +93,8 @@ class DataFetcherTool(Tool):
             - min_char_length: Optional[int] -- if provided, chunks shorter than this will be removed BEFORE embedding/upsert
 
         Returns:
-            A dict containing success status, game name, chunks_upserted, and a summary or error.
+            A dict containing success status, game name, canonical_name (if found),
+            chunks_upserted, and a summary or error.
         """
         try:
             if not isinstance(args, dict):
@@ -93,7 +106,9 @@ class DataFetcherTool(Tool):
 
             # pick out optional parameters
             explicit_outdir = args.get("outdir")
-            outdir = str(explicit_outdir) if explicit_outdir else self._safe_outdir_for_game(game_name)
+            # If caller provided explicit outdir, honor it; otherwise create safe outdir now
+            initial_outdir = str(explicit_outdir) if explicit_outdir else self._safe_outdir_for_game(game_name)
+            outdir = initial_outdir
             os.makedirs(outdir, exist_ok=True)
 
             # optional embed/upsert params
@@ -115,23 +130,61 @@ class DataFetcherTool(Tool):
             # Step 1: Fetch & Merge
             # -------------------------
             logger.info("Step 1: fetch & merge (merge_and_save)")
-            # merge_and_save returns path to saved merged file
+            # merge_and_save returns path to saved merged file (and merged file contains canonical metadata)
             merged_path = merge_and_save(game_name, outdir=outdir, validate=True)
             if not merged_path or not pathlib.Path(merged_path).exists():
                 raise RuntimeError(f"merge_and_save did not produce merged file (game={game_name})")
 
             logger.info("Merged file saved at: %s", merged_path)
 
-            # -------------------------
-            # Step 2: Chunking
-            # -------------------------
-            logger.info("Step 2: chunking (build_chunks_from_merged)")
-            # load merged object (build_chunks_from_merged expects merged obj; but also accepts the merged dict)
+            # Read merged object to detect canonical/resolved name (RAWG-corrected)
             import json
 
             with open(merged_path, "r", encoding="utf-8") as fh:
                 merged_obj = json.load(fh)
 
+            # Determine canonical name from merged object if possible
+            canonical_name = None
+            # common fields that might contain canonical/resolved titles
+            for key in ("canonical_name", "resolved_name", "title", "rawg_name", "name"):
+                val = merged_obj.get(key)
+                if val and isinstance(val, str) and val.strip():
+                    canonical_name = val.strip()
+                    break
+
+            notes: List[str] = []
+            if canonical_name and canonical_name != game_name:
+                notes.append(f"RAWG-corrected name: '{canonical_name}' (original request: '{game_name}')")
+                logger.info("Detected canonical name from merged metadata: %s", canonical_name)
+                # If caller did not provide an explicit outdir, relocate artifacts into canonical-named outdir
+                if not explicit_outdir:
+                    canonical_outdir = self._safe_outdir_for_game(canonical_name)
+                    if canonical_outdir != outdir:
+                        logger.info("Relocating artifacts into canonical outdir: %s", canonical_outdir)
+                        os.makedirs(canonical_outdir, exist_ok=True)
+                        # Move merged file into canonical_outdir
+                        try:
+                            new_merged_path = os.path.join(canonical_outdir, os.path.basename(merged_path))
+                            shutil.move(merged_path, new_merged_path)
+                            merged_path = new_merged_path
+                            outdir = canonical_outdir
+                            notes.append(f"Relocated merged file into canonical outdir: {canonical_outdir}")
+                        except Exception as ex_move:
+                            # If move fails, log and continue with original outdir (non-fatal)
+                            logger.exception("Failed to relocate merged file to canonical outdir: %s", ex_move)
+                            notes.append(f"Failed to relocate merged file to canonical outdir: {ex_move}")
+
+            else:
+                if canonical_name:
+                    logger.info("Canonical name equals requested name or not useful: %s", canonical_name)
+                else:
+                    logger.info("No canonical name discovered in merged metadata; continuing with original game_name.")
+                    notes.append("No canonical name discovered in merged metadata")
+
+            # -------------------------
+            # Step 2: Chunking
+            # -------------------------
+            logger.info("Step 2: chunking (build_chunks_from_merged)")
             chunks = ingest_chunking.build_chunks_from_merged(
                 merged_obj,
                 chunk_tokens=chunk_tokens,
@@ -158,7 +211,10 @@ class DataFetcherTool(Tool):
                 chunks = kept_chunks
                 logger.info("Filtered %d chunks shorter than min_char_length=%d; remaining=%d", filtered_out_count, min_char_length, len(chunks))
 
-            chunks_path = os.path.join(outdir, f"{(merged_obj.get('title') or game_name).strip().lower().replace(' ', '_')}_chunks.jsonl")
+            # Name chunk file using canonical title if available, else merged title or original game_name
+            chunk_title = (merged_obj.get("title") or canonical_name or game_name).strip()
+            safe_chunk_title = chunk_title.lower().replace(" ", "_")
+            chunks_path = os.path.join(outdir, f"{safe_chunk_title}_chunks.jsonl")
             ingest_chunking.save_chunks_jsonl(chunks, chunks_path)
             logger.info("Chunks saved to %s (count=%d, original=%d)", chunks_path, len(chunks), original_chunk_count)
 
@@ -166,7 +222,7 @@ class DataFetcherTool(Tool):
             # Step 3: Embed
             # -------------------------
             logger.info("Step 3: embedding (embed_and_save)")
-            vectors_path = vectors_filename or os.path.join(outdir, f"{(merged_obj.get('title') or game_name).strip().lower().replace(' ', '_')}_vectors.jsonl")
+            vectors_path = vectors_filename or os.path.join(outdir, f"{safe_chunk_title}_vectors.jsonl")
             embed_and_save(
                 chunks_path=chunks_path,
                 out_path=vectors_path,
@@ -200,16 +256,18 @@ class DataFetcherTool(Tool):
             failed_count = int(upsert_result.get("failed", 0))
 
             summary = (
-                f"Ingestion completed for '{game_name}'. "
+                f"Ingestion completed for requested='{game_name}' canonical='{canonical_name or game_name}'. "
                 f"Merged: {merged_path}. Chunks: {chunks_path} ({len(chunks)} chunks, original={original_chunk_count}). "
                 f"Vectors: {vectors_path}. Upsert processed={processed} success={success_count} failed={failed_count}."
             )
 
             logger.info(summary)
 
-            return {
+            # Build result payload including canonical name if present
+            result_payload: Dict[str, Any] = {
                 "success": True,
                 "game": game_name,
+                "canonical_name": canonical_name,
                 "chunks_upserted": success_count,
                 "processed": processed,
                 "failed": failed_count,
@@ -219,7 +277,14 @@ class DataFetcherTool(Tool):
                 "vectors_path": vectors_path,
                 "original_chunk_count": original_chunk_count,
                 "filtered_out_count": filtered_out_count,
+                "notes": notes,
+                "merged_obj": merged_obj,  # include merged metadata for downstream inspection if needed
             }
+
+            # Optionally provide upsert result meta
+            result_payload["upsert_result"] = upsert_result
+
+            return result_payload
 
         except Exception as exc:
             logger.exception("DataFetcherTool failed: %s", exc)
