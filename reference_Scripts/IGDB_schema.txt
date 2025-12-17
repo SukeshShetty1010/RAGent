@@ -1,0 +1,127 @@
+<data_audit>
+  - Mixed entity types detected within the `clean` array, including:
+    - Base Game (e.g., Assassin's Creed Valhalla)
+    - Paid Expansions (e.g., Dawn of Ragnarök, Wrath of the Druids)
+    - Free Content / Title Updates (e.g., River Raids, Mastery Challenge)
+    - Editions (Gold, Ultimate, Complete, Collector’s, Deluxe)
+    - Bundles (multi-game bundles, season pass bundles)
+  - Strong relational signals present via `parent_game` and `version_parent`, indicating hierarchical dependencies.
+  - All categorical dimensions (genres, platforms, themes, involved_companies, keywords, tags) are represented strictly as integer IDs (Foreign Keys).
+  - Temporal fields (`first_release_date`, `created_at`, `updated_at`) are Unix Epoch timestamps.
+  - `checksum` field present on every entity, suitable for change detection and incremental updates.
+  - Text fields (`summary`, `storyline`) contain newlines and extended prose but no HTML markup; normalization is still required.
+  - `game_type` field is consistently populated and can be used as a primary classifier signal.
+</data_audit>
+
+<classification_logic>
+  - Base Game:
+    - Condition:
+      - `game_type == 0`
+      - AND no `parent_game`
+      - AND no `version_parent`
+    - Result: Root entity in the franchise graph.
+  - Expansion / DLC (Narrative or Gameplay Add-on):
+    - Condition:
+      - `parent_game` exists
+      - AND `game_type IN (1, 2)`
+    - Result: Child entity linked to Base Game via `parent_game`.
+  - Free Updates / Title Updates:
+    - Condition:
+      - `parent_game` exists
+      - AND `game_type == 14`
+    - Result: Operational content; store separately from paid DLC.
+  - Editions (Gold, Ultimate, Complete, Collector’s, etc.):
+    - Condition:
+      - `version_parent` exists
+      - AND `game_type == 0`
+    - Result: Commercial variants; do NOT treat as standalone games.
+  - Bundles / Season Passes:
+    - Condition:
+      - `game_type == 3`
+    - Result: Commercial aggregation; link via associative tables.
+  - Standalone Experiences (e.g., Discovery Tour):
+    - Condition:
+      - `game_type IN (4)`
+    - Result: Semi-independent products; still reference base game when `parent_game` exists.
+</classification_logic>
+
+<cleaning_steps>
+  - Step 1: Entity Separation
+    - Iterate through `clean` array and classify each record using the rules above.
+    - Assign a normalized `entity_type` field (BASE_GAME, EXPANSION, EDITION, BUNDLE, UPDATE).
+  - Step 2: Temporal Normalization
+    - Convert all Unix Epoch timestamps to ISO-8601 dates:
+      - `first_release_date` → `YYYY-MM-DD`
+      - `created_at`, `updated_at` → `YYYY-MM-DDTHH:MM:SSZ`
+  - Step 3: Text Normalization
+    - Trim leading/trailing whitespace.
+    - Normalize newlines to `\n`.
+    - Preserve full prose for `summary` and `storyline`.
+  - Step 4: Relationship Extraction
+    - Store `parent_game` and `version_parent` as explicit foreign keys.
+    - Build a separate relationship table to support graph traversal.
+  - Step 5: ID Integrity Preservation
+    - Retain all ID-only arrays exactly as received (no resolution at this stage).
+    - Ensure arrays default to empty lists if missing.
+  - Step 6: Deduplication Guard
+    - Use `(id, checksum)` as the immutable identity for update detection.
+</cleaning_steps>
+
+<target_schema>
+  Main_Game_Table:
+    - game_id (PK, Int)
+    - name (String)
+    - entity_type (Enum: BASE_GAME)
+    - first_release_date (Date)
+    - aggregated_rating (Float)
+    - total_rating (Float)
+    - checksum (UUID)
+    - created_at (DateTime)
+    - updated_at (DateTime)
+    - summary (Text)
+    - storyline (Text)
+
+  Expansion_Table:
+    - expansion_id (PK, Int)
+    - parent_game_id (FK → Main_Game_Table.game_id)
+    - name (String)
+    - expansion_type (Enum: DLC, FREE_UPDATE)
+    - first_release_date (Date)
+    - checksum (UUID)
+
+  Edition_Table:
+    - edition_id (PK, Int)
+    - base_game_id (FK → Main_Game_Table.game_id)
+    - edition_title (String)
+    - checksum (UUID)
+
+  Bundle_Table:
+    - bundle_id (PK, Int)
+    - name (String)
+    - checksum (UUID)
+
+  Game_Relationship_Table:
+    - source_game_id (Int)
+    - target_game_id (Int)
+    - relationship_type (Enum: PARENT_OF, VERSION_OF, INCLUDES)
+
+  Dimension_FK_Tables (shared across all entities):
+    - game_id (FK)
+    - genre_ids (Array[Int])
+    - platform_ids (Array[Int])
+    - theme_ids (Array[Int])
+    - company_ids (Array[Int])
+    - keyword_ids (Array[Int])
+    - tag_ids (Array[Int])
+</target_schema>
+
+<integration_notes>
+  - ID-only fields must be resolved via separate IGDB endpoint fetches:
+    - `/genres`, `/platforms`, `/themes`, `/companies`, etc.
+  - Recommend maintaining local dimension tables with `(id, name, checksum)` for MDM consistency.
+  - `checksum` should be used to detect upstream IGDB changes and trigger selective reprocessing.
+  - Editions and Bundles should be excluded from search indexing but included in commerce and ownership logic.
+  - This schema maps cleanly to both:
+    - Relational databases (PostgreSQL with FK constraints)
+    - Graph databases (Neo4j / Neptune) using `parent_game` and `version_parent` as edges.
+</integration_notes>

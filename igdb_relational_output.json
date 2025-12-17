@@ -1,0 +1,1416 @@
+{
+  "Main_Game_Table": [
+    {
+      "id": 133004,
+      "name": "Assassin's Creed Valhalla",
+      "parent_game": null,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 0,
+      "first_release_date": "2020-11-10T00:00:00Z",
+      "created_at": "2020-04-30T05:32:05Z",
+      "updated_at": "2025-12-17T08:50:13Z",
+      "summary": "In Assassin's Creed Valhalla, become Eivor, a legendary Viking raider on a quest for glory. Explore a dynamic and beautiful open world set against the brutal backdrop of England’s Dark Ages. Raid your enemies, grow your settlement, and build your political power in the quest to earn a place among the gods in Valhalla.",
+      "storyline": "Driven from Norway by endless wars and dwindling resources in the ninth century CE, players will lead Eivor's clan of Norsemen across the icy North Sea to the rich lands of England's broken kingdoms. Players must carve out a new future for their clan, reliving the ruthless fighting style of Viking warriors with a revamped combat system that includes the ability to dual-wield weapons against a greater variety of enemies than ever before.\n\nTo secure resources players can lead raids to select locations using their longship to earn much-needed riches and resources. As the Vikings begin to settle in their new home, they encounter resistance from the Saxons including King Aelfred of Wessex, who denounces them as heathens and looks to be the sole ruler of a civilized England. Against all odds, Eivor must do what is necessary to keep Valhalla within reach.[4]",
+      "aggregated_rating": 85.08333333333333,
+      "total_rating": 79.73404976650363,
+      "checksum": "d6d82d3a-d5f0-9735-2d32-79b19b200eb0",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [
+        367,
+        1095,
+        1575,
+        27054
+      ],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487,
+        536871279,
+        536872007,
+        536872487,
+        536897966
+      ],
+      "involved_companies": [
+        155414,
+        155418,
+        104781,
+        202100,
+        155416,
+        155424,
+        155425,
+        155422,
+        155423,
+        257201,
+        155413,
+        155415,
+        155417,
+        155420,
+        155426,
+        155427,
+        155419,
+        155421
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    }
+  ],
+  "Expansion_Table": [
+    {
+      "id": 185706,
+      "name": "Assassin's Creed Valhalla: Dawn of Ragnarök",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 2,
+      "first_release_date": "2022-03-10T00:00:00Z",
+      "created_at": "2021-12-13T17:07:20Z",
+      "updated_at": "2025-12-10T02:51:47Z",
+      "summary": "In the most ambitious expansion in franchise history, Eivor must embrace their destiny as Odin, the Norse god of Battle and Wisdom. Unleash new divine powers as you embark on a desperate quest through a breathtaking world. Complete a legendary Viking saga and save your son in the face of the gods’ doom.",
+      "storyline": "Wield incredible, otherworldly powers. Absorb new abilities from those you’ve defeated and use them to slay all who stand in your way. Shape-shift into a raven for spectacular assassinations or resurrect your defeated foes to fight on your side. Transform your skin into magma to protect yourself, infuse your weapon with ice to unleash devastating strikes, and more.\n\nFaced with visions of a new threat, Eivor must embrace their destiny as Odin and enter the mythical dwarven realm of Svartalfheim, a beautiful but hostile world under invasion. From underground forges to soaring golden peaks, immerse yourself in a vast, perilous new world of Norse mythology as you embrace your fate as a Norse god.\n\nFace off against Jotnars, foes of ice from Jotunheim, and Muspels, new enemies of fire from Muspelheim. Battle a wide range of enemy archetypes, infiltrate their strongholds, and wield their own powers against them as you grow stronger. At the head of this army stands Surtr, an unkillable fire giant and the greatest enemy that Odin has ever faced.\n\nAs Odin, embark on a desperate quest to rescue your son, Baldr, from imprisonment at the hands of an unspeakable foe. Use your wit and cunning to infiltrate hostile territory, gain dwarven allies, and take revenge on Baldr’s captors. Odin’s journey will force him to confront his own fate against the certain doom of Ragnarök.",
+      "aggregated_rating": 75.0,
+      "total_rating": 71.00996292502151,
+      "checksum": "16287365-27e2-5530-317b-b47f8ced07fa",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        162023,
+        202105
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 140175,
+      "name": "Assassin's Creed Valhalla: The Siege of Paris",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 2,
+      "first_release_date": "2021-08-12T00:00:00Z",
+      "created_at": "2020-10-20T19:21:40Z",
+      "updated_at": "2025-12-11T03:47:39Z",
+      "summary": "Sail to the kingdom of Francia and engage the forces of Charles the Fat as you participate in the Vikings' most daring conquest. Infiltrate the city of Paris, forge new alliances within its walls, and strike a blow that will shatter an empire.",
+      "storyline": null,
+      "aggregated_rating": 75.5,
+      "total_rating": 72.08577229041846,
+      "checksum": "996d20bb-5d10-46bd-81c6-482b9a54761d",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        151484,
+        202120
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 140174,
+      "name": "Assassin's Creed Valhalla: Wrath of the Druids",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 2,
+      "first_release_date": "2021-05-13T00:00:00Z",
+      "created_at": "2020-10-20T19:19:48Z",
+      "updated_at": "2025-12-12T08:03:15Z",
+      "summary": "Eivor’s latest journey takes them to shores of Ireland, where the newly-appointed High-King Flann Sinna seeks to unite four disparate regions under a single Irish banner. Along the way, Eivor will discover the secrets of an ancient druidic cult, encounter fearsome mythological creatures, and explore Ireland’s many mysteries.",
+      "storyline": null,
+      "aggregated_rating": 77.375,
+      "total_rating": 74.3715461765785,
+      "checksum": "63632f93-ee67-d98e-22e8-2103d0ad4daa",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        202109,
+        202110
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 211296,
+      "name": "Assassin's Creed Valhalla: Forgotten Saga",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 1,
+      "first_release_date": "2022-08-02T00:00:00Z",
+      "created_at": "2022-08-02T16:06:12Z",
+      "updated_at": "2025-09-25T19:29:47Z",
+      "summary": "This free game mode is inspired by the rogue-lite genre and presents players with a new challenge as enemies are relentless and every choice counts.",
+      "storyline": "Baldr, the Norse god of light and purity, is lost to Niflheim. Odin, mad with grief, refuses to accept that his son lies in the misty realm of the dead. Defying fate, the All-Father plunges into the depths of Niflheim to push through the hostile lands, but Niflheim is a realm of the dead, and the living are not welcome.\n\nThe lands of Niflheim are harsh and unforgiving. You will journey through various regions such as the ice-cold Kaldstad and the poisonous swamps of Nidheim, all the way to Hel’s Castle. Moving through these lands is no easy feat as Hel’s minions patrol the area, ready to attack any intruder on site.",
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "235f68aa-d106-4f61-b63a-028825b4e8c6",
+      "genres": [
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167
+      ],
+      "themes": [
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        38,
+        268435487
+      ],
+      "involved_companies": [
+        202111,
+        202112
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 196679,
+      "name": "Uno: Assassin's Creed Valhalla Theme Cards",
+      "parent_game": 22739,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 1,
+      "first_release_date": "2022-04-07T00:00:00Z",
+      "created_at": "2022-04-08T17:29:47Z",
+      "updated_at": "2025-12-13T18:16:02Z",
+      "summary": "Play your favorite card game like a Viking in UNO Valhalla DLC, inspired by the world of Assassin’s Creed Valhalla.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "f9d5d370-92f9-7921-6724-2ba717ec9f01",
+      "genres": [],
+      "platforms": [
+        169,
+        6,
+        49,
+        130
+      ],
+      "themes": [
+        35
+      ],
+      "keywords": [],
+      "tags": [
+        35
+      ],
+      "involved_companies": [],
+      "franchises": [],
+      "collections": []
+    },
+    {
+      "id": 150042,
+      "name": "Assassin's Creed Valhalla: The Way of the Berserker",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 1,
+      "first_release_date": "2020-11-10T00:00:00Z",
+      "created_at": "2021-05-28T09:07:27Z",
+      "updated_at": "2025-09-07T03:22:01Z",
+      "summary": "The Way of the Berserker is a single-player downloadable content addition for Assassin's Creed: Valhalla and was released on 10 November 2020 as a pre-order bonus. The content consists of three missions in which Eivor joins a legendary Norse Berserker on his quest for revenge.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": 59.9602560072036,
+      "checksum": "40388030-d354-159d-e421-726e710b92aa",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        18,
+        22,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        18,
+        22,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        325523,
+        325524
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 323775,
+      "name": "Assassin's Creed Valhalla: The Legend of Beowulf",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 1,
+      "first_release_date": "2020-11-10T00:00:00Z",
+      "created_at": "2024-11-29T17:31:57Z",
+      "updated_at": "2025-09-07T03:22:01Z",
+      "summary": "The Legend of Beowulf is a single-player downloadable content addition for Assassin's Creed: Valhalla that was released on 10 November 2020 for Season Pass holders. The content consists of three missions in which Eivor discovers the secrets behind the legendary hero Beowulf.\n\nThe Legend of Beowulf memories can be accessed after founding Ravensthorpe, but a Power Level of 20 is recommended.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "7676cd36-7baa-e2ea-6bca-229a337524e9",
+      "genres": [
+        4,
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        268435460,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        297502,
+        297503
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    }
+  ],
+  "Edition_Table": [
+    {
+      "id": 136108,
+      "name": "Assassin's Creed Valhalla: Limited Edition",
+      "parent_game": null,
+      "version_parent": 133004,
+      "version_title": "Limited Edition",
+      "game_type": 0,
+      "first_release_date": "2020-11-10T00:00:00Z",
+      "created_at": "2020-07-25T10:26:54Z",
+      "updated_at": "2025-12-11T22:28:47Z",
+      "summary": "The Limited Edition of the game includes: copy of the Assassin’s Creed Valhalla game, the Berserker Settlement Pack, The Hati Wolf Mount & a set of Runes.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "f534872f-2245-810f-07d4-6a5f7f90cce8",
+      "genres": [
+        12
+      ],
+      "platforms": [
+        169,
+        48,
+        167,
+        49
+      ],
+      "themes": [
+        1
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        268435468
+      ],
+      "involved_companies": [
+        202104
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 188167,
+      "name": "Assassin's Creed Valhalla: Ragnarök Edition",
+      "parent_game": null,
+      "version_parent": 133004,
+      "version_title": "Ragnarök Edition",
+      "game_type": 0,
+      "first_release_date": "2022-02-24T00:00:00Z",
+      "created_at": "2022-01-25T08:11:33Z",
+      "updated_at": "2025-12-11T22:28:46Z",
+      "summary": "Includes the game and the epic Dawn of Ragnarök expansion!\n\nIn Assassin's Creed Valhalla, you are Eivor, a fierce Viking warrior raised on tales of battle and glory. Explore a mysterious and beautiful open world set against the brutal backdrop of England's Dark Ages. Raid your enemies, grow your settlement, and build your political power in the quest to earn a place among the gods in Valhalla.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "ed6af332-79e9-b262-de9a-ef0ea84ce607",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        18,
+        22,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        18,
+        22,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        202103
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 134119,
+      "name": "Assassin's Creed Valhalla: Gold Edition",
+      "parent_game": null,
+      "version_parent": 133004,
+      "version_title": "Gold Edition",
+      "game_type": 0,
+      "first_release_date": "2020-11-10T00:00:00Z",
+      "created_at": "2020-05-23T10:52:15Z",
+      "updated_at": "2025-12-11T22:28:46Z",
+      "summary": "In Assassin's Creed: Valhalla, become Eivor, a legendary Viking raider on a quest for glory. Explore a dynamic and beautiful open world set against the brutal backdrop of England’s Dark Ages. Raid your enemies, grow your settlement, and build your political power in the quest to earn a place among the gods in Valhalla.\n\nAssassin's Creed: Valhalla - Gold Edition includes the game and the Season Pass.",
+      "storyline": "Playable as female or male, Eivor leads a clan of Norse people across the icy North Sea to flee Norway’s endless war and dwindling resources. If they hope to survive, they’ll have to build a new home in the hostile lands of England. There, you’ll provide for yourself and your people by constructing, customizing, and upgrading your settlement with new buildings like barracks, blacksmiths, and tattoo parlors, all while recruiting new members to grow your clan.",
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "2330d230-9776-efe9-c4a9-8dbfc0ab0255",
+      "genres": [
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        38,
+        268435487
+      ],
+      "involved_companies": [
+        104784,
+        202107
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 164835,
+      "name": "Assassin's Creed Valhalla: Deluxe Edition",
+      "parent_game": null,
+      "version_parent": 133004,
+      "version_title": "Deluxe Edition",
+      "game_type": 0,
+      "first_release_date": "2021-08-05T00:00:00Z",
+      "created_at": "2021-08-14T13:50:28Z",
+      "updated_at": "2025-12-11T22:28:47Z",
+      "summary": "Includes the game and Ultimate Pack, which contains the Berserker Gear Pack, Berserker Settlement Pack, and more!\n\nBecome Eivor, a legendary Viking warrior raised on tales of battle and glory. Explore a dynamic open world set against the brutal backdrop of England's Dark Ages. Raid your enemies, grow your clan's settlement, and build your political power on a quest for glory.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "a13177b0-d577-f622-c123-23daa55ba955",
+      "genres": [
+        12
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        38,
+        268435468
+      ],
+      "involved_companies": [],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 191960,
+      "name": "Assassin's Creed Valhalla: Complete Edition",
+      "parent_game": null,
+      "version_parent": 133004,
+      "version_title": "Complete Edition",
+      "game_type": 0,
+      "first_release_date": "2022-02-24T00:00:00Z",
+      "created_at": "2022-02-28T13:57:32Z",
+      "updated_at": "2025-12-11T22:28:46Z",
+      "summary": "Includes the game, all expansions, and more!\n\nIn Assassin's Creed Valhalla, you are Eivor, a fierce Viking warrior raised on tales of battle and glory. Explore a mysterious and beautiful open world set against the brutal backdrop of England's Dark Ages. Raid your enemies, grow your settlement, and build your political power in the quest to earn a place among the gods in Valhalla.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "85981c87-faa2-8622-5fc8-18fd05ccf397",
+      "genres": [
+        12
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        38,
+        268435468
+      ],
+      "involved_companies": [
+        202102
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 141160,
+      "name": "Assassin's Creed Valhalla: Collector's Edition",
+      "parent_game": null,
+      "version_parent": 133004,
+      "version_title": "Collector's Edition",
+      "game_type": 0,
+      "first_release_date": "2020-11-10T00:00:00Z",
+      "created_at": "2020-11-22T09:18:10Z",
+      "updated_at": "2025-10-12T21:12:23Z",
+      "summary": "In Assassin's Creed Valhalla, become Eivor, a legendary Viking raider on a quest for glory. Explore a dynamic and beautiful open world set against the brutal backdrop of England’s Dark Ages. Raid your enemies, grow your settlement, and build your political power in the quest to earn a place among the gods in Valhalla.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "f19f44d5-3fe3-28fa-a691-649ee7ab38e0",
+      "genres": [],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [],
+      "keywords": [],
+      "tags": [],
+      "involved_companies": [
+        113520,
+        202108
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 136132,
+      "name": "Assassin's Creed Valhalla: Ultimate Edition",
+      "parent_game": null,
+      "version_parent": 133004,
+      "version_title": "Ultimate Edition",
+      "game_type": 0,
+      "first_release_date": "2020-11-10T00:00:00Z",
+      "created_at": "2020-07-25T23:08:37Z",
+      "updated_at": "2025-12-11T22:28:46Z",
+      "summary": "In Assassin's Creed: Valhalla, become Eivor, a legendary Viking raider on a quest for glory. Explore a dynamic and beautiful open world set against the brutal backdrop of England’s Dark Ages. Raid your enemies, grow your settlement, and build your political power in the quest to earn a place among the gods in Valhalla.\n\nAssassin's Creed: Valhalla - Ultimate Edition includes the game, the Ultimate Pack and the Season Pass.",
+      "storyline": "Playable as female or male, Eivor leads a clan of Norse people across the icy North Sea to flee Norway’s endless war and dwindling resources. If they hope to survive, they’ll have to build a new home in the hostile lands of England. There, you’ll provide for yourself and your people by constructing, customizing, and upgrading your settlement with new buildings like barracks, blacksmiths, and tattoo parlors, all while recruiting new members to grow your clan.",
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "817a2ab2-e481-cc96-3346-e1ceef630480",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        38
+      ],
+      "keywords": [
+        962,
+        1095
+      ],
+      "tags": [
+        1,
+        22,
+        38,
+        268435468,
+        268435487,
+        536871874,
+        536872007
+      ],
+      "involved_companies": [
+        104786,
+        202117
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    }
+  ],
+  "Bundle_Table": [
+    {
+      "id": 164698,
+      "name": "Assassin's Creed Bundle: Assassin's Creed Valhalla, Assassin's Creed Odyssey, and Assassin's Creed Origins",
+      "parent_game": null,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 3,
+      "first_release_date": "2020-11-12T00:00:00Z",
+      "created_at": "2021-08-13T17:56:01Z",
+      "updated_at": "2025-12-11T22:28:47Z",
+      "summary": "A bundle including three Assassin's Creed titles: Assassin's Creed Valhalla, Assassin's Creed Odyssey, and Assassin's Creed Origins.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "54f8ad56-6b1d-49b6-0e02-7063c4c5e015",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        49
+      ],
+      "themes": [
+        1,
+        18,
+        22,
+        23,
+        38
+      ],
+      "keywords": [
+        22,
+        36041
+      ],
+      "tags": [
+        1,
+        18,
+        22,
+        23,
+        38,
+        268435468,
+        268435487,
+        536870934,
+        536906953
+      ],
+      "involved_companies": [
+        202119
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 293717,
+      "name": "Assassin's Creed Valhalla: Season Pass",
+      "parent_game": null,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 3,
+      "first_release_date": null,
+      "created_at": "2024-03-26T08:04:03Z",
+      "updated_at": "2025-07-15T19:03:07Z",
+      "summary": "Get access to epic content, explore new lands, and discover new gear with the Assassin's Creed Valhalla Season Pass.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "5d152314-45e0-840f-a4f9-afb925132695",
+      "genres": [],
+      "platforms": [
+        48,
+        6,
+        167
+      ],
+      "themes": [],
+      "keywords": [],
+      "tags": [],
+      "involved_companies": [],
+      "franchises": [],
+      "collections": []
+    },
+    {
+      "id": 271474,
+      "name": "Assassin's Creed Mirage & Assassin's Creed Valhalla Bundle",
+      "parent_game": null,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 3,
+      "first_release_date": "2023-10-05T00:00:00Z",
+      "created_at": "2023-10-12T02:14:59Z",
+      "updated_at": "2025-10-07T22:34:33Z",
+      "summary": "Play the two latest installments of the iconic Assassin's Creed franchise with Assassin's Creed Mirage and Assassin's Creed Valhalla.\n\nAssassin's Creed Mirage: Experience the story of Basim, a cunning street thief with nightmarish visions, seeking answers and justice as he navigates the bustling streets of ninth-century Baghdad. Through a mysterious, ancient organization known as the Hidden Ones, he will become a deadly Master Assassin and change his fate in ways he never could have imagined.\n\nAssassin's Creed Valhalla: Become Eivor, a legendary Viking warrior raised on tales of battle and glory. Explore England’s Dark Ages as you raid your enemies, grow your settlement, and build your political power in a quest to earn your place in Valhalla.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "ca64261b-d9c4-fcb4-0d93-d835947c3775",
+      "genres": [
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1
+      ],
+      "keywords": [
+        22,
+        960
+      ],
+      "tags": [
+        1,
+        268435487,
+        536870934,
+        536871872,
+        536873365
+      ],
+      "involved_companies": [
+        250213,
+        250214,
+        250215
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 164617,
+      "name": "Assassin's Creed Valhalla + Watch Dogs: Legion Bundle",
+      "parent_game": null,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 3,
+      "first_release_date": "2020-11-12T00:00:00Z",
+      "created_at": "2021-08-13T12:54:28Z",
+      "updated_at": "2025-12-11T22:28:46Z",
+      "summary": "A bundle including two Ubisoft games: Assassin's Creed Valhalla and Watch Dogs: Legion.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "497f2ff4-c941-930b-a3ea-ee9119c28fa5",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        167,
+        49
+      ],
+      "themes": [],
+      "keywords": [],
+      "tags": [
+        268435468,
+        268435487,
+        536873365
+      ],
+      "involved_companies": [
+        222176
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    },
+    {
+      "id": 164694,
+      "name": "Assassin's Creed Valhalla + Immortals Fenyx Rising Bundle",
+      "parent_game": null,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 3,
+      "first_release_date": "2021-03-01T00:00:00Z",
+      "created_at": "2021-08-13T17:40:28Z",
+      "updated_at": "2025-12-11T22:28:47Z",
+      "summary": "This bundle includes two Ubisoft games: Assassin's Creed Valhalla and Immortals Fenyx Rising.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "183d6655-dfb1-e2a6-f7ec-486d22b4d7d8",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [],
+      "keywords": [
+        960,
+        36041
+      ],
+      "tags": [
+        268435468,
+        268435487,
+        536871872,
+        536873365,
+        536906953
+      ],
+      "involved_companies": [
+        262698
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": []
+    }
+  ],
+  "Update_Table": [
+    {
+      "id": 222819,
+      "name": "Assassin's Creed Valhalla: Title Update 1.5.1",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2022-04-19T00:00:00Z",
+      "created_at": "2022-10-25T22:16:00Z",
+      "updated_at": "2025-09-07T03:22:01Z",
+      "summary": "This update comes with bug fixes and patches, as well as the Mastery Challenge Pack 2, the annual Ostara Festival, and more.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "c9e0ce24-5dc7-f17f-8635-3dfec54ae3b2",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        192114,
+        202106
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 228704,
+      "name": "Assassin's Creed Valhalla: River Raids",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2021-02-16T00:00:00Z",
+      "created_at": "2022-12-12T04:13:15Z",
+      "updated_at": "2025-10-07T22:34:29Z",
+      "summary": "River Raids is a free update for Assassin's Creed: Valhalla. Released as part of Title Update 1.1.2, the update adds the replayable river raiding mode based on the existing raiding feature in the base game and introduces three distinct maps of rivers for players to explore; namely the River Exe, the River Severn and the River Dee. The update also added new quests and a set of armor and weapon to obtain through the new map.\n\nAn additional update in conjunction with the Ostara Season content added a second armor set to be obtained.\n\nA third update introducing the River Erriff, the River Berbha and the River Rhine was released on 7 September 2021, featuring new questlines to obtain Lugh's Spear and the Ulfberht Sword.",
+      "storyline": "It all starts with the construction of the River Incursions Dock, where we recruit specific Jomsvikings for these navigations. Vagn, a dark-skinned Viking, is our guide in this expansion. We chose one of the six rivers on the map to navigate and we went on the attack! The new maps are all based on river systems, which consist of a meandering main course with islands and interconnecting side channels. Scattered along the banks of the river are civilian settlements, military compounds, monasteries and druid camps. Each of these location types offers different challenges and rewards. The maps are: River Exe, River Severn, River Dee, River Erriff, River Berbha and my favorite: the River Rhine (it's in France and it has a very big city, I was impressed!).",
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "8fdb3c44-dc63-2ff5-54af-7385dd5e3f5e",
+      "genres": [
+        12
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        268435468
+      ],
+      "involved_companies": [
+        202113,
+        202114
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 325329,
+      "name": "Assassin's Creed Valhalla: Shared History",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2022-11-29T00:00:00Z",
+      "created_at": "2024-12-11T22:29:23Z",
+      "updated_at": "2025-09-07T03:22:01Z",
+      "summary": "Shared History is a free update for Assassin's Creed: Valhalla. It follows Eivor Varinsdottir's meeting with Basim Ibn Ishaq's former mentor Roshan to combat common enemies who had joined forces against the two women.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "3d970e90-792f-151e-b66c-2e8c1a31f6d6",
+      "genres": [
+        4,
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435460,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        299220,
+        299221
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 222815,
+      "name": "Assassin's Creed Valhalla: Mastery Challenge",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2021-06-15T00:00:00Z",
+      "created_at": "2022-10-25T21:54:25Z",
+      "updated_at": "2025-09-07T03:22:00Z",
+      "summary": "Mastery Challenge is a free update that adds replayable trials designed to assess player proficiency in melee, ranged, and stealth objectives. As players complete these challenges, they can unlock a variety of unique rewards, including weapons, tattoos, and decorations.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "1556fb4c-afb6-bc10-f146-c79cac2e0ceb",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        192111,
+        202115
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 217563,
+      "name": "Assassin's Creed Valhalla: The Last Chapter",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2022-11-29T00:00:00Z",
+      "created_at": "2022-09-13T14:39:54Z",
+      "updated_at": "2025-09-07T03:22:01Z",
+      "summary": "The Last Chapter is a free update for Assassin's Creed: Valhalla and is the final part of Eivor Varinsdottir's story.\n\nWhile it was originally planned to release with Update 1.6.2 on 6 December 2022, an unforeseen scheduling error made it release a week early on 29 November instead.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "afaf3f28-98fb-cfa6-c9c9-75e235ceba12",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        186880,
+        186881
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 228706,
+      "name": "Assassin's Creed Valhalla: A Fated Encounter",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2021-12-14T00:00:00Z",
+      "created_at": "2022-12-12T04:22:02Z",
+      "updated_at": "2025-10-07T22:34:30Z",
+      "summary": "A Fated Encounter was a virtual representation of one of Eivor Varinsdottir's genetic memories, relived by Layla Hassan in 2020 through the Portable Animus HR-8.5. It was added via Title Update 1.4.1.",
+      "storyline": "The crossover sees both games receive a new free story arc update, with \"Those Who Are Treasured\" in Odyssey that sees Kassandra travel to the island of Korfu to explore the aftermath of obtaining the immortality-granting Staff of Hermes Trismegistus, while \"A Fated Encounter\" in Valhalla has Eivor travel to the Isle of Skye, where she encounters Kassandra.",
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "0927a2d8-301e-ecfa-72df-7a7032e19d07",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        196210
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 222834,
+      "name": "Assassin's Creed Valhalla: Tombs of the Fallen",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2021-11-09T00:00:00Z",
+      "created_at": "2022-10-26T09:25:53Z",
+      "updated_at": "2025-11-13T11:17:59Z",
+      "summary": "Tombs of the Fallen is a free content update introduced in version 1.4.0 of Assassin’s Creed Valhalla. It adds a series of puzzle-oriented tombs that invite players to explore vast underground caverns filled with traps, poison, and environmental challenges. Players must use observation, exploration, and parkour skills to navigate these ancient structures and uncover hidden treasures linked to the lore of a long-lost civilization. The content emphasizes non-combat exploration and environmental problem-solving over traditional missions. Additional tombs expanding this feature were released with title update 1.6.1",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "8dcbd3b5-b7e8-889a-2653-3c7853df6580",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        192146,
+        202116
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    },
+    {
+      "id": 222835,
+      "name": "Assassin's Creed Valhalla: Tombs of the Fallen Pack 2",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 14,
+      "first_release_date": "2022-09-27T00:00:00Z",
+      "created_at": "2022-10-26T09:46:16Z",
+      "updated_at": "2025-09-25T19:29:47Z",
+      "summary": "This free title update (1.6.1) expands on the Tombs of the Fallen that were introduced in update 1.4.0.\n\nThe journey of Tombs of the Fallen comes to an epic conclusion in this all-new addition. Find your way through three mysterious tombs rigged with ancient traps and complex puzzles. Only the most dedicated adventurers will discover buried secrets from a fallen civilization.\n\nObserve and explore deep waters, molten lava, and Isu teachings to solve ancient puzzles and acquire lost treasures.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "db89710a-0552-a3bf-d776-3b0cd0a55ec6",
+      "genres": [
+        12,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        22,
+        23,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        22,
+        23,
+        38,
+        268435468,
+        268435487
+      ],
+      "involved_companies": [
+        192147,
+        202125
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    }
+  ],
+  "Standalone_Experience_Table": [
+    {
+      "id": 152231,
+      "name": "Discovery Tour: Viking Age",
+      "parent_game": 133004,
+      "version_parent": null,
+      "version_title": null,
+      "game_type": 4,
+      "first_release_date": "2021-10-19T00:00:00Z",
+      "created_at": "2021-06-13T11:44:49Z",
+      "updated_at": "2025-12-12T11:02:20Z",
+      "summary": "Free to all owners of Assassin's Creed Valhalla, this addon will allow players to explore the game's world and provide a deeper dive into the history of the Viking age.",
+      "storyline": null,
+      "aggregated_rating": null,
+      "total_rating": null,
+      "checksum": "fcbda96e-7da9-c7b2-3696-f4100a79b496",
+      "genres": [
+        13,
+        31
+      ],
+      "platforms": [
+        170,
+        169,
+        48,
+        6,
+        167,
+        49
+      ],
+      "themes": [
+        1,
+        34,
+        38
+      ],
+      "keywords": [],
+      "tags": [
+        1,
+        34,
+        38,
+        268435469,
+        268435487
+      ],
+      "involved_companies": [
+        202280,
+        202281
+      ],
+      "franchises": [
+        571
+      ],
+      "collections": [
+        18
+      ]
+    }
+  ],
+  "Unclassified": []
+}

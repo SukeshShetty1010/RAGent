@@ -1,0 +1,167 @@
+{
+  "game_id": 437059,
+  "title": "Assassin's Creed Valhalla",
+  "description": "Become Eivor, a mighty Viking raider and lead your clan from the harsh shores of Norway to a new home amid the lush farmlands of ninth-century England. Explore a beautiful, mysterious open world where you'll face brutal enemies, raid fortresses, build your clan's new settlement, and forge alliances to win glory and earn a place in Valhalla. England in the age of the Vikings is a fractured nation of petty lords and warring kingdoms. Beneath the chaos lies a rich and untamed land waiting for a new conqueror. Will it be you?",
+  "release_date": "2020-11-10",
+  "release_year": 2020,
+  "platforms": [
+    {
+      "platform_name": "PC",
+      "platform_family": "PC",
+      "release_date": "2022-12-06",
+      "requirements_minimum": "Minimum:\nRequires a 64-bit processor and operating system\nOS: Windows 10 (versions 64 bits uniquement)\nProcessor: AMD Ryzen 3 1200 3.1 GHz / Intel Core i5-4460 3.2 GHz\nMemory: 8 GB RAM\nGraphics: AMD R9 380 /NVIDIA GeForce GTX 960\nDirectX: Version 12\nStorage: 160 GB available space",
+      "requirements_recommended": "Recommended:\nRequires a 64-bit processor and operating system\nOS: Windows 10 (versions 64 bits uniquement)\nProcessor: AMD Ryzen 5 1600 3.2 GHz / Intel Core i7-4790 3.6 GHz\nMemory: 8 GB RAM\nGraphics: AMD R9 380 /NVIDIA GeForce GTX 960\nDirectX: Version 12\nStorage: 160 GB available space"
+    },
+    {
+      "platform_name": "Xbox One",
+      "platform_family": null,
+      "release_date": "2020-11-10",
+      "requirements_minimum": null,
+      "requirements_recommended": null
+    },
+    {
+      "platform_name": "PlayStation 5",
+      "platform_family": null,
+      "release_date": "2020-11-10",
+      "requirements_minimum": null,
+      "requirements_recommended": null
+    },
+    {
+      "platform_name": "PlayStation 4",
+      "platform_family": null,
+      "release_date": "2020-11-10",
+      "requirements_minimum": null,
+      "requirements_recommended": null
+    },
+    {
+      "platform_name": "Xbox Series S/X",
+      "platform_family": null,
+      "release_date": "2020-11-10",
+      "requirements_minimum": null,
+      "requirements_recommended": null
+    }
+  ],
+  "genres": [
+    "Action",
+    "Adventure",
+    "RPG"
+  ],
+  "developers": [
+    "Ubisoft Montreal"
+  ],
+  "publishers": [
+    "Ubisoft Entertainment"
+  ],
+  "ratings": {
+    "average_rating": 3.69,
+    "rating_top": 4,
+    "metacritic": 82,
+    "distribution": [
+      {
+        "label": "recommended",
+        "percent": 44.54,
+        "count": 359
+      },
+      {
+        "label": "meh",
+        "percent": 24.44,
+        "count": 197
+      },
+      {
+        "label": "exceptional",
+        "percent": 21.59,
+        "count": 174
+      },
+      {
+        "label": "skip",
+        "percent": 9.43,
+        "count": 76
+      }
+    ],
+    "metacritic_by_platform": [
+      {
+        "platform": "Xbox Series S/X",
+        "score": 84
+      },
+      {
+        "platform": "Xbox One",
+        "score": 82
+      },
+      {
+        "platform": "PlayStation 4",
+        "score": 80
+      },
+      {
+        "platform": "PC",
+        "score": 82
+      },
+      {
+        "platform": "PlayStation 5",
+        "score": 84
+      }
+    ]
+  },
+  "tags": [
+    "Singleplayer",
+    "Multiplayer",
+    "Atmospheric",
+    "RPG",
+    "Story Rich",
+    "Open World",
+    "Third Person",
+    "Partial Controller Support",
+    "Fantasy",
+    "Gore",
+    "Female Protagonist",
+    "Violent",
+    "Stealth",
+    "Action-Adventure",
+    "Action RPG",
+    "Nudity",
+    "In-App Purchases",
+    "Captions available",
+    "Historical",
+    "Sexual Content",
+    "Assassin",
+    "Протагонистка",
+    "vikings"
+  ],
+  "age_rating": {
+    "esrb": null
+  },
+  "engagement": {
+    "added_by_status": {
+      "yet": 396,
+      "owned": 2273,
+      "beaten": 560,
+      "toplay": 679,
+      "dropped": 355,
+      "playing": 204
+    },
+    "reactions": {
+      "1": 2,
+      "2": 1,
+      "3": 4,
+      "4": 1,
+      "5": 2,
+      "7": 2,
+      "8": 1,
+      "9": 1,
+      "10": 1,
+      "11": 2,
+      "13": 5,
+      "14": 5,
+      "15": 6,
+      "16": 5,
+      "17": 1,
+      "18": 3,
+      "19": 2,
+      "20": 1,
+      "21": 3
+    }
+  },
+  "source": {
+    "rawg_url": "https://www.ubisoft.com/en-us/game/assassins-creed/valhalla",
+    "last_updated": "2025-12-04T19:24:45"
+  }
+}

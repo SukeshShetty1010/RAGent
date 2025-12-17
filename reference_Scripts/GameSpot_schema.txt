@@ -1,0 +1,87 @@
+<data_audit>
+  - Raw HTML detected in the `description` field (e.g., `<p>`, `<ul>`, `<a>`), making it unsuitable for NLP or analytics without sanitization.
+  - The `deck` field exists as a concise plain-text summary, but may be empty or missing in some Gamespot entries.
+  - Image assets are highly redundant: the `image` object contains multiple resolutions (`square_tiny`, `screen_tiny`, `original`, `super_url`) that represent the same visual content at different sizes.
+  - Association fields such as `genres`, `platforms`, `developers`, and `publishers` are lists of dictionaries (`{id, name, api_detail_url}`), which are verbose for analytical use.
+  - Dual identifiers are present: numeric `id` and string-based `guid`, both of which serve different lineage and deduplication purposes.
+  - Date fields like `release_date` are not guaranteed to be in a single normalized format across all records.
+  - Several fields may appear as empty lists (e.g., `themes`, `dlcs`) depending on the game, requiring defensive null/empty handling.
+</data_audit>
+
+<normalization_strategy>
+  Step 1: Identifier Preservation
+    - Retain both `id` (Int) and `guid` (String).
+    - Treat `guid` as the globally unique external identifier; `id` as an internal numeric key.
+
+  Step 2: Text Normalization
+    - Sanitize `description` by stripping all HTML tags and decoding HTML entities.
+    - Normalize whitespace and line breaks.
+    - Define roles:
+      - `deck` → short_summary
+      - `description` → full_description
+    - If `deck` is null or empty, generate `short_summary` by truncating the cleaned `full_description` to a fixed length (e.g., 300–400 chars).
+
+  Step 3: Image Asset Reduction
+    - From the `image` object, retain only:
+      - `original` (highest fidelity archival use), OR
+      - `super_url` (if more consistently available across records).
+    - Drop all thumbnail and low-resolution variants.
+
+  Step 4: Association Flattening
+    - For list-of-object fields (`genres`, `platforms`, `developers`, `publishers`):
+      - Extract only the `name` field.
+      - Convert to `List[String]`.
+    - Discard nested `api_detail_url` inside these lists (lineage is preserved at the top-level URLs).
+
+  Step 5: Platform Logic
+    - Keep only platform names (e.g., "PC", "PlayStation 5").
+    - Do not retain per-platform API URLs unless a later join back to Gamespot APIs is explicitly required.
+
+  Step 6: Date Standardization
+    - Convert `release_date` to ISO-8601 format (`YYYY-MM-DD`).
+    - If missing or null, explicitly store as `null` rather than an empty string.
+
+  Step 7: URL Lineage
+    - Preserve `api_detail_url` and `site_detail_url` verbatim.
+    - These fields anchor traceability back to Gamespot and must not be dropped.
+
+  Step 8: Null & Empty Handling
+    - Normalize all missing list fields to empty lists (`[]`).
+    - Normalize missing scalar fields to `null`.
+</normalization_strategy>
+
+<target_schema>
+  {
+    "id": Int,
+    "guid": String,
+
+    "title": String,
+    "short_summary": String,
+    "full_description": String,
+
+    "release_date": String,          // ISO-8601 (YYYY-MM-DD)
+
+    "genres": List[String],
+    "platforms": List[String],
+    "developers": List[String],
+    "publishers": List[String],
+
+    "image_url": String,              // original or super_url
+
+    "api_detail_url": String,
+    "site_detail_url": String,
+
+    "source": String                  // constant value: "gamespot"
+  }
+</target_schema>
+
+<python_pseudocode_hints>
+  - Use `html.unescape()` to decode HTML entities.
+  - Use `re.sub(r"<[^>]+>", " ", text)` or `BeautifulSoup(text, "html.parser").get_text()` for HTML stripping.
+  - Use `.get(key, default)` consistently to avoid KeyError on missing fields.
+  - For truncation logic:
+      `summary = deck or cleaned_description[:400]`
+  - For association flattening:
+      `[obj["name"] for obj in item.get("genres", []) if "name" in obj]`
+  - Use `datetime.fromisoformat()` or `datetime.strptime()` to normalize dates when necessary.
+</python_pseudocode_hints>

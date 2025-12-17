@@ -1,0 +1,476 @@
+{
+  "id": 437059,
+  "slug": "assassins-creed-valhalla",
+  "name": "Assassin's Creed Valhalla",
+  "name_original": "Assassin's Creed Valhalla",
+  "description": "<p>Become Eivor, a mighty Viking raider and lead your clan from the harsh shores of Norway to a new home amid the lush farmlands of ninth-century England. Explore a beautiful, mysterious open world where you&#39;ll face brutal enemies, raid fortresses, build your clan&#39;s new settlement, and forge alliances to win glory and earn a place in Valhalla.</p>\n<p>England in the age of the Vikings is a fractured nation of petty lords and warring kingdoms. Beneath the chaos lies a rich and untamed land waiting for a new conqueror. Will it be you?</p>",
+  "metacritic": 82,
+  "metacritic_platforms": [
+    {
+      "metascore": 84,
+      "url": "https://www.metacritic.com/game/xbox-series-x/assassins-creed-valhalla",
+      "platform": {
+        "platform": 186,
+        "name": "Xbox Series S/X",
+        "slug": "xbox-series-x"
+      }
+    },
+    {
+      "metascore": 82,
+      "url": "https://www.metacritic.com/game/xbox-one/assassins-creed-valhalla",
+      "platform": {
+        "platform": 1,
+        "name": "Xbox One",
+        "slug": "xbox-one"
+      }
+    },
+    {
+      "metascore": 80,
+      "url": "https://www.metacritic.com/game/playstation-4/assassins-creed-valhalla",
+      "platform": {
+        "platform": 18,
+        "name": "PlayStation 4",
+        "slug": "playstation4"
+      }
+    },
+    {
+      "metascore": 82,
+      "url": "https://www.metacritic.com/game/pc/assassins-creed-valhalla",
+      "platform": {
+        "platform": 4,
+        "name": "PC",
+        "slug": "pc"
+      }
+    },
+    {
+      "metascore": 84,
+      "url": "https://www.metacritic.com/game/playstation-5/assassins-creed-valhalla",
+      "platform": {
+        "platform": 187,
+        "name": "PlayStation 5",
+        "slug": "playstation5"
+      }
+    }
+  ],
+  "released": "2020-11-10",
+  "tba": false,
+  "updated": "2025-12-04T19:24:45",
+  "website": "https://www.ubisoft.com/en-us/game/assassins-creed/valhalla",
+  "rating": 3.69,
+  "rating_top": 4,
+  "ratings": [
+    {
+      "id": 4,
+      "title": "recommended",
+      "count": 359,
+      "percent": 44.54
+    },
+    {
+      "id": 3,
+      "title": "meh",
+      "count": 197,
+      "percent": 24.44
+    },
+    {
+      "id": 5,
+      "title": "exceptional",
+      "count": 174,
+      "percent": 21.59
+    },
+    {
+      "id": 1,
+      "title": "skip",
+      "count": 76,
+      "percent": 9.43
+    }
+  ],
+  "reactions": {
+    "1": 2,
+    "2": 1,
+    "3": 4,
+    "4": 1,
+    "5": 2,
+    "7": 2,
+    "8": 1,
+    "9": 1,
+    "10": 1,
+    "11": 2,
+    "13": 5,
+    "14": 5,
+    "15": 6,
+    "16": 5,
+    "17": 1,
+    "18": 3,
+    "19": 2,
+    "20": 1,
+    "21": 3
+  },
+  "added": 4467,
+  "added_by_status": {
+    "yet": 396,
+    "owned": 2273,
+    "beaten": 560,
+    "toplay": 679,
+    "dropped": 355,
+    "playing": 204
+  },
+  "playtime": 5,
+  "creators_count": 7,
+  "achievements_count": 484,
+  "parent_achievements_count": 61,
+  "reddit_url": "https://www.reddit.com/r/assassinscreed/",
+  "reddit_name": "",
+  "reddit_description": "",
+  "reddit_count": 1740,
+  "twitch_count": 101,
+  "youtube_count": 1000000,
+  "reviews_text_count": 24,
+  "ratings_count": 782,
+  "suggestions_count": 471,
+  "alternative_names": [
+    "Assassin's Creed Вальгалла"
+  ],
+  "metacritic_url": "https://www.metacritic.com/game/playstation-5/assassins-creed-valhalla",
+  "parents_count": 0,
+  "additions_count": 6,
+  "game_series_count": 22,
+  "user_game": null,
+  "reviews_count": 806,
+  "saturated_color": "0f0f0f",
+  "dominant_color": "0f0f0f",
+  "parent_platforms": [
+    {
+      "platform": {
+        "id": 1,
+        "name": "PC",
+        "slug": "pc"
+      }
+    },
+    {
+      "platform": {
+        "id": 2,
+        "name": "PlayStation",
+        "slug": "playstation"
+      }
+    },
+    {
+      "platform": {
+        "id": 3,
+        "name": "Xbox",
+        "slug": "xbox"
+      }
+    }
+  ],
+  "platforms": [
+    {
+      "platform": {
+        "id": 4,
+        "name": "PC",
+        "slug": "pc",
+        "year_end": null,
+        "year_start": null,
+        "games_count": 560107
+      },
+      "released_at": "2022-12-06",
+      "requirements": {
+        "minimum": "Minimum:\nRequires a 64-bit processor and operating system\nOS: Windows 10 (versions 64 bits uniquement)\nProcessor: AMD Ryzen 3 1200 3.1 GHz / Intel Core i5-4460 3.2 GHz\nMemory: 8 GB RAM\nGraphics: AMD R9 380 /NVIDIA GeForce GTX 960\nDirectX: Version 12\nStorage: 160 GB available space",
+        "recommended": "Recommended:\nRequires a 64-bit processor and operating system\nOS: Windows 10 (versions 64 bits uniquement)\nProcessor: AMD Ryzen 5 1600 3.2 GHz / Intel Core i7-4790 3.6 GHz\nMemory: 8 GB RAM\nGraphics: AMD R9 380 /NVIDIA GeForce GTX 960\nDirectX: Version 12\nStorage: 160 GB available space"
+      }
+    },
+    {
+      "platform": {
+        "id": 1,
+        "name": "Xbox One",
+        "slug": "xbox-one",
+        "year_end": null,
+        "year_start": null,
+        "games_count": 5722
+      },
+      "released_at": "2020-11-10",
+      "requirements": {}
+    },
+    {
+      "platform": {
+        "id": 187,
+        "name": "PlayStation 5",
+        "slug": "playstation5",
+        "year_end": null,
+        "year_start": 2020,
+        "games_count": 1391
+      },
+      "released_at": "2020-11-10",
+      "requirements": {}
+    },
+    {
+      "platform": {
+        "id": 18,
+        "name": "PlayStation 4",
+        "slug": "playstation4",
+        "year_end": null,
+        "year_start": null,
+        "games_count": 6962
+      },
+      "released_at": "2020-11-10",
+      "requirements": {}
+    },
+    {
+      "platform": {
+        "id": 186,
+        "name": "Xbox Series S/X",
+        "slug": "xbox-series-x",
+        "year_end": null,
+        "year_start": 2020,
+        "games_count": 1200
+      },
+      "released_at": "2020-11-10",
+      "requirements": {}
+    }
+  ],
+  "stores": [
+    {
+      "id": 882573,
+      "url": "",
+      "store": {
+        "id": 1,
+        "name": "Steam",
+        "slug": "steam",
+        "domain": "store.steampowered.com",
+        "games_count": 122943
+      }
+    },
+    {
+      "id": 428215,
+      "url": "",
+      "store": {
+        "id": 11,
+        "name": "Epic Games",
+        "slug": "epic-games",
+        "domain": "epicgames.com",
+        "games_count": 1429
+      }
+    },
+    {
+      "id": 428216,
+      "url": "",
+      "store": {
+        "id": 2,
+        "name": "Xbox Store",
+        "slug": "xbox-store",
+        "domain": "microsoft.com",
+        "games_count": 4932
+      }
+    },
+    {
+      "id": 454544,
+      "url": "",
+      "store": {
+        "id": 3,
+        "name": "PlayStation Store",
+        "slug": "playstation-store",
+        "domain": "store.playstation.com",
+        "games_count": 8064
+      }
+    }
+  ],
+  "developers": [
+    {
+      "id": 3709,
+      "name": "Ubisoft Montreal",
+      "slug": "ubisoft-montreal",
+      "games_count": 121
+    }
+  ],
+  "genres": [
+    {
+      "id": 4,
+      "name": "Action",
+      "slug": "action",
+      "games_count": 191338
+    },
+    {
+      "id": 3,
+      "name": "Adventure",
+      "slug": "adventure",
+      "games_count": 151526
+    },
+    {
+      "id": 5,
+      "name": "RPG",
+      "slug": "role-playing-games-rpg",
+      "games_count": 61860
+    }
+  ],
+  "tags": [
+    {
+      "id": 31,
+      "name": "Singleplayer",
+      "slug": "singleplayer",
+      "language": "eng",
+      "games_count": 250603
+    },
+    {
+      "id": 7,
+      "name": "Multiplayer",
+      "slug": "multiplayer",
+      "language": "eng",
+      "games_count": 42504
+    },
+    {
+      "id": 13,
+      "name": "Atmospheric",
+      "slug": "atmospheric",
+      "language": "eng",
+      "games_count": 39656
+    },
+    {
+      "id": 24,
+      "name": "RPG",
+      "slug": "rpg",
+      "language": "eng",
+      "games_count": 26562
+    },
+    {
+      "id": 118,
+      "name": "Story Rich",
+      "slug": "story-rich",
+      "language": "eng",
+      "games_count": 27224
+    },
+    {
+      "id": 36,
+      "name": "Open World",
+      "slug": "open-world",
+      "language": "eng",
+      "games_count": 9241
+    },
+    {
+      "id": 149,
+      "name": "Third Person",
+      "slug": "third-person",
+      "language": "eng",
+      "games_count": 14691
+    },
+    {
+      "id": 40845,
+      "name": "Partial Controller Support",
+      "slug": "partial-controller-support",
+      "language": "eng",
+      "games_count": 13980
+    },
+    {
+      "id": 64,
+      "name": "Fantasy",
+      "slug": "fantasy",
+      "language": "eng",
+      "games_count": 32915
+    },
+    {
+      "id": 26,
+      "name": "Gore",
+      "slug": "gore",
+      "language": "eng",
+      "games_count": 6658
+    },
+    {
+      "id": 189,
+      "name": "Female Protagonist",
+      "slug": "female-protagonist",
+      "language": "eng",
+      "games_count": 15526
+    },
+    {
+      "id": 34,
+      "name": "Violent",
+      "slug": "violent",
+      "language": "eng",
+      "games_count": 7843
+    },
+    {
+      "id": 15,
+      "name": "Stealth",
+      "slug": "stealth",
+      "language": "eng",
+      "games_count": 7155
+    },
+    {
+      "id": 69,
+      "name": "Action-Adventure",
+      "slug": "action-adventure",
+      "language": "eng",
+      "games_count": 20985
+    },
+    {
+      "id": 97,
+      "name": "Action RPG",
+      "slug": "action-rpg",
+      "language": "eng",
+      "games_count": 8678
+    },
+    {
+      "id": 44,
+      "name": "Nudity",
+      "slug": "nudity",
+      "language": "eng",
+      "games_count": 8833
+    },
+    {
+      "id": 40837,
+      "name": "In-App Purchases",
+      "slug": "in-app-purchases",
+      "language": "eng",
+      "games_count": 3408
+    },
+    {
+      "id": 40833,
+      "name": "Captions available",
+      "slug": "captions-available",
+      "language": "eng",
+      "games_count": 1483
+    },
+    {
+      "id": 89,
+      "name": "Historical",
+      "slug": "historical",
+      "language": "eng",
+      "games_count": 3980
+    },
+    {
+      "id": 50,
+      "name": "Sexual Content",
+      "slug": "sexual-content",
+      "language": "eng",
+      "games_count": 8737
+    },
+    {
+      "id": 278,
+      "name": "Assassin",
+      "slug": "assassin",
+      "language": "eng",
+      "games_count": 962
+    },
+    {
+      "id": 59643,
+      "name": "Протагонистка",
+      "slug": "protagonistka",
+      "language": "eng",
+      "games_count": 8004
+    },
+    {
+      "id": 6046,
+      "name": "vikings",
+      "slug": "vikings",
+      "language": "eng",
+      "games_count": 187
+    }
+  ],
+  "publishers": [
+    {
+      "id": 918,
+      "name": "Ubisoft Entertainment",
+      "slug": "ubisoft-entertainment",
+      "games_count": 1096
+    }
+  ],
+  "esrb_rating": null,
+  "description_raw": "Become Eivor, a mighty Viking raider and lead your clan from the harsh shores of Norway to a new home amid the lush farmlands of ninth-century England. Explore a beautiful, mysterious open world where you'll face brutal enemies, raid fortresses, build your clan's new settlement, and forge alliances to win glory and earn a place in Valhalla.\n\nEngland in the age of the Vikings is a fractured nation of petty lords and warring kingdoms. Beneath the chaos lies a rich and untamed land waiting for a new conqueror. Will it be you?"
+}
