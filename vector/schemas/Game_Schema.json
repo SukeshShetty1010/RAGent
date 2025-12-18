@@ -1,0 +1,82 @@
+{
+  "class": "Game",
+  "description": "Canonical game entity from RAWG",
+  "vectorizer": "text2vec-transformers",
+  "properties": [
+    {
+      "name": "game_id",
+      "dataType": ["int"],
+      "description": "RAWG game ID"
+    },
+    {
+      "name": "title",
+      "dataType": ["text"],
+      "description": "Game title"
+    },
+    {
+      "name": "description",
+      "dataType": ["text"],
+      "description": "Long-form game description",
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "vectorizePropertyName": false
+        }
+      }
+    },
+    {
+      "name": "release_date",
+      "dataType": ["date"],
+      "description": "Official release date"
+    },
+    {
+      "name": "release_year",
+      "dataType": ["int"],
+      "description": "Release year for fast filtering"
+    },
+    {
+      "name": "genres",
+      "dataType": ["text[]"],
+      "description": "Game genres"
+    },
+    {
+      "name": "developers",
+      "dataType": ["text[]"],
+      "description": "Game developers"
+    },
+    {
+      "name": "publishers",
+      "dataType": ["text[]"],
+      "description": "Game publishers"
+    },
+    {
+      "name": "tags",
+      "dataType": ["text[]"],
+      "description": "Community and gameplay tags"
+    },
+    {
+      "name": "average_rating",
+      "dataType": ["number"],
+      "description": "Average RAWG rating"
+    },
+    {
+      "name": "metacritic_score",
+      "dataType": ["int"],
+      "description": "Metacritic score"
+    },
+    {
+      "name": "source_rawg_url",
+      "dataType": ["text"],
+      "description": "Official website or RAWG source URL"
+    },
+    {
+      "name": "last_updated",
+      "dataType": ["date"],
+      "description": "Last updated timestamp from source"
+    },
+    {
+      "name": "has_platform_specs",
+      "dataType": ["boolean"],
+      "description": "Whether platform specs exist"
+    }
+  ]
+}

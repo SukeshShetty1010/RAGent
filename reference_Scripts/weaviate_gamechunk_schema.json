@@ -1,0 +1,388 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/unified_game_master_v2.schema.json",
+  "title": "UnifiedGameMaster",
+  "description": "Unified master schema merging RAWG, IGDB, and GameSpot datasets with zero data loss. All fields are preserved, strictly typed, and source-annotated.",
+  "type": "object",
+  "required": [
+    "identity",
+    "core",
+    "release",
+    "classification",
+    "platforms",
+    "organizations",
+    "ratings",
+    "engagement",
+    "igdb_relations",
+    "media_coverage",
+    "raw_provenance"
+  ],
+  "properties": {
+    "identity": {
+      "type": "object",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Cross-source identity and canonical identifiers.",
+      "required": ["unified_id"],
+      "properties": {
+        "unified_id": {
+          "type": "string",
+          "description": "Canonical unified identifier (rawg:{id} | igdb:{id} | gamespot:{id})."
+        },
+        "rawg_id": {
+          "type": ["integer", "null"],
+          "description": "RAWG numeric game ID."
+        },
+        "igdb_id": {
+          "type": ["integer", "null"],
+          "description": "IGDB numeric game ID."
+        },
+        "gamespot_id": {
+          "type": ["integer", "null"],
+          "$comment": "GAMESPOT",
+          "description": "GameSpot numeric game identifier."
+        },
+        "slug": {
+          "type": ["string", "null"],
+          "description": "Canonical slug (prefer IGDB, fallback RAWG)."
+        }
+      }
+    },
+    "core": {
+      "type": "object",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Core descriptive fields.",
+      "required": ["title"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Canonical game title."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "Long-form description or summary (RAWG/IGDB)."
+        },
+        "storyline": {
+          "type": ["string", "null"],
+          "$comment": "IGDB",
+          "description": "Narrative storyline text."
+        },
+        "deck": {
+          "type": ["string", "null"],
+          "$comment": "GAMESPOT",
+          "description": "GameSpot editorial deck/short summary. Semantically distinct from long description."
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Release timing information with multiple granularities.",
+      "properties": {
+        "release_date": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Primary release date (ISO-8601). Nullable for GameSpot compatibility."
+        },
+        "release_year": {
+          "type": ["integer", "null"],
+          "description": "Derived release year."
+        },
+        "first_release_date_unix": {
+          "type": ["integer", "null"],
+          "$comment": "IGDB",
+          "description": "IGDB first_release_date (Unix timestamp)."
+        },
+        "release_dates": {
+          "type": "array",
+          "description": "All known release events across platforms/regions.",
+          "items": {
+            "type": "object",
+            "required": ["date", "source"],
+            "properties": {
+              "platform": {
+                "type": ["string", "null"],
+                "description": "Platform name."
+              },
+              "region": {
+                "type": ["string", "null"],
+                "description": "Region code or name."
+              },
+              "date": {
+                "type": ["string", "null"],
+                "description": "Release date (ISO-8601 or human-readable fallback)."
+              },
+              "source": {
+                "type": "string",
+                "enum": ["rawg", "igdb", "gamespot"],
+                "description": "Originating data source."
+              }
+            }
+          }
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Genre, tags, themes, and age classification.",
+      "properties": {
+        "genres": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Union of genre labels."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Union of descriptive tags."
+        },
+        "themes": {
+          "type": "array",
+          "$comment": "IGDB",
+          "items": { "type": "string" },
+          "description": "Thematic classifications."
+        },
+        "age_ratings": {
+          "type": "array",
+          "$comment": "IGDB | RAWG",
+          "items": { "type": "string" },
+          "description": "Age rating labels."
+        },
+        "esrb_rating": {
+          "type": ["string", "null"],
+          "description": "Primary ESRB rating."
+        }
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Supported platforms with per-platform metadata.",
+      "items": {
+        "type": "object",
+        "required": ["platform_name"],
+        "properties": {
+          "platform_name": {
+            "type": "string",
+            "description": "Platform display name."
+          },
+          "platform_family": {
+            "type": ["string", "null"],
+            "description": "Platform family (e.g., PC, PlayStation)."
+          },
+          "release_date": {
+            "type": ["string", "null"],
+            "description": "Platform-specific release date."
+          },
+          "requirements_minimum": {
+            "type": ["string", "null"],
+            "description": "Minimum system requirements (PC only)."
+          },
+          "requirements_recommended": {
+            "type": ["string", "null"],
+            "description": "Recommended system requirements (PC only)."
+          }
+        }
+      }
+    },
+    "organizations": {
+      "type": "object",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Companies involved in development and publishing.",
+      "properties": {
+        "developers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Developer company names."
+        },
+        "publishers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Publisher company names."
+        }
+      }
+    },
+    "ratings": {
+      "type": "object",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Critical and professional ratings with normalization.",
+      "properties": {
+        "rawg_rating": {
+          "type": ["number", "null"],
+          "description": "RAWG average rating (0–5)."
+        },
+        "igdb_rating": {
+          "type": ["number", "null"],
+          "description": "IGDB aggregated/total rating (0–100)."
+        },
+        "gamespot_score": {
+          "type": ["number", "null"],
+          "$comment": "GAMESPOT",
+          "description": "GameSpot professional review score."
+        },
+        "metacritic": {
+          "type": ["integer", "null"],
+          "description": "Metacritic score."
+        },
+        "normalized_0_100": {
+          "type": ["integer", "null"],
+          "description": "Unified normalized rating (0–100)."
+        }
+      }
+    },
+    "engagement": {
+      "type": "object",
+      "$comment": "RAWG",
+      "description": "User engagement and interaction metrics.",
+      "properties": {
+        "added_by_status": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" },
+          "description": "Counts by user status (owned, beaten, etc.)."
+        },
+        "reactions": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" },
+          "description": "Reaction counts keyed by reaction ID."
+        }
+      }
+    },
+    "igdb_relations": {
+      "type": "object",
+      "$comment": "IGDB",
+      "description": "Relational IGDB entities preserved without flattening loss.",
+      "properties": {
+        "parent_game_id": {
+          "type": ["integer", "null"],
+          "description": "Parent game ID if this is an expansion or DLC."
+        },
+        "dlcs": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "expansions": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "bundles": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "remakes": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "remasters": {
+          "type": "array",
+          "items": { "type": "integer" }
+        }
+      }
+    },
+    "media_coverage": {
+      "type": "object",
+      "$comment": "GAMESPOT",
+      "description": "Editorial and professional content from GameSpot.",
+      "properties": {
+        "articles": {
+          "type": "array",
+          "description": "GameSpot editorial articles. Body fields may contain HTML markup.",
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "properties": {
+              "id": {
+                "type": ["integer", "string"],
+                "description": "GameSpot article identifier."
+              },
+              "title": {
+                "type": "string",
+                "description": "Article title."
+              },
+              "authors": {
+                "type": ["array", "null"],
+                "items": { "type": "string" },
+                "description": "List of article authors."
+              },
+              "deck": {
+                "type": ["string", "null"],
+                "description": "Short editorial deck/summary."
+              },
+              "body_html": {
+                "type": ["string", "null"],
+                "description": "Full article body containing HTML markup."
+              },
+              "site_detail_url": {
+                "type": ["string", "null"],
+                "format": "uri",
+                "description": "Canonical GameSpot URL."
+              },
+              "published_at": {
+                "type": ["string", "null"],
+                "description": "Publication timestamp."
+              }
+            }
+          }
+        },
+        "reviews": {
+          "type": "array",
+          "description": "Professional GameSpot reviews.",
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "properties": {
+              "id": {
+                "type": ["integer", "string"],
+                "description": "GameSpot review identifier."
+              },
+              "title": {
+                "type": "string",
+                "description": "Review title."
+              },
+              "author": {
+                "type": ["string", "null"],
+                "description": "Review author."
+              },
+              "score": {
+                "type": ["number", "null"],
+                "description": "Review score assigned by GameSpot."
+              },
+              "review_body": {
+                "type": ["string", "null"],
+                "description": "Full review text, may contain HTML markup."
+              },
+              "site_detail_url": {
+                "type": ["string", "null"],
+                "format": "uri",
+                "description": "Canonical GameSpot review URL."
+              },
+              "published_at": {
+                "type": ["string", "null"],
+                "description": "Review publication date."
+              }
+            }
+          }
+        }
+      }
+    },
+    "raw_provenance": {
+      "type": "object",
+      "$comment": "RAWG | IGDB | GAMESPOT",
+      "description": "Complete raw payload preservation for audit and zero data loss.",
+      "properties": {
+        "rawg": {
+          "type": ["object", "null"],
+          "description": "Full cleaned RAWG payload."
+        },
+        "igdb": {
+          "type": ["object", "null"],
+          "description": "Full IGDB relational payload."
+        },
+        "gamespot": {
+          "type": ["object", "null"],
+          "description": "Full cleaned GameSpot payload."
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

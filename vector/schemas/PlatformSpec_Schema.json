@@ -1,0 +1,37 @@
+{
+  "class": "PlatformSpec",
+  "description": "Platform-specific game data",
+  "vectorizer": "none",
+  "properties": [
+    {
+      "name": "platform_name",
+      "dataType": ["text"],
+      "description": "Platform name (PC, PS5, Xbox)"
+    },
+    {
+      "name": "platform_family",
+      "dataType": ["text"],
+      "description": "Platform family grouping"
+    },
+    {
+      "name": "release_date",
+      "dataType": ["date"],
+      "description": "Platform-specific release date"
+    },
+    {
+      "name": "requirements_minimum",
+      "dataType": ["text"],
+      "description": "Minimum system requirements"
+    },
+    {
+      "name": "requirements_recommended",
+      "dataType": ["text"],
+      "description": "Recommended system requirements"
+    },
+    {
+      "name": "game",
+      "dataType": ["Game"],
+      "description": "Reference to parent game"
+    }
+  ]
+}

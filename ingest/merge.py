@@ -1,715 +1,131 @@
 # merge.py
 """
-merge.py
+Transforms cleaned RAWG data into flat objects matching:
+- Game_Schema.json
+- PlatformSpec_Schema.json
 
-CLI + functions to:
-  - call loader.fetch_all_sources(game_name)
-  - merge the returned RAWG / IGDB / GameSpot payloads using merge_three_sources
-  - validate/coerce with GameMerged (pydantic)
-  - save merged JSON to disk
-
-Usage:
-  python merge.py --game "Elden Ring" --outdir ./out
+Outputs the resulting Game object and PlatformSpec objects to stdout.
 """
-from __future__ import annotations
 
-import argparse
 import json
-import os
-import re
-import pathlib
+from datetime import datetime
 from typing import Any, Dict, List, Optional
-from datetime import datetime, date
-from pydantic import BaseModel, Field, AnyUrl
-
-# Import the loader that fetches per-source payloads
-from ingest.loader import fetch_all_sources, _safe_name  # reuse _safe_name helper for filenames
-
-# reuse helpers & parts of your rough.py design (validators + normalization)
-try:
-    from pydantic import field_validator
-    _HAS_FIELD_VALIDATOR = True
-except Exception:
-    from pydantic import validator
-    _HAS_FIELD_VALIDATOR = False
-
-class Ratings(BaseModel):
-    rawg: Optional[float] = None
-    igdb: Optional[float] = None
-    metacritic: Optional[int] = None
-    rawg_detail: Optional[Dict[str, Any] | List[Any]] = None
-    igdb_detail: Optional[Dict[str, Any] | List[Any]] = None
-    normalized_0_100: Optional[int] = None
 
 
-class SourceProvenance(BaseModel):
-    rawg: Optional[Dict[str, Any]] = None
-    igdb: Optional[Dict[str, Any]] = None
-    gamespot: Optional[Dict[str, Any]] = None
-
-def save_json(data: Any, path: str) -> None:
-    p = pathlib.Path(path)
-    p.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-
-class GameMerged(BaseModel):
-    # canonical top-level fields
-    unified_id: Optional[str] = None
-    title: str
-    slug: Optional[str] = None
-    description: Optional[str] = None
-    release_date: Optional[date] = None
-    release_year: Optional[int] = None
-    release_dates: List[Dict[str, Optional[str]]] = Field(default_factory=list)
-
-    # ids per source
-    rawg_id: Optional[int] = None
-    igdb_id: Optional[int] = None
-    gamespot_id: Optional[str] = None
-
-    # classification
-    platforms: List[str] = Field(default_factory=list)
-    genres: List[str] = Field(default_factory=list)
-    tags: List[str] = Field(default_factory=list)
-    themes: List[str] = Field(default_factory=list)
-    developers: List[str] = Field(default_factory=list)
-    publishers: List[str] = Field(default_factory=list)
-
-    # age / rating classification
-    age_ratings: List[str] = Field(default_factory=list)
-    esrb_rating: Optional[str] = None
-
-    # ratings & urls
-    ratings: Ratings = Field(default_factory=Ratings)
-    urls: List[AnyUrl] = Field(default_factory=list)
-    stores: List[str] = Field(default_factory=list)
-    websites: List[AnyUrl] = Field(default_factory=list)
-
-    # gamespot textual & raw provenance
-    gamespot: Dict[str, Any] = Field(default_factory=dict)
-
-    # flattened documents for RAG ingestion
-    documents: List[Dict[str, Any]] = Field(default_factory=list)
-
-    # provenance
-    source: SourceProvenance = Field(default_factory=SourceProvenance)
-    merged_from: Optional[Dict[str, Any]] = None
-
-    if _HAS_FIELD_VALIDATOR:
-        @field_validator("title")
-        @classmethod
-        def _title_validator(cls, v):
-            if not v or not str(v).strip():
-                raise ValueError("title must be a non-empty string")
-            return str(v).strip()
-    else:
-        @validator("title")
-        @classmethod
-        def _title_validator(cls, v):
-            if not v or not str(v).strip():
-                raise ValueError("title must be a non-empty string")
-            return str(v).strip()
-
-def _extract_name_from_item(item: Any) -> Optional[str]:
-    if item is None:
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
+def safe_iso_date(value: Optional[str]) -> Optional[str]:
+    """
+    Parse a date/datetime string and return RFC3339-compatible ISO date.
+    If parsing fails or value is None, return None.
+    """
+    if not value:
         return None
-    if isinstance(item, dict):
-        if item.get("name") and isinstance(item.get("name"), str):
-            return item.get("name").strip()
-        if item.get("platform") and isinstance(item["platform"], dict) and item["platform"].get("name"):
-            return item["platform"]["name"].strip()
-        if item.get("company") and isinstance(item["company"], dict) and item["company"].get("name"):
-            return item["company"]["name"].strip()
-        if item.get("url") and isinstance(item.get("url"), str):
-            return None
-        if item.get("slug") and isinstance(item.get("slug"), str):
-            slug = item.get("slug").strip()
-            if not slug.isdigit():
-                return slug
-        return None
-    if isinstance(item, str):
-        s = item.strip()
-        if s and not re.fullmatch(r"\d+", s):
-            return s
-        return None
-    return None
 
-
-def _strip_html(html: Optional[str]) -> Optional[str]:
-    if not html or not isinstance(html, str):
-        return None
-    # extremely simple html stripper (conservative)
-    text = re.sub(r"<[^>]+>", "", html)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text or None
-
-
-def _parse_gamespot_date(val: Optional[str]) -> Optional[str]:
-    if not val:
-        return None
-    # try ISO parse, else try common formats, else return raw
-    try:
-        dt = datetime.fromisoformat(val)
-        return dt.date().isoformat()
-    except Exception:
-        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d %b %Y"):
-            try:
-                return datetime.strptime(val, fmt).date().isoformat()
-            except Exception:
-                continue
-    return val  # fallback: keep original
-
-def _iso_date_from_rawg(rawg_date: Optional[str]) -> Optional[date]:
-    if not rawg_date:
-        return None
-    try:
-        return datetime.fromisoformat(rawg_date).date()
-    except Exception:
+    for fmt in (
+        "%Y-%m-%d",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%SZ",
+    ):
         try:
-            return datetime.strptime(rawg_date, "%Y-%m-%d").date()
+            dt = datetime.strptime(value[: len(fmt)], fmt)
+            return dt.date().isoformat()
         except Exception:
-            return None
+            continue
 
-def _date_from_unix(ts: Optional[int]) -> Optional[date]:
-    if not ts:
-        return None
     try:
-        return datetime.utcfromtimestamp(int(ts)).date()
+        return datetime.fromisoformat(value).date().isoformat()
     except Exception:
         return None
 
-def _list_union_normalize(*lists: Optional[List[Any]]) -> List[str]:
-    out = []
-    for a in lists:
-        if a:
-            for item in a:
-                name = _extract_name_from_item(item)
-                if name:
-                    out.append(name)
-    seen = set()
-    result = []
-    for v in out:
-        key = v.strip().lower()
-        if key and key not in seen:
-            seen.add(key)
-            result.append(v.strip())
-    return result
 
-def _collect_gamespot_buckets(gamespot_wrapper: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract normalized gamespot structure:
-      - game_info: pruned game object
-      - articles: list of normalized article objects
-      - reviews: list of normalized review objects
-      - releases: list of normalized release objects
-    """
-    out = {"game_info": None, "articles": [], "reviews": [], "releases": []}
-    if not isinstance(gamespot_wrapper, dict):
-        return out
-
-    games = gamespot_wrapper.get("games") or []
-    # The fetcher stores each entry as {"game": {...}, "related": {"articles":[], "reviews":[], "releases":[]}}
-    if isinstance(games, list) and games:
-        # choose the first gamespot entry that has a game object
-        entry = games[0]
-        game_obj = entry.get("game") or {}
-        out["game_info"] = game_obj
-
-        related = entry.get("related") or {}
-        # articles
-        for a in related.get("articles") or []:
-            out["articles"].append({
-                "id": a.get("id") or a.get("guid") or None,
-                "title": a.get("title") or a.get("deck") or None,
-                "authors": a.get("authors") or a.get("author") or None,
-                "deck": a.get("deck") or None,
-                "body_html": a.get("body") or a.get("body_html") or None,
-                "body_text": _strip_html(a.get("body") or a.get("body_html")) if a.get("body") else None,
-                "site_detail_url": a.get("site_detail_url") or a.get("url"),
-                "categories": a.get("categories") or [],
-                "associations": a.get("associations") or [],
-                "published_at": _parse_gamespot_date(a.get("publish_date") or a.get("published_at") or a.get("date")),
-                "updated_at": _parse_gamespot_date(a.get("update_date") or a.get("updated_at"))
-            })
-        # reviews
-        for r in related.get("reviews") or []:
-            out["reviews"].append({
-                "id": r.get("id") or r.get("guid") or None,
-                "title": r.get("title") or r.get("deck") or None,
-                "author": r.get("authors") or r.get("author") or None,
-                "site_detail_url": r.get("site_detail_url") or r.get("url"),
-                "review_text": _strip_html(r.get("body") or r.get("review") or r.get("body_html")) if (r.get("body") or r.get("review")) else None,
-                "score": r.get("score") or r.get("rating") or None,
-                "published_at": _parse_gamespot_date(r.get("publish_date") or r.get("published_at") or r.get("date"))
-            })
-        # releases
-        for rel in related.get("releases") or []:
-            out["releases"].append({
-                "platform": _extract_name_from_item(rel.get("platform")) or rel.get("platform"),
-                "region": rel.get("region") or None,
-                "date": _parse_gamespot_date(rel.get("date") or rel.get("released_at") or rel.get("release_date")),
-                "notes": rel.get("notes") or None
-            })
-    return out
-
-# ---------- Merge logic (three sources) ----------
-def merge_three_sources(rawg: Dict[str, Any], igdb: Dict[str, Any], gamespot: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Merge RAWG, IGDB, and GameSpot payloads into unified dict compatible with GameMerged.
-    Uses same heuristics as your rough.py but extends with GameSpot and extra metadata.
-    """
-    # first reuse detection/unwrapping heuristics from rough.py style
-    def _looks_like_rawg(rec: Any) -> bool:
-        if not isinstance(rec, dict):
-            return False
-        if rec.get("description_raw") or rec.get("released") or rec.get("metacritic"):
-            return True
-        platforms = rec.get("platforms")
-        if isinstance(platforms, list) and any(isinstance(p, dict) and p.get("platform") for p in platforms):
-            return True
-        return False
-
-    def _looks_like_igdb(wrapper: Any) -> bool:
-        if not isinstance(wrapper, dict):
-            return False
-        recs = wrapper.get("records")
-        if isinstance(recs, list) and recs:
-            first = recs[0]
-            if isinstance(first, dict) and isinstance(first.get("clean"), list):
-                return True
-            if isinstance(first, dict) and (first.get("aggregated_rating") or first.get("first_release_date")):
-                return True
-        if isinstance(wrapper.get("genres"), list) and wrapper.get("genres") and all(isinstance(x, int) for x in wrapper.get("genres")):
-            return True
-        return False
-
-    def _get_rawg_record(rawg_wrapper: Dict[str, Any]) -> Dict[str, Any]:
-        if not rawg_wrapper:
-            return {}
-        if isinstance(rawg_wrapper, dict) and "records" in rawg_wrapper and isinstance(rawg_wrapper["records"], list) and rawg_wrapper["records"]:
-            for candidate in rawg_wrapper["records"]:
-                if _looks_like_rawg(candidate):
-                    return candidate
-            return rawg_wrapper["records"][0]
-        if _looks_like_rawg(rawg_wrapper):
-            return rawg_wrapper
-        return rawg_wrapper
-
-    def choose_igdb_clean_record(igdb_wrapper: Dict[str, Any], rawg_name: str = "", rawg_slug: str = "") -> Dict[str, Any]:
-        if not igdb_wrapper:
-            return {}
-        clean_list = []
-        if isinstance(igdb_wrapper, dict) and isinstance(igdb_wrapper.get("records"), list) and igdb_wrapper["records"]:
-            first = igdb_wrapper["records"][0]
-            if isinstance(first, dict) and isinstance(first.get("clean"), list):
-                clean_list = first["clean"]
-            else:
-                clean_list = igdb_wrapper["records"]
-        elif isinstance(igdb_wrapper, list):
-            clean_list = igdb_wrapper
-
-        if not clean_list:
-            return {}
-
-        rawg_name_l = (rawg_name or "").strip().lower()
-        rawg_slug_l = (rawg_slug or "").strip().lower()
-
-        for r in clean_list:
-            if isinstance(r, dict) and r.get("name") and r["name"].strip().lower() == rawg_name_l:
-                return r
-        for r in clean_list:
-            if isinstance(r, dict) and r.get("slug") and r["slug"].strip().lower() == rawg_slug_l:
-                return r
-        for r in clean_list:
-            if isinstance(r, dict) and r.get("name") and rawg_name_l and rawg_name_l in r["name"].strip().lower():
-                return r
-
-        def score(r):
-            if not isinstance(r, dict):
-                return 0.0
-            return float(r.get("aggregated_rating") or r.get("total_rating") or r.get("rating") or 0.0)
-        best = max(clean_list, key=score)
-        return best if isinstance(best, dict) else {}
-
-    def _get_igdb_record(igdb_wrapper, rawg_rec):
-        igdb_choice = choose_igdb_clean_record(igdb_wrapper, rawg_rec.get("name", ""), rawg_rec.get("slug", ""))
-        if igdb_choice:
-            return igdb_choice
-        if isinstance(igdb_wrapper, dict) and isinstance(igdb_wrapper.get("records"), list) and igdb_wrapper["records"]:
-            first = igdb_wrapper["records"][0]
-            if isinstance(first, dict) and not isinstance(first.get("clean"), list):
-                return first
-        return igdb_wrapper
-
-    merged: Dict[str, Any] = {}
-    merged["source"] = {"rawg": rawg, "igdb": igdb, "gamespot": gamespot}
-
-    rawg_candidate = rawg if _looks_like_rawg(rawg) else (rawg if rawg else {})
-    igdb_candidate = igdb if _looks_like_igdb(igdb) else (igdb if igdb else {})
-
-    rawg_rec = _get_rawg_record(rawg_candidate)
-    igdb_rec = _get_igdb_record(igdb_candidate, rawg_rec)
-
-    # GameSpot buckets
-    gamespot_buckets = _collect_gamespot_buckets(gamespot)
-    merged["gamespot"] = gamespot_buckets
-
-    # IDs and unified id preference: RAWG > IGDB > GameSpot
-    merged["rawg_id"] = rawg_rec.get("id")
-    merged["igdb_id"] = igdb_rec.get("id")
-    gp_id = None
-    if isinstance(gamespot_buckets.get("game_info"), dict):
-        gp_id = gamespot_buckets["game_info"].get("id") or gamespot_buckets["game_info"].get("guid") or gamespot_buckets["game_info"].get("site_detail_url")
-    merged["gamespot_id"] = str(gp_id) if gp_id is not None else None
-
-    if merged.get("rawg_id"):
-        merged["unified_id"] = f"rawg:{merged['rawg_id']}"
-    elif merged.get("igdb_id"):
-        merged["unified_id"] = f"igdb:{merged['igdb_id']}"
-    elif merged.get("gamespot_id"):
-        merged["unified_id"] = f"gamespot:{merged['gamespot_id']}"
-    else:
-        merged["unified_id"] = None
-
-    # Title & slug
-    title = (
-        (rawg_rec.get("name_original") if isinstance(rawg_rec, dict) else None)
-        or rawg_rec.get("name")
-        or igdb_rec.get("name")
-        or igdb_rec.get("resolved_name")
-        or (gamespot_buckets.get("game_info") or {}).get("name")
-        or igdb_rec.get("slug")
-        or rawg_rec.get("slug")
-        or ""
-    )
-    merged["title"] = title.strip() if isinstance(title, str) else str(title)
-    merged["slug"] = (igdb_rec.get("slug") or rawg_rec.get("slug") or (gamespot_buckets.get("game_info") or {}).get("site_detail_url") or None)
-
-    # Description
-    desc = None
-    if isinstance(rawg_rec, dict):
-        desc = rawg_rec.get("description_raw") or rawg_rec.get("description")
-    if not desc:
-        desc = igdb_rec.get("summary") or igdb_rec.get("storyline") or (gamespot_buckets.get("game_info") or {}).get("deck")
-    merged["description"] = desc.strip() if isinstance(desc, str) else None
-
-    # Release dates (collect multiple sources)
-    release_dates = []
-    # RAWG 'released' (single)
-    rd = _iso_date_from_rawg(rawg_rec.get("released")) if isinstance(rawg_rec, dict) else None
-    if rd:
-        release_dates.append({"platform": None, "region": None, "date": rd.isoformat(), "source": "rawg"})
-    # IGDB first_release_date
-    id_rd = _date_from_unix(igdb_rec.get("first_release_date")) if isinstance(igdb_rec, dict) else None
-    if id_rd:
-        release_dates.append({"platform": None, "region": None, "date": id_rd.isoformat(), "source": "igdb"})
-    # IGDB may have release_dates array
-    for r in (igdb_rec.get("release_dates") or []):
-        if isinstance(r, dict):
-            d = None
-            if r.get("date"):
-                try:
-                    d = datetime.fromisoformat(r.get("date")).date().isoformat()
-                except Exception:
-                    try:
-                        d = datetime.utcfromtimestamp(int(r.get("date"))).date().isoformat()
-                    except Exception:
-                        d = None
-            if not d and r.get("human"):
-                d = r.get("human")
-            release_dates.append({"platform": r.get("platform") or None, "region": r.get("region") or None, "date": d, "source": "igdb"})
-    # GameSpot releases
-    for r in (gamespot_buckets.get("releases") or []):
-        release_dates.append({"platform": r.get("platform"), "region": r.get("region"), "date": r.get("date"), "source": "gamespot"})
-
-    merged["release_dates"] = [rd for rd in release_dates if rd.get("date")]
-    merged["release_date"] = merged["release_dates"][0]["date"] if merged["release_dates"] else None
-    merged["release_year"] = int(merged["release_date"][:4]) if merged.get("release_date") else None
-
-    # Platforms / genres / tags / themes / developers / publishers
-    merged["platforms"] = _list_union_normalize(rawg_rec.get("platforms") if isinstance(rawg_rec, dict) else None,
-                                                igdb_rec.get("platforms") if isinstance(igdb_rec, dict) else None,
-                                                (gamespot_buckets.get("game_info") or {}).get("platforms"))
-    merged["genres"] = _list_union_normalize(rawg_rec.get("genres") if isinstance(rawg_rec, dict) else None,
-                                             igdb_rec.get("genres") if isinstance(igdb_rec, dict) else None,
-                                             (gamespot_buckets.get("game_info") or {}).get("genres"))
-    merged["tags"] = _list_union_normalize(rawg_rec.get("tags") if isinstance(rawg_rec, dict) else None,
-                                           igdb_rec.get("tags") if isinstance(igdb_rec, dict) else None)
-    merged["themes"] = _list_union_normalize(igdb_rec.get("themes") if isinstance(igdb_rec, dict) else None,
-                                             igdb_rec.get("keywords") if isinstance(igdb_rec, dict) else None)
-
-    # developers / publishers (IGDB involved_companies or RAWG developers/publishers)
-    devs = []
-    pubs = []
-    # IGDB convention: involved_companies or developers/publishers arrays
-    if isinstance(igdb_rec, dict):
-        for key in ("involved_companies", "developers", "developers_names", "publishers", "publishers_names"):
-            if igdb_rec.get(key):
-                devs.extend(_list_union_normalize(igdb_rec.get("involved_companies") if key == "involved_companies" else igdb_rec.get(key)))
-    # RAWG may provide 'developers' or 'publishers' arrays
-    if isinstance(rawg_rec, dict):
-        devs.extend(_list_union_normalize(rawg_rec.get("developers")))
-        pubs.extend(_list_union_normalize(rawg_rec.get("publishers")))
-    # fallback: game_info associations in GameSpot
-    associations = (gamespot_buckets.get("game_info") or {}).get("associations") or []
-    if associations:
-        merged["tags"].extend([a.get("name") for a in associations if isinstance(a, dict) and a.get("name")])
-    merged["developers"] = list(dict.fromkeys([d for d in devs if d]))  # preserve order unique
-    merged["publishers"] = list(dict.fromkeys([p for p in pubs if p]))
-
-    # Age ratings / esrb
-    age_r = []
-    if isinstance(igdb_rec, dict):
-        for ar in (igdb_rec.get("age_ratings") or []):
-            if isinstance(ar, dict):
-                age_r.append(ar.get("rating") or ar.get("name"))
-            elif isinstance(ar, (str, int)):
-                age_r.append(str(ar))
-    # RAWG esrb
-    if isinstance(rawg_rec, dict) and rawg_rec.get("esrb"):
-        maybe = rawg_rec.get("esrb")
-        if isinstance(maybe, dict) and maybe.get("name"):
-            age_r.append(maybe.get("name"))
-    merged["age_ratings"] = [x for x in dict.fromkeys([a for a in age_r if a])]
-    merged["esrb_rating"] = merged["age_ratings"][0] if merged["age_ratings"] else None
-
-    # Ratings
-    merged["ratings"] = {
-        "rawg": rawg_rec.get("rating") if isinstance(rawg_rec, dict) else None,
-        "igdb": (igdb_rec.get("aggregated_rating") or igdb_rec.get("total_rating") or igdb_rec.get("rating")) if isinstance(igdb_rec, dict) else None,
-        "metacritic": rawg_rec.get("metacritic") if isinstance(rawg_rec, dict) else None,
-        "rawg_detail": rawg_rec.get("ratings") if isinstance(rawg_rec, dict) else None,
-        "igdb_detail": {k: igdb_rec.get(k) for k in ["aggregated_rating", "total_rating", "rating", "rating_count", "total_rating_count"] if isinstance(igdb_rec, dict) and igdb_rec.get(k) is not None},
-        "normalized_0_100": None
-    }
-    # optionally compute normalized_0_100 if values present
+def safe_int(value: Any) -> Optional[int]:
     try:
-        if merged["ratings"]["metacritic"]:
-            merged["ratings"]["normalized_0_100"] = int(merged["ratings"]["metacritic"])
-        elif merged["ratings"]["igdb"]:
-            # IGDB ratings often 0-100 float
-            merged["ratings"]["normalized_0_100"] = int(round(float(merged["ratings"]["igdb"])))
-        elif merged["ratings"]["rawg"]:
-            # RAWG rating often 0-5 float; scale to 0-100
-            merged["ratings"]["normalized_0_100"] = int(round(float(merged["ratings"]["rawg"]) * 20))
+        return int(value)
     except Exception:
-        merged["ratings"]["normalized_0_100"] = None
+        return None
 
-    # URLs / websites / stores
-    urls = set()
-    websites = set()
-    stores = set()
-    if isinstance(rawg_rec, dict):
-        if rawg_rec.get("website"):
-            websites.add(rawg_rec.get("website"))
-        if rawg_rec.get("metacritic_url"):
-            urls.add(rawg_rec.get("metacritic_url"))
-        for s in (rawg_rec.get("stores") or []):
-            if isinstance(s, dict) and s.get("url"):
-                stores.add(s.get("url"))
-            elif isinstance(s, str):
-                stores.add(s)
-    if isinstance(igdb_rec, dict):
-        if igdb_rec.get("url"):
-            urls.add(igdb_rec.get("url"))
-        for w in (igdb_rec.get("websites") or []):
-            if isinstance(w, dict) and w.get("url"):
-                websites.add(w.get("url"))
-            elif isinstance(w, str):
-                websites.add(w)
-    # GameSpot links: site_detail_url in articles/reviews and game_info
-    gp = gamespot_buckets.get("game_info") or {}
-    if gp.get("site_detail_url"):
-        urls.add(gp.get("site_detail_url"))
-    for a in (gamespot_buckets.get("articles") or []):
-        if a.get("site_detail_url"):
-            urls.add(a.get("site_detail_url"))
-    for r in (gamespot_buckets.get("reviews") or []):
-        if r.get("site_detail_url"):
-            urls.add(r.get("site_detail_url"))
 
-    merged["urls"] = [u for u in list(urls) if u]
-    merged["websites"] = [w for w in list(websites) if w]
-    merged["stores"] = [s for s in list(stores) if s]
+def safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except Exception:
+        return None
 
-    # gamespot bucket already captured
-    # build documents from gamespot articles & reviews (flatten for RAG)
-    documents = []
-    for a in (gamespot_buckets.get("articles") or []):
-        doc = {
-            "id": a.get("id"),
-            "source": "gamespot:article",
-            "title": a.get("title"),
-            "content": a.get("body_text") or a.get("deck") or "",
-            "excerpt": a.get("deck"),
-            "created_at": a.get("published_at"),
-            "meta": {"site_detail_url": a.get("site_detail_url"), "categories": a.get("categories")}
-        }
-        documents.append(doc)
-    for r in (gamespot_buckets.get("reviews") or []):
-        doc = {
-            "id": r.get("id"),
-            "source": "gamespot:review",
-            "title": r.get("title"),
-            "content": r.get("review_text") or "",
-            "excerpt": None,
-            "created_at": r.get("published_at"),
-            "meta": {"site_detail_url": r.get("site_detail_url"), "score": r.get("score")}
-        }
-        documents.append(doc)
-    merged["documents"] = documents
 
-    # merged_from decisions (which source provided what)
-    merged["merged_from"] = {
-        "title_from": "rawg" if (isinstance(rawg_rec, dict) and (rawg_rec.get("name") or rawg_rec.get("name_original"))) else ("igdb" if (isinstance(igdb_rec, dict) and igdb_rec.get("name")) else "gamespot"),
-        "description_from": "rawg" if (isinstance(rawg_rec, dict) and (rawg_rec.get("description_raw") or rawg_rec.get("description"))) else ("igdb" if (isinstance(igdb_rec, dict) and (igdb_rec.get("summary") or igdb_rec.get("storyline"))) else "gamespot"),
-        "release_from": "rawg" if rd else ("igdb" if id_rd else "gamespot")
+# ---------------------------------------------------------
+# Core transformers
+# ---------------------------------------------------------
+def create_game_object(source_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a flat Game object matching Game_Schema.json
+    """
+    ratings = source_data.get("ratings", {})
+    source = source_data.get("source", {})
+    platforms = source_data.get("platforms") or []
+
+    game_obj = {
+        "game_id": safe_int(source_data.get("game_id")),
+        "title": source_data.get("title"),
+        "description": source_data.get("description"),
+        "release_date": safe_iso_date(source_data.get("release_date")),
+        "release_year": safe_int(source_data.get("release_year")),
+        "genres": source_data.get("genres") or [],
+        "developers": source_data.get("developers") or [],
+        "publishers": source_data.get("publishers") or [],
+        "tags": source_data.get("tags") or [],
+        "average_rating": safe_float(ratings.get("average_rating")),
+        "metacritic_score": safe_int(ratings.get("metacritic")),
+        "source_rawg_url": source.get("rawg_url"),
+        "last_updated": safe_iso_date(source.get("last_updated")),
+        "has_platform_specs": bool(platforms),
     }
 
-    return merged
+    return game_obj
 
-# Helper: ensure we pass wrappers the merger expects
-def _normalize_loader_payloads(results: Dict[str, Any]) -> Dict[str, Any]:
+
+def create_platform_objects(source_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    loader.fetch_all_sources returns:
-      { "rawg": [ ... ], "igdb": [ ... ], "gamespot": [ ... ] }
-
-    merge_three_sources expects wrappers that are dict-like (it contains heuristics
-    that will handle dicts shaped like {"records": [...] } or raw dict objects).
-    We'll wrap the lists into `{"records": ...}` for RAWG/IGDB, and pick the
-    first GameSpot entry (gamespot fetch returns merged 'game' wrappers).
+    Create PlatformSpec objects matching PlatformSpec_Schema.json.
+    Uses game_id as a placeholder reference to the Game object.
     """
-    rawg_list = results.get("rawg") or []
-    igdb_list = results.get("igdb") or []
-    gamespot_list = results.get("gamespot") or []
+    game_id = safe_int(source_data.get("game_id"))
+    platforms = source_data.get("platforms") or []
 
-    rawg_wrapper = {}
-    igdb_wrapper = {}
-    gamespot_wrapper = {}
+    platform_objects: List[Dict[str, Any]] = []
 
-    if isinstance(rawg_list, list):
-        # Some fetchers return a single dict; if so, wrap appropriately.
-        if len(rawg_list) == 1 and isinstance(rawg_list[0], dict):
-            # RAWG fetcher returns the detailed RAWG object in a single element
-            rawg_wrapper = rawg_list[0]
-        else:
-            rawg_wrapper = {"records": rawg_list}
+    for p in platforms:
+        platform_objects.append(
+            {
+                "platform_name": p.get("platform_name"),
+                "platform_family": p.get("platform_family"),
+                "release_date": safe_iso_date(p.get("release_date")),
+                "requirements_minimum": p.get("requirements_minimum"),
+                "requirements_recommended": p.get("requirements_recommended"),
+                # Placeholder cross-ref (to be replaced by Weaviate reference)
+                "game": game_id,
+            }
+        )
 
-    if isinstance(igdb_list, list):
-        if len(igdb_list) == 1 and isinstance(igdb_list[0], dict) and (
-            "raw" in igdb_list[0] or "clean" in igdb_list[0] or "records" in igdb_list[0]
-        ):
-            # igdb_data.fetch_igdb_game_data returns a dict with 'raw' and 'clean'
-            igdb_wrapper = igdb_list[0]
-        elif len(igdb_list) == 1 and isinstance(igdb_list[0], dict):
-            igdb_wrapper = igdb_list[0]
-        else:
-            igdb_wrapper = {"records": igdb_list}
-
-    # gamespot fetch returns list of one merged wrapper, take the first dict if present
-    if isinstance(gamespot_list, list) and gamespot_list:
-        # gamespot_data.fetch_gamespot_data returns merged structure inside the first element
-        gp = gamespot_list[0]
-        # If the loader already returned a dict shaped like {"games": [...]}, keep it
-        if isinstance(gp, dict) and ("games" in gp or "query" in gp or "games_count" in gp):
-            gamespot_wrapper = gp
-        else:
-            # otherwise wrap
-            gamespot_wrapper = {"games": gamespot_list}
-
-    return {"rawg": rawg_wrapper, "igdb": igdb_wrapper, "gamespot": gamespot_wrapper}
+    return platform_objects
 
 
-def merge_and_save(game_name: str, outdir: str = ".", validate: bool = True) -> str:
-    """
-    Fetches all sources for game_name, merges them, validates using GameMerged,
-    and writes a merged JSON file to outdir. Returns the path to the saved file.
-    """
-    os.makedirs(outdir, exist_ok=True)
-
-    # 1) Fetch the source payloads using loader helper
-    print(f"[fetch] Pulling RAWG / IGDB / GameSpot data for: {game_name!r}")
-    results = fetch_all_sources(game_name, strip_visual=True)
-
-    # 2) Normalize wrappers for merger
-    wrapped = _normalize_loader_payloads(results)
-
-    # 3) Merge using your merge_three_sources logic
-    merged = merge_three_sources(wrapped.get("rawg"), wrapped.get("igdb"), wrapped.get("gamespot"))
-
-    # 4) Validate/coerce with GameMerged (if available and requested)
-    if validate and "GameMerged" in globals():
-        try:
-            gm = GameMerged.parse_obj({
-                "unified_id": merged.get("unified_id"),
-                "title": merged.get("title"),
-                "slug": merged.get("slug"),
-                "description": merged.get("description"),
-                "release_date": merged.get("release_date"),
-                "release_year": merged.get("release_year"),
-                "release_dates": merged.get("release_dates"),
-                "rawg_id": merged.get("rawg_id"),
-                "igdb_id": merged.get("igdb_id"),
-                "gamespot_id": merged.get("gamespot_id"),
-                "platforms": merged.get("platforms"),
-                "genres": merged.get("genres"),
-                "tags": merged.get("tags"),
-                "themes": merged.get("themes"),
-                "developers": merged.get("developers"),
-                "publishers": merged.get("publishers"),
-                "age_ratings": merged.get("age_ratings"),
-                "esrb_rating": merged.get("esrb_rating"),
-                "ratings": merged.get("ratings"),
-                "urls": merged.get("urls"),
-                "websites": merged.get("websites"),
-                "stores": merged.get("stores"),
-                "gamespot": merged.get("gamespot"),
-                "documents": merged.get("documents"),
-                "source": merged.get("source"),
-                "merged_from": merged.get("merged_from"),
-            })
-            to_save = gm.dict()
-        except Exception as e:
-            # Validation failed — fall back to raw merged dict but warn
-            print("[warning] Validation with GameMerged failed:", e)
-            to_save = merged
-    else:
-        to_save = merged
-
-    # 5) Safe filename and save
-    safe = _safe_name(game_name)
-    out_path = os.path.join(outdir, f"{safe}_merged.json")
-    # If CMP_Merge provided save_json helper, use it (it keeps default=str and nice encoding)
-    try:
-        # CMP_Merge's save_json signature: save_json(data, path)
-        save_json(to_save, out_path)  # type: ignore
-    except Exception:
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(to_save, f, indent=2, ensure_ascii=False, default=str)
-
-    print(f"[saved] Merged file written to: {out_path}")
-    return out_path
-
-
+# ---------------------------------------------------------
+# CLI / Execution
+# ---------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Fetch + merge RAWG, IGDB, GameSpot into unified JSON")
-    parser.add_argument("--game", "-g", help="Game name to fetch and merge")
-    parser.add_argument("--outdir", "-o", default=".", help="Output directory")
-    parser.add_argument("--no-validate", dest="validate", action="store_false", help="Skip pydantic validation")
-    args = parser.parse_args()
+    with open("cleaned_rawg_data.json", "r", encoding="utf-8") as f:
+        source_data = json.load(f)
 
-    game = args.game
-    if not game:
-        try:
-            game = input("Enter game name to fetch & merge: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nExiting.")
-            return
+    game = create_game_object(source_data)
+    platforms = create_platform_objects(source_data)
 
-    if not game:
-        print("Game name required.")
-        return
+    print("=== Game Object ===")
+    print(json.dumps(game, indent=2, ensure_ascii=False))
 
-    merge_and_save(game, outdir=args.outdir, validate=args.validate)
+    print("\n=== PlatformSpec Objects ===")
+    print(json.dumps(platforms, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
