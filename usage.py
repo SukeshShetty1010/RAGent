@@ -1,122 +1,192 @@
+# usage.py
 """
-usage.py
+Live integration test for upsert_platform_specs.py (Weaviate v4)
 
-Live integration test for Editorial Chunking (GameSpot → Chunks → JSON).
+This script:
+1. Connects to a local Weaviate v4 instance.
+2. Ensures the Game collection exists (creates a minimal one if missing).
+3. Creates a real canonical Game object (via RAWG-backed identity ingest).
+4. Calls upsert_platform_specs with a real game name and UUID.
+5. Verifies PlatformSpec objects via GraphQL filtered by game reference.
 
-This script validates:
-GameSpot API → Normalization → EditorialChunker → Retrieval-ready chunks → JSON export
-
-Focus:
-- Real editorial data (no mocks)
-- Token-bounded chunking (500 / overlap 50)
-- Strict adherence to chunk_contract.md
-- Parent/lineage integrity (No Orphan Chunks)
-- JSON export of chunks
+Requirements:
+- Weaviate v4 running locally (http://localhost:8080)
+- RAWG_API_KEY set in environment
+- weaviate-client >= 4.x
 """
 
-import uuid
-import json
-from collections import Counter
-from pprint import pprint
+import logging
+import sys
+from typing import Any, Dict
 
-# ---------------------------------------------------------
-# Live imports
-# ---------------------------------------------------------
-from ingest.gamespot_editorial_normalize import fetch_and_prepare_gamespot
-from chunking.editorial_chunker import EditorialChunker
+import weaviate
+from weaviate.classes.config import Configure, Property, DataType
+from weaviate.util import generate_uuid5
 
-def main():
-    # -----------------------------------------------------
-    # 1. Narrative-heavy target
-    # -----------------------------------------------------
-    game_name = "Far Cry 5"
-    game_uuid = str(uuid.uuid4())
+from upsert.upsert_platform_specs import upsert_platform_specs
+from ingest.rawg_identity_ingest import fetch_and_prepare_identity
 
-    print(f"\n🎮 Editorial Chunking Target: {game_name}")
-    print(f"🧬 Canonical Game UUID: {game_uuid}")
+# ------------------------------------------------------------------
+# Logging (project-consistent)
+# ------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-    # -----------------------------------------------------
-    # 2. Fetch + Normalize (live GameSpot)
-    # -----------------------------------------------------
-    gamespot_payload = fetch_and_prepare_gamespot(
+WEAVIATE_URL = "http://localhost:8080"
+GAME_COLLECTION = "Game"
+
+# Fixed namespace UUID for deterministic Game UUIDs
+GAME_NAMESPACE_UUID = "12345678-1234-5678-1234-567812345678"
+
+
+# ------------------------------------------------------------------
+# Schema helpers (Weaviate v4)
+# ------------------------------------------------------------------
+def ensure_game_collection(client: weaviate.WeaviateClient) -> None:
+    """
+    Ensure the Game collection exists.
+    If missing, create a minimal collection sufficient for references.
+    """
+    if client.collections.exists(GAME_COLLECTION):
+        logger.info("Game collection already exists.")
+        return
+
+    logger.warning("Game collection missing. Creating minimal Game collection...")
+
+    client.collections.create(
+        name=GAME_COLLECTION,
+        vectorizer_config=Configure.Vectorizer.none(),
+        properties=[
+            Property(
+                name="game_id",
+                data_type=DataType.INT,
+            ),
+            Property(
+                name="title",
+                data_type=DataType.TEXT,
+            ),
+            Property(
+                name="release_year",
+                data_type=DataType.INT,
+            ),
+        ],
+    )
+
+    logger.info("Game collection created.")
+
+
+# ------------------------------------------------------------------
+# Canonical Game creation (Weaviate v4)
+# ------------------------------------------------------------------
+def create_canonical_game(
+    client: weaviate.WeaviateClient, game_name: str
+) -> str:
+    """
+    Fetch RAWG-backed canonical identity and upsert a Game object.
+    Returns the deterministic Game UUID.
+    """
+    logger.info("Fetching canonical identity for '%s'...", game_name)
+    game_obj = fetch_and_prepare_identity(game_name)
+
+    rawg_game_id = game_obj.get("game_id")
+    if rawg_game_id is None:
+        raise RuntimeError("Canonical identity missing RAWG game_id")
+
+    game_uuid = generate_uuid5(GAME_NAMESPACE_UUID, str(game_obj["game_id"]))
+
+    logger.info("Upserting Game '%s' with UUID %s", game_name, game_uuid)
+
+    game_collection = client.collections.get(GAME_COLLECTION)
+    game_collection.data.insert(
+        uuid=game_uuid,
+        properties=game_obj,
+    )
+
+    return str(game_uuid)
+
+
+# ------------------------------------------------------------------
+# Verification (GraphQL v4-compatible)
+# ------------------------------------------------------------------
+def verify_platform_specs(
+    client: weaviate.WeaviateClient, game_uuid: str
+) -> None:
+    """
+    Query PlatformSpec objects filtered by game reference and print them.
+    """
+    logger.info("Verifying PlatformSpec objects linked to Game %s", game_uuid)
+
+    query = f"""
+    {{
+      Get {{
+        PlatformSpec(
+          where: {{
+            path: ["game"],
+            operator: Equal,
+            valueString: "weaviate://localhost/Game/{game_uuid}"
+          }}
+        ) {{
+          platform_name
+          platform_family
+          release_date
+          requirements_minimum
+          requirements_recommended
+        }}
+      }}
+    }}
+    """
+
+    result = client.graphql_raw(query)
+    specs = (
+        result.get("data", {})
+        .get("Get", {})
+        .get("PlatformSpec", [])
+    )
+
+    logger.info("Retrieved %d PlatformSpec objects.", len(specs))
+    for spec in specs:
+        print(spec)
+
+
+# ------------------------------------------------------------------
+# Main execution
+# ------------------------------------------------------------------
+def main() -> None:
+    game_name = "Far Cry 5"  # real example
+
+    try:
+        client = weaviate.connect_to_local()
+    except Exception as exc:
+        raise SystemExit(f"❌ Failed to connect to Weaviate: {exc}")
+
+    # 1. Ensure prerequisite schema
+    ensure_game_collection(client)
+
+    # 2. Create canonical Game anchor
+    try:
+        game_uuid = create_canonical_game(client, game_name)
+    except Exception as exc:
+        logger.error("Failed to create canonical Game: %s", exc)
+        client.close()
+        sys.exit(1)
+
+    # 3. Run PlatformSpec upsert (still uses client object)
+    logger.info("Running PlatformSpec upsert for '%s'...", game_name)
+    count = upsert_platform_specs(
+        client=client,  # v4 client is compatible for batch/REST usage
         game_name=game_name,
-        canonical_game_uuid=game_uuid,
-    )
-
-    if gamespot_payload is None:
-        print("\n⚠️  WARNING: No GameSpot editorial content found.")
-        print("Chunking skipped.")
-        return
-
-    gamespot_uuid = gamespot_payload["uuid"]
-    editorial_object = gamespot_payload["properties"]
-
-    # -----------------------------------------------------
-    # 3. Chunking
-    # -----------------------------------------------------
-    chunker = EditorialChunker(chunk_size=500, overlap=50)
-    chunks = chunker.process_game_editorial(
-        editorial_object=editorial_object,
         game_uuid=game_uuid,
-        gamespot_uuid=gamespot_uuid,
     )
+    logger.info("Upserted %d PlatformSpec objects.", count)
 
-    if not chunks:
-        print("\n⚠️  WARNING: 0 chunks generated (no usable editorial text).")
-        return
+    # 4. Verify linkage
+    verify_platform_specs(client, game_uuid)
 
-    # -----------------------------------------------------
-    # 4. Contract validation (chunk_contract.md)
-    # -----------------------------------------------------
-    for chunk in chunks:
-        # Identity
-        assert "chunk_id" in chunk and isinstance(chunk["chunk_id"], str), "Invalid chunk_id"
-        assert chunk.get("game_uuid") == game_uuid, "game_uuid mismatch"
-        assert (
-            chunk.get("parent_editorial_uuid") == gamespot_uuid
-        ), "parent_editorial_uuid mismatch"
+    client.close()
 
-        # Content
-        assert chunk.get("content"), "Empty chunk content"
-        assert chunk.get("source") == "gamespot", "Invalid source"
-        assert chunk.get("content_type") in ("review", "article"), "Invalid content_type"
-
-        # Token boundary check
-        token_count = len(chunker.tokenizer.encode(chunk["content"]))
-        assert token_count <= 520, f"Chunk exceeds token limit: {token_count}"
-
-    # -----------------------------------------------------
-    # 5. Reporting
-    # -----------------------------------------------------
-    type_counts = Counter(c["content_type"] for c in chunks)
-
-    print("\n📊 Chunk Extraction Summary")
-    print(
-        f"  Extracted {len(chunks)} chunks "
-        f"({type_counts.get('review', 0)} Reviews, "
-        f"{type_counts.get('article', 0)} Articles)"
-    )
-
-    total_tokens = sum(len(chunker.tokenizer.encode(c["content"])) for c in chunks)
-    print(f"  Total tokens across all chunks: {total_tokens}")
-
-    # -----------------------------------------------------
-    # 6. Boundary inspection
-    # -----------------------------------------------------
-    print("\n🔍 FIRST CHUNK (start of editorial):")
-    pprint(chunks[0])
-
-    print("\n🔍 LAST CHUNK (end of editorial):")
-    pprint(chunks[-1])
-
-    # -----------------------------------------------------
-    # 7. Save chunks to JSON file
-    # -----------------------------------------------------
-    output_filename = f"{game_name.replace(' ', '_')}_chunks.json"
-    with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(chunks, f, indent=2, ensure_ascii=False)
-
-    print(f"\n✅ Chunks saved to: {output_filename}")
 
 if __name__ == "__main__":
     main()
