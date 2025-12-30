@@ -1,7 +1,7 @@
 {
   "class": "GameSpot_Game",
   "description": "GameSpot game metadata with nested summaries, reviews, and articles",
-  "vectorizer": "text2vec-openai",
+  "vectorizer": "text2vec-transformers",
   "properties": [
     {
       "name": "metadata",

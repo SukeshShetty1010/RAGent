@@ -2,7 +2,7 @@
     "$schema": "https://weaviate.io/schema/weaviate-schema.json",
     "class": "EditorialChunk",
     "description": "You are generating a semantic embedding. This text is a single, atomic excerpt from a video game review or editorial article. Your task is to represent the meaning of the text faithfully and neutrally. Do not summarize. Do not rephrase. Do not infer context beyond the text. Preserve tone, intent, and opinion as expressed by the author. Treat this text as an independent semantic unit.",
-    "vectorizer": "text2vec-openai",
+    "vectorizer": "text2vec-transformers",
     "properties": [
         {
         "name": "content",
