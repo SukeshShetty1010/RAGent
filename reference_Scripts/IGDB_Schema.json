@@ -1,37 +1,31 @@
 {
   "class": "IGDB_Game",
-  "description": "Relational IGDB metadata used for lineage, editions, expansions, and structured joins. Not used for semantic retrieval.",
+  "description": "Unified IGDB entities across all relational categories",
   "vectorizer": "none",
-
   "properties": [
     {
       "name": "entity_category",
       "dataType": ["text"],
-      "description": "IGDB entity category (Main, Expansion, Edition, Bundle, Update, Standalone)",
-      "indexFilterable": true,
-      "indexSearchable": false,
+      "description": "Source category (Main_Game_Table, Expansion_Table, Edition_Table, Bundle_Table, Update_Table, Standalone_Experience_Table)",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
+
     {
-      "name": "igdb_id",
+      "name": "id",
       "dataType": ["int"],
       "description": "IGDB numeric identifier",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "checksum",
       "dataType": ["text"],
       "description": "IGDB checksum UUID",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
 
@@ -39,40 +33,32 @@
       "name": "name",
       "dataType": ["text"],
       "description": "Entity name",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": false }
       }
     },
     {
       "name": "summary",
       "dataType": ["text"],
-      "description": "Short description (relational context only)",
-      "indexFilterable": false,
-      "indexSearchable": false,
+      "description": "Short description / summary",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": false }
       }
     },
     {
       "name": "storyline",
       "dataType": ["text"],
-      "description": "Long-form storyline (relational context only)",
-      "indexFilterable": false,
-      "indexSearchable": false,
+      "description": "Long-form narrative or storyline",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": false }
       }
     },
     {
       "name": "version_title",
       "dataType": ["text"],
       "description": "Edition or version title",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": false }
       }
     },
 
@@ -80,30 +66,24 @@
       "name": "parent_game",
       "dataType": ["int"],
       "description": "Parent game foreign key",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "version_parent",
       "dataType": ["int"],
       "description": "Version parent foreign key",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "game_type",
       "dataType": ["int"],
       "description": "IGDB game type enum",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
 
@@ -111,51 +91,41 @@
       "name": "first_release_date",
       "dataType": ["date"],
       "description": "Initial release date",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "created_at",
       "dataType": ["date"],
       "description": "IGDB creation timestamp",
-      "indexFilterable": false,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "updated_at",
       "dataType": ["date"],
       "description": "IGDB last update timestamp",
-      "indexFilterable": false,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
 
     {
       "name": "aggregated_rating",
       "dataType": ["number"],
-      "description": "Aggregated rating",
-      "indexFilterable": true,
-      "indexSearchable": false,
+      "description": "Aggregated critic/user rating",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "total_rating",
       "dataType": ["number"],
       "description": "Total combined rating",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
 
@@ -163,80 +133,64 @@
       "name": "genres",
       "dataType": ["int[]"],
       "description": "Genre ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "platforms",
       "dataType": ["int[]"],
       "description": "Platform ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "themes",
       "dataType": ["int[]"],
       "description": "Theme ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "keywords",
       "dataType": ["int[]"],
       "description": "Keyword ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "tags",
       "dataType": ["int[]"],
       "description": "Tag ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "involved_companies",
       "dataType": ["int[]"],
       "description": "Company ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "franchises",
       "dataType": ["int[]"],
       "description": "Franchise ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     },
     {
       "name": "collections",
       "dataType": ["int[]"],
       "description": "Collection ID list",
-      "indexFilterable": true,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       }
     }
   ]

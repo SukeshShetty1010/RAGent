@@ -1,0 +1,85 @@
+{
+  "class": "EditorialChunk",
+  "description": "Atomic semantic excerpt from a video game editorial source. This text is embedded as-is to preserve meaning, tone, and opinion. It represents the smallest retrievable semantic unit in the system.",
+  "vectorizer": "text2vec-transformers",
+
+  "properties": [
+    {
+      "name": "content",
+      "dataType": ["text"],
+      "description": "Atomic editorial text chunk to be embedded",
+      "indexSearchable": true,
+      "indexFilterable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": false
+        }
+      }
+    },
+
+    {
+      "name": "source_title",
+      "dataType": ["text"],
+      "description": "Title of the source article or review",
+      "indexSearchable": false,
+      "indexFilterable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+
+    {
+      "name": "source",
+      "dataType": ["text"],
+      "description": "Editorial source identifier (e.g. gamespot)",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+
+    {
+      "name": "content_type",
+      "dataType": ["text"],
+      "description": "Type of editorial content (review, article, preview)",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+
+    {
+      "name": "chunk_index",
+      "dataType": ["int"],
+      "description": "Chunk order within the original editorial document",
+      "indexFilterable": true,
+      "indexSortable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": {
+          "skip": true
+        }
+      }
+    },
+
+    {
+      "name": "game",
+      "dataType": ["Game"],
+      "description": "Canonical Game entity this chunk belongs to"
+    },
+
+    {
+      "name": "parent_editorial",
+      "dataType": ["GameSpot_Game"],
+      "description": "Source editorial container this chunk was derived from"
+    }
+  ]
+}

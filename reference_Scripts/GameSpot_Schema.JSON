@@ -1,119 +1,90 @@
 {
   "class": "GameSpot_Game",
-  "description": "GameSpot editorial container storing raw summaries, reviews, and articles. Feeds downstream chunking and semantic indexing.",
+  "description": "GameSpot game metadata with nested summaries, reviews, and articles",
   "vectorizer": "text2vec-transformers",
-
   "properties": [
-    {
-      "name": "game",
-      "dataType": ["Game"],
-      "description": "Canonical Game this editorial content belongs to"
-    },
-
     {
       "name": "metadata",
       "dataType": ["object"],
-      "description": "Core GameSpot metadata (non-semantic)",
-      "indexFilterable": false,
-      "indexSearchable": false,
+      "description": "Core game metadata",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       },
       "nestedProperties": [
         {
           "name": "id",
           "dataType": ["int"],
           "description": "GameSpot game ID",
-          "indexFilterable": true,
-          "indexSearchable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           }
         },
         {
           "name": "name",
           "dataType": ["text"],
           "description": "Game name",
-          "indexFilterable": true,
-          "indexSearchable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           }
         },
         {
           "name": "slug",
           "dataType": ["text"],
           "description": "Game slug",
-          "indexFilterable": true,
-          "indexSearchable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           }
         },
         {
           "name": "release_date",
           "dataType": ["date"],
           "description": "Release date",
-          "indexFilterable": true,
-          "indexSearchable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           }
         }
       ]
     },
-
     {
       "name": "summary",
       "dataType": ["object"],
-      "description": "Editorial summaries (semantic)",
-      "indexFilterable": false,
-      "indexSearchable": false,
+      "description": "Short and long descriptions",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       },
       "nestedProperties": [
         {
           "name": "deck",
           "dataType": ["text"],
-          "description": "Short editorial summary",
-          "indexSearchable": true,
-          "indexFilterable": false,
+          "description": "Short summary",
           "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
+            "text2vec-openai": { "skip": false }
           }
         },
         {
           "name": "description",
           "dataType": ["text"],
-          "description": "Full editorial description",
-          "indexSearchable": true,
-          "indexFilterable": false,
+          "description": "Full description",
           "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
+            "text2vec-openai": { "skip": false }
           }
         }
       ]
     },
-
     {
       "name": "reviews",
       "dataType": ["object"],
-      "description": "Review metadata and review content",
-      "indexFilterable": false,
-      "indexSearchable": false,
+      "description": "Review metadata and review items",
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       },
       "nestedProperties": [
         {
           "name": "average_score",
           "dataType": ["number"],
           "description": "Average review score",
-          "indexFilterable": true,
-          "indexSearchable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           }
         },
         {
@@ -121,100 +92,83 @@
           "dataType": ["object[]"],
           "description": "Individual reviews",
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           },
           "nestedProperties": [
             {
               "name": "title",
               "dataType": ["text"],
               "description": "Review title",
-              "indexSearchable": false,
               "moduleConfig": {
-                "text2vec-transformers": { "skip": true }
+                "text2vec-openai": { "skip": true }
               }
             },
             {
               "name": "score",
               "dataType": ["number"],
               "description": "Review score",
-              "indexFilterable": true,
-              "indexSearchable": false,
               "moduleConfig": {
-                "text2vec-transformers": { "skip": true }
+                "text2vec-openai": { "skip": true }
               }
             },
             {
               "name": "date",
               "dataType": ["date"],
               "description": "Review date",
-              "indexFilterable": true,
-              "indexSearchable": false,
               "moduleConfig": {
-                "text2vec-transformers": { "skip": true }
+                "text2vec-openai": { "skip": true }
               }
             },
             {
               "name": "body",
               "dataType": ["text"],
-              "description": "Full review body",
-              "indexSearchable": true,
-              "indexFilterable": false,
+              "description": "Full review text",
               "moduleConfig": {
-                "text2vec-transformers": { "skip": false }
+                "text2vec-openai": { "skip": false }
               }
             }
           ]
         }
       ]
     },
-
     {
       "name": "articles",
       "dataType": ["object[]"],
       "description": "Editorial articles",
-      "indexFilterable": false,
-      "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
+        "text2vec-openai": { "skip": true }
       },
       "nestedProperties": [
         {
           "name": "title",
           "dataType": ["text"],
           "description": "Article title",
-          "indexSearchable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           }
         },
         {
           "name": "date",
           "dataType": ["date"],
           "description": "Article publish date",
-          "indexFilterable": true,
-          "indexSearchable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
+            "text2vec-openai": { "skip": true }
           }
         },
         {
           "name": "deck",
           "dataType": ["text"],
           "description": "Article summary deck",
-          "indexSearchable": true,
-          "indexFilterable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
+            "text2vec-openai": { "skip": false }
           }
         },
         {
           "name": "body",
           "dataType": ["text"],
           "description": "Full article body",
-          "indexSearchable": true,
-          "indexFilterable": false,
           "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
+            "text2vec-openai": { "skip": false }
           }
         }
       ]

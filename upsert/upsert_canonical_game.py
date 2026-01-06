@@ -29,7 +29,7 @@ from ingest.rawg_identity_ingest import fetch_and_prepare_identity
 
 GAME_NAMESPACE_UUID = UUID("12345678-1234-5678-1234-567812345678")
 GAME_CLASS_NAME = "Game"
-SCHEMA_PATH = Path(__file__).parent / "vector\schemas\rawg_game.schema.json"
+SCHEMA_PATH = "vector/schemas/rawg_game.schema.json"
 
 
 # -------------------------------------------------------------------

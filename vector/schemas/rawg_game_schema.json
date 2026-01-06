@@ -1,0 +1,148 @@
+{
+  "class": "Game",
+  "description": "Canonical Game anchor derived from RAWG data. Represents a single authoritative video game identity.",
+  "vectorizer": "none",
+
+  "properties": [
+    {
+      "name": "game_id",
+      "dataType": ["int"],
+      "description": "RAWG game ID (primary canonical identity)",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "title",
+      "dataType": ["text"],
+      "description": "Game title",
+      "indexFilterable": true,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": false }
+      }
+    },
+    {
+      "name": "description",
+      "dataType": ["text"],
+      "description": "Long-form game description",
+      "indexFilterable": false,
+      "indexSearchable": true,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": false }
+      }
+    },
+    {
+      "name": "release_date",
+      "dataType": ["date"],
+      "description": "Official release date",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "release_year",
+      "dataType": ["int"],
+      "description": "Release year for fast filtering",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "genres",
+      "dataType": ["text[]"],
+      "description": "Game genres",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "developers",
+      "dataType": ["text[]"],
+      "description": "Game developers",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "publishers",
+      "dataType": ["text[]"],
+      "description": "Game publishers",
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "tags",
+      "dataType": ["text[]"],
+      "description": "Community and gameplay tags",
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "average_rating",
+      "dataType": ["number"],
+      "description": "Average RAWG rating",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "metacritic_score",
+      "dataType": ["int"],
+      "description": "Metacritic score",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "source_rawg_url",
+      "dataType": ["text"],
+      "description": "RAWG source URL",
+      "indexFilterable": false,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "last_updated",
+      "dataType": ["date"],
+      "description": "Last updated timestamp",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    },
+    {
+      "name": "has_platform_specs",
+      "dataType": ["boolean"],
+      "description": "Whether platform specs exist",
+      "indexFilterable": true,
+      "indexSearchable": false,
+      "moduleConfig": {
+        "text2vec-transformers": { "skip": true }
+      }
+    }
+  ]
+}
