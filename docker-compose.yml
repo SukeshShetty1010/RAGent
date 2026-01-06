@@ -2,15 +2,17 @@ version: "3.8"
 
 services:
   weaviate:
-    image: semitechnologies/weaviate:1.24.10
+    image: semitechnologies/weaviate:1.27.3
     container_name: weaviate
     restart: unless-stopped
+
     ports:
       - "8080:8080"
-      - "50051:50051"   # gRPC (v4 uses this heavily)
+      - "50051:50051"   # gRPC required for weaviate-client v4
+
     environment:
       # -----------------------------
-      # Core
+      # Core Weaviate config
       # -----------------------------
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
       QUERY_DEFAULTS_LIMIT: 25
@@ -18,29 +20,14 @@ services:
       CLUSTER_HOSTNAME: "node1"
 
       # -----------------------------
-      # Modules (THIS FIXES YOUR ERROR)
+      # OpenAI Vectorizer
       # -----------------------------
-      ENABLE_MODULES: "text2vec-transformers"
-      DEFAULT_VECTORIZER_MODULE: "text2vec-transformers"
-
-      # -----------------------------
-      # Transformer inference backend
-      # -----------------------------
-      TRANSFORMERS_INFERENCE_API: "http://t2v-transformers:8080"
+      ENABLE_MODULES: "text2vec-openai"
+      DEFAULT_VECTORIZER_MODULE: "text2vec-openai"
+      OPENAI_APIKEY: "${OPENAI_API_KEY}"
 
     volumes:
       - weaviate_data:/var/lib/weaviate
-
-    depends_on:
-      - t2v-transformers
-
-
-  t2v-transformers:
-    image: semitechnologies/transformers-inference:sentence-transformers-all-MiniLM-L6-v2
-    container_name: t2v-transformers
-    restart: unless-stopped
-    environment:
-      ENABLE_CUDA: "0"   # set to "1" only if you have NVIDIA GPU
 
 volumes:
   weaviate_data:

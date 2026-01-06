@@ -32,10 +32,35 @@ def _safe_float(value: Any) -> Optional[float]:
 
 
 def _safe_iso_date(value: Optional[str]) -> Optional[str]:
-    if not value:
+    """
+    Normalize dates to strict RFC3339 (Weaviate v4 compatible).
+
+    Accepted inputs:
+      - YYYY-MM-DD
+      - YYYY-MM-DDTHH:MM:SS
+      - YYYY-MM-DDTHH:MM:SSZ
+      - YYYY-MM-DDTHH:MM:SS+HH:MM
+
+    Output:
+      - Always RFC3339 with timezone
+    """
+    if not value or not isinstance(value, str):
         return None
+
+    value = value.strip()
+
     try:
-        return value[:10]
+        # Case 1: Date-only → midnight UTC
+        if "T" not in value:
+            return f"{value[:10]}T00:00:00Z"
+
+        # Case 2: Has timezone already
+        if value.endswith("Z") or "+" in value or "-" in value[10:]:
+            return value
+
+        # Case 3: Timestamp WITHOUT timezone → assume UTC
+        return f"{value}Z"
+
     except Exception:
         return None
 
@@ -45,8 +70,8 @@ def _safe_iso_date(value: Optional[str]) -> Optional[str]:
 # ------------------------------------------------------------------
 
 def _create_game_object(source_data: Dict[str, Any]) -> Dict[str, Any]:
-    ratings = source_data.get("ratings", {})
-    source = source_data.get("source", {})
+    ratings = source_data.get("ratings", {}) or {}
+    source = source_data.get("source", {}) or {}
     platforms = source_data.get("platforms") or []
 
     return {
@@ -97,7 +122,7 @@ def fetch_and_prepare_identity(game_name: str) -> Dict[str, Any]:
     # 3. Transform
     game_obj = _create_game_object(cleaned)
 
-    # 4. Validate
+    # 4. Validate canonical contract
     validate_game_identity(game_obj)
 
     return game_obj

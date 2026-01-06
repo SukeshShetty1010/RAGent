@@ -3,22 +3,19 @@
 Canonical Game Anchor Upsert (Weaviate v4 Compatible)
 
 - Uses REAL Weaviate v4 client
-- Validates payload against JSON Schema
+- Enforces Canonical Game contract (NOT Weaviate schema validation)
 - Enforces deterministic UUIDs
 - Idempotent (no duplicate writes)
 - Fails fast on all invalid states
 """
 
 import argparse
-import json
 import sys
-from pathlib import Path
 from uuid import UUID
 
 from weaviate import WeaviateClient
 from weaviate.connect import ConnectionParams
 from weaviate.util import generate_uuid5
-from jsonschema import validate, ValidationError
 
 from ingest.rawg_identity_ingest import fetch_and_prepare_identity
 
@@ -29,17 +26,48 @@ from ingest.rawg_identity_ingest import fetch_and_prepare_identity
 
 GAME_NAMESPACE_UUID = UUID("12345678-1234-5678-1234-567812345678")
 GAME_CLASS_NAME = "Game"
-SCHEMA_PATH = "vector/schemas/rawg_game.schema.json"
 
 
 # -------------------------------------------------------------------
-# HELPERS
+# CONTRACT VALIDATION (AUTHORITATIVE)
 # -------------------------------------------------------------------
 
-def load_schema():
-    with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+def validate_game_contract(game: dict) -> None:
+    """
+    Enforces the Canonical Game contract.
 
+    This validates *data integrity*, not storage schema.
+    Weaviate enforces schema correctness at persistence time.
+    """
+
+    if not isinstance(game, dict):
+        raise RuntimeError("Game contract violation: payload is not a dictionary")
+
+    # ---- Required identity fields ----
+    if "game_id" not in game or game["game_id"] is None:
+        raise RuntimeError("Game contract violation: missing 'game_id'")
+
+    if not isinstance(game["game_id"], int):
+        raise RuntimeError("Game contract violation: 'game_id' must be int")
+
+    if "title" not in game or not isinstance(game["title"], str) or not game["title"].strip():
+        raise RuntimeError("Game contract violation: missing or empty 'title'")
+
+    # ---- Optional sanity checks (non-fatal but defensive) ----
+    if "release_year" in game and game["release_year"] is not None:
+        if not isinstance(game["release_year"], int):
+            raise RuntimeError("Game contract violation: 'release_year' must be int")
+
+    if "genres" in game and not isinstance(game["genres"], list):
+        raise RuntimeError("Game contract violation: 'genres' must be list")
+
+    if "developers" in game and not isinstance(game["developers"], list):
+        raise RuntimeError("Game contract violation: 'developers' must be list")
+
+
+# -------------------------------------------------------------------
+# WEAVIATE CLIENT
+# -------------------------------------------------------------------
 
 def get_weaviate_client() -> WeaviateClient:
     try:
@@ -52,7 +80,7 @@ def get_weaviate_client() -> WeaviateClient:
         client.connect()
         return client
     except Exception as exc:
-        raise RuntimeError(f"Failed to connect to Weaviate: {exc}")
+        raise RuntimeError(f"Failed to connect to Weaviate: {exc}") from exc
 
 
 # -------------------------------------------------------------------
@@ -61,30 +89,37 @@ def get_weaviate_client() -> WeaviateClient:
 
 def upsert_game_anchor(client: WeaviateClient, game_name: str) -> str:
     """
-    Fetch → Validate → Idempotent Upsert of Canonical Game
+    Fetch → Contract Validate → Deterministic UUID → Idempotent Upsert
     """
 
-    # 1. Fetch canonical identity
+    # ------------------------------------------------------------
+    # 1. Fetch canonical identity from RAWG
+    # ------------------------------------------------------------
     game_obj = fetch_and_prepare_identity(game_name)
 
-    # 2. Schema validation
-    schema = load_schema()
-    try:
-        validate(instance=game_obj, schema=schema)
-    except ValidationError as exc:
-        raise RuntimeError(f"Schema validation failed: {exc.message}") from exc
+    # ------------------------------------------------------------
+    # 2. Enforce Canonical Game contract (NOT schema validation)
+    # ------------------------------------------------------------
+    validate_game_contract(game_obj)
 
-    # 3. Deterministic UUID
+    # ------------------------------------------------------------
+    # 3. Deterministic UUID (RAWG ID is the identity root)
+    # ------------------------------------------------------------
     rawg_id = game_obj["game_id"]
     game_uuid = generate_uuid5(GAME_NAMESPACE_UUID, str(rawg_id))
 
+    # ------------------------------------------------------------
     # 4. Idempotency check
+    # ------------------------------------------------------------
     collection = client.collections.get(GAME_CLASS_NAME)
+
     if collection.data.exists(uuid=game_uuid):
         print(f"⚠️  Game already exists. UUID={game_uuid}")
         return str(game_uuid)
 
-    # 5. Insert
+    # ------------------------------------------------------------
+    # 5. Insert canonical Game anchor
+    # ------------------------------------------------------------
     collection.data.insert(
         uuid=game_uuid,
         properties=game_obj,
@@ -97,7 +132,7 @@ def upsert_game_anchor(client: WeaviateClient, game_name: str) -> str:
 # CLI
 # -------------------------------------------------------------------
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Upsert Canonical Game Anchor (Weaviate v4)"
     )
@@ -109,14 +144,25 @@ def main():
     )
     args = parser.parse_args()
 
+    client: WeaviateClient | None = None
+
     try:
         client = get_weaviate_client()
-        uuid = upsert_game_anchor(client, args.game)
-        print(f"✅ Canonical Game Anchor ready → UUID: {uuid}")
+        game_uuid = upsert_game_anchor(client, args.game)
+        print(f"✅ Canonical Game Anchor ready → UUID: {game_uuid}")
+
     except Exception as exc:
         print(f"❌ FAILURE: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    finally:
+        if client:
+            client.close()
+
+
+# -------------------------------------------------------------------
+# ENTRYPOINT
+# -------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()

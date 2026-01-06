@@ -1,7 +1,7 @@
 {
   "class": "GameSpot_Game",
   "description": "GameSpot editorial container storing raw summaries, reviews, and articles. Feeds downstream chunking and semantic indexing.",
-  "vectorizer": "text2vec-transformers",
+  "vectorizer": "none",
 
   "properties": [
     {
@@ -16,49 +16,30 @@
       "description": "Core GameSpot metadata (non-semantic)",
       "indexFilterable": false,
       "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
-      },
       "nestedProperties": [
         {
-          "name": "id",
+          "name": "gamespot_id",
           "dataType": ["int"],
           "description": "GameSpot game ID",
-          "indexFilterable": true,
-          "indexSearchable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          }
+          "indexFilterable": true
         },
         {
           "name": "name",
           "dataType": ["text"],
           "description": "Game name",
-          "indexFilterable": true,
-          "indexSearchable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          }
+          "indexFilterable": true
         },
         {
           "name": "slug",
           "dataType": ["text"],
           "description": "Game slug",
-          "indexFilterable": true,
-          "indexSearchable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          }
+          "indexFilterable": true
         },
         {
           "name": "release_date",
           "dataType": ["date"],
           "description": "Release date",
-          "indexFilterable": true,
-          "indexSearchable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          }
+          "indexFilterable": true
         }
       ]
     },
@@ -66,32 +47,19 @@
     {
       "name": "summary",
       "dataType": ["object"],
-      "description": "Editorial summaries (semantic)",
+      "description": "Editorial summaries (raw, not embedded)",
       "indexFilterable": false,
       "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
-      },
       "nestedProperties": [
         {
           "name": "deck",
           "dataType": ["text"],
-          "description": "Short editorial summary",
-          "indexSearchable": true,
-          "indexFilterable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
-          }
+          "description": "Short editorial summary"
         },
         {
           "name": "description",
           "dataType": ["text"],
-          "description": "Full editorial description",
-          "indexSearchable": true,
-          "indexFilterable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
-          }
+          "description": "Full editorial description"
         }
       ]
     },
@@ -102,66 +70,39 @@
       "description": "Review metadata and review content",
       "indexFilterable": false,
       "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
-      },
       "nestedProperties": [
         {
           "name": "average_score",
           "dataType": ["number"],
           "description": "Average review score",
-          "indexFilterable": true,
-          "indexSearchable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          }
+          "indexFilterable": true
         },
         {
           "name": "items",
           "dataType": ["object[]"],
           "description": "Individual reviews",
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          },
           "nestedProperties": [
             {
               "name": "title",
               "dataType": ["text"],
-              "description": "Review title",
-              "indexSearchable": false,
-              "moduleConfig": {
-                "text2vec-transformers": { "skip": true }
-              }
+              "description": "Review title"
             },
             {
               "name": "score",
               "dataType": ["number"],
               "description": "Review score",
-              "indexFilterable": true,
-              "indexSearchable": false,
-              "moduleConfig": {
-                "text2vec-transformers": { "skip": true }
-              }
+              "indexFilterable": true
             },
             {
               "name": "date",
               "dataType": ["date"],
               "description": "Review date",
-              "indexFilterable": true,
-              "indexSearchable": false,
-              "moduleConfig": {
-                "text2vec-transformers": { "skip": true }
-              }
+              "indexFilterable": true
             },
             {
               "name": "body",
               "dataType": ["text"],
-              "description": "Full review body",
-              "indexSearchable": true,
-              "indexFilterable": false,
-              "moduleConfig": {
-                "text2vec-transformers": { "skip": false }
-              }
+              "description": "Full review body"
             }
           ]
         }
@@ -174,48 +115,27 @@
       "description": "Editorial articles",
       "indexFilterable": false,
       "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-transformers": { "skip": true }
-      },
       "nestedProperties": [
         {
           "name": "title",
           "dataType": ["text"],
-          "description": "Article title",
-          "indexSearchable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          }
+          "description": "Article title"
         },
         {
           "name": "date",
           "dataType": ["date"],
           "description": "Article publish date",
-          "indexFilterable": true,
-          "indexSearchable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": true }
-          }
+          "indexFilterable": true
         },
         {
           "name": "deck",
           "dataType": ["text"],
-          "description": "Article summary deck",
-          "indexSearchable": true,
-          "indexFilterable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
-          }
+          "description": "Article summary deck"
         },
         {
           "name": "body",
           "dataType": ["text"],
-          "description": "Full article body",
-          "indexSearchable": true,
-          "indexFilterable": false,
-          "moduleConfig": {
-            "text2vec-transformers": { "skip": false }
-          }
+          "description": "Full article body"
         }
       ]
     }

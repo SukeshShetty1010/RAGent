@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import Dict, Optional
 
 import weaviate
 from weaviate.exceptions import WeaviateBaseError
@@ -19,6 +20,22 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+def _uuid_from_beacon(beacon: Optional[str]) -> Optional[str]:
+    """
+    Extract UUID from a Weaviate beacon:
+      weaviate://localhost/Game/<uuid>  → <uuid>
+    """
+    if not beacon or not isinstance(beacon, str):
+        return None
+    try:
+        return beacon.rstrip("/").split("/")[-1]
+    except Exception:
+        return None
 
 
 # ------------------------------------------------------------------
@@ -86,7 +103,7 @@ def upsert_platform_specs(
         return 0
 
     # --------------------------------------------------
-    # 4. Upsert using v4 Collections API
+    # 4. Upsert using v4 Collections API (CORRECT REFERENCES)
     # --------------------------------------------------
     collection = client.collections.get("PlatformSpec")
 
@@ -94,10 +111,24 @@ def upsert_platform_specs(
 
     for obj in payloads:
         try:
+            # ---- Separate properties and references (v4 rule) ----
+            properties: Dict = dict(obj["properties"])
+            game_ref = properties.pop("game", None)
+
+            references: Dict[str, str] = {}
+
+            if isinstance(game_ref, dict):
+                game_uuid_ref = _uuid_from_beacon(game_ref.get("beacon"))
+                if game_uuid_ref:
+                    references["game"] = game_uuid_ref
+
+            # ---- Insert ----
             collection.data.insert(
                 uuid=obj["uuid"],
-                properties=obj["properties"],
+                properties=properties,
+                references=references,
             )
+
             success_count += 1
 
         except WeaviateBaseError as exc:

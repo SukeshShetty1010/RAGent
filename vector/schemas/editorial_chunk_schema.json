@@ -1,7 +1,7 @@
 {
   "class": "EditorialChunk",
   "description": "Atomic semantic excerpt from a video game editorial source. This text is embedded as-is to preserve meaning, tone, and opinion. It represents the smallest retrievable semantic unit in the system.",
-  "vectorizer": "text2vec-transformers",
+  "vectorizer": "text2vec-openai",
 
   "properties": [
     {
@@ -11,8 +11,9 @@
       "indexSearchable": true,
       "indexFilterable": false,
       "moduleConfig": {
-        "text2vec-transformers": {
-          "skip": false
+        "text2vec-openai": {
+          "skip": false,
+          "model": "text-embedding-3-small"
         }
       }
     },
@@ -24,7 +25,7 @@
       "indexSearchable": false,
       "indexFilterable": false,
       "moduleConfig": {
-        "text2vec-transformers": {
+        "text2vec-openai": {
           "skip": true
         }
       }
@@ -37,7 +38,7 @@
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": {
+        "text2vec-openai": {
           "skip": true
         }
       }
@@ -50,7 +51,7 @@
       "indexFilterable": true,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": {
+        "text2vec-openai": {
           "skip": true
         }
       }
@@ -64,7 +65,7 @@
       "indexSortable": true,
       "indexSearchable": false,
       "moduleConfig": {
-        "text2vec-transformers": {
+        "text2vec-openai": {
           "skip": true
         }
       }
