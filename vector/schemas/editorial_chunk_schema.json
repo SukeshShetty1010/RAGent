@@ -1,21 +1,15 @@
 {
   "class": "EditorialChunk",
-  "description": "Atomic semantic excerpt from a video game editorial source. This text is embedded as-is to preserve meaning, tone, and opinion. It represents the smallest retrievable semantic unit in the system.",
-  "vectorizer": "text2vec-openai",
+  "description": "Atomic semantic excerpt from a video game editorial source. Embedded client-side using e5-base-v2. Represents the smallest retrievable semantic unit in the system.",
+  "vectorizer": "none",
 
   "properties": [
     {
       "name": "content",
       "dataType": ["text"],
-      "description": "Atomic editorial text chunk to be embedded",
+      "description": "Atomic editorial text chunk. Embedded client-side using e5-base-v2.",
       "indexSearchable": true,
-      "indexFilterable": false,
-      "moduleConfig": {
-        "text2vec-openai": {
-          "skip": false,
-          "model": "text-embedding-3-small"
-        }
-      }
+      "indexFilterable": false
     },
 
     {
@@ -23,12 +17,7 @@
       "dataType": ["text"],
       "description": "Title of the source article or review",
       "indexSearchable": false,
-      "indexFilterable": false,
-      "moduleConfig": {
-        "text2vec-openai": {
-          "skip": true
-        }
-      }
+      "indexFilterable": false
     },
 
     {
@@ -36,25 +25,15 @@
       "dataType": ["text"],
       "description": "Editorial source identifier (e.g. gamespot)",
       "indexFilterable": true,
-      "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-openai": {
-          "skip": true
-        }
-      }
+      "indexSearchable": false
     },
 
     {
       "name": "content_type",
       "dataType": ["text"],
-      "description": "Type of editorial content (review, article, preview)",
+      "description": "Type of editorial content (review, article)",
       "indexFilterable": true,
-      "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-openai": {
-          "skip": true
-        }
-      }
+      "indexSearchable": false
     },
 
     {
@@ -63,12 +42,7 @@
       "description": "Chunk order within the original editorial document",
       "indexFilterable": true,
       "indexSortable": true,
-      "indexSearchable": false,
-      "moduleConfig": {
-        "text2vec-openai": {
-          "skip": true
-        }
-      }
+      "indexSearchable": false
     },
 
     {

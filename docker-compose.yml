@@ -8,23 +8,21 @@ services:
 
     ports:
       - "8080:8080"
-      - "50051:50051"   # gRPC required for weaviate-client v4
+      - "50051:50051"
 
     environment:
-      # -----------------------------
-      # Core Weaviate config
-      # -----------------------------
+      # Core
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
-      QUERY_DEFAULTS_LIMIT: 25
       PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
-      CLUSTER_HOSTNAME: "node1"
+      QUERY_DEFAULTS_LIMIT: "25"
 
-      # -----------------------------
-      # OpenAI Vectorizer
-      # -----------------------------
-      ENABLE_MODULES: "text2vec-openai"
-      DEFAULT_VECTORIZER_MODULE: "text2vec-openai"
-      OPENAI_APIKEY: "${OPENAI_API_KEY}"
+      # IMPORTANT: disable all modules for now
+      DEFAULT_VECTORIZER_MODULE: "none"
+      ENABLE_MODULES: ""
+
+      # gRPC (needed by v4 client)
+      GRPC_PORT: "50051"
+      CLUSTER_HOSTNAME: "node1"
 
     volumes:
       - weaviate_data:/var/lib/weaviate

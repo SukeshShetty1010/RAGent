@@ -8,8 +8,10 @@ Stage 1:
 Stage 2:
 - Platform Specs
 
-Future stages (stubbed):
+Stage 3:
 - IGDB Metadata
+
+Future stages (stubbed):
 - Editorial Chunking
 
 Execution:
@@ -25,6 +27,7 @@ from weaviate import WeaviateClient
 
 from upsert.upsert_canonical_game import upsert_game_anchor
 from upsert.upsert_platform_specs import upsert_platform_specs
+from upsert.upsert_igdb_metadata import upsert_igdb_context
 
 
 # -------------------------------------------------------------------
@@ -46,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the Weaviate ingestion pipeline (Stages 1–2)."
+        description="Run the Weaviate ingestion pipeline (Stages 1–3)."
     )
     parser.add_argument(
         "--game",
@@ -92,15 +95,27 @@ def main() -> None:
         )
 
         # ------------------------------------------------------------
+        # Stage 3: IGDB Metadata
+        # ------------------------------------------------------------
+        logger.info("Starting Stage 3: IGDB Metadata...")
+
+        igdb_count = upsert_igdb_context(
+            client=client,
+            game_title=args.game,
+            game_uuid=game_uuid,
+        )
+
+        logger.info(
+            f"✅ Stage 3 Complete. Upserted {igdb_count} IGDB entities."
+        )
+
+        # ------------------------------------------------------------
         # FUTURE STAGES (INTENTIONALLY DISABLED)
         # ------------------------------------------------------------
-        # logger.info("Starting Stage 3: IGDB Metadata...")
-        # upsert_igdb_metadata(client, game_uuid)
-
         # logger.info("Starting Stage 4: Editorial Chunking...")
         # upsert_editorial_chunks(client, game_uuid)
 
-        logger.info("Pipeline execution complete (Stages 1–2).")
+        logger.info("Pipeline execution complete (Stages 1–3).")
 
     except Exception as exc:
         logger.error(f"❌ Pipeline failed: {exc}")

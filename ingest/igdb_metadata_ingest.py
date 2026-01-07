@@ -5,9 +5,15 @@ Fetches, cleans, and transforms IGDB relational data (main game, expansions,
 editions, bundles, DLCs) and prepares Weaviate-ready payloads that are
 STRICTLY linked to a Canonical Game entity.
 
-This module exists to support graph traversal and filtering without polluting
-the semantic vector space.
+This module:
+✔ Produces relational metadata
+✔ Enforces No-Orphan Rule
+✔ Produces schema-valid payloads
+✘ Does NOT persist data
+✘ Does NOT embed vectors
 """
+
+from __future__ import annotations
 
 import argparse
 from typing import Any, Dict, List
@@ -22,7 +28,7 @@ from pre_process.cleaner import IGDBCleaner
 # Helpers (intentionally minimal and local)
 # ---------------------------------------------------------------------
 
-def _safe_int(value: Any):
+def _safe_int(value: Any) -> int | None:
     try:
         return int(value)
     except Exception:
@@ -42,36 +48,42 @@ def fetch_and_prepare_igdb(
 
     Args:
         game_title: Human-readable game title (used for IGDB fetch)
-        canonical_game_uuid: UUID of the canonical Game object (REQUIRED)
+        canonical_game_uuid: UUID of the canonical Game entity (REQUIRED)
 
     Returns:
-        Flat list of IGDB_Game payloads ready for batch ingestion
+        Flat list of IGDB_Game payloads ready for Weaviate batch ingestion
 
     Raises:
         ValueError if canonical_game_uuid is missing
+        RuntimeError on malformed IGDB payloads
     """
 
     if not canonical_game_uuid:
         raise ValueError("canonical_game_uuid is required (No Orphan Rule)")
 
     # --------------------------------------------------
-    # 1. Fetch
+    # 1. Fetch IGDB data
     # --------------------------------------------------
     raw_igdb = fetch_igdb_game_data(game_title)
 
-    # IGDB fetcher returns a wrapper dict; extract records
+    if not isinstance(raw_igdb, dict):
+        raise RuntimeError("IGDB fetch returned invalid payload")
+
     records = raw_igdb.get("clean") or []
     if not isinstance(records, list):
-        raise RuntimeError("Unexpected IGDB fetch format")
+        raise RuntimeError("Unexpected IGDB fetch format: 'clean' is not a list")
 
     # --------------------------------------------------
-    # 2. Clean (relational normalization)
+    # 2. Clean & normalize into relational tables
     # --------------------------------------------------
     cleaner = IGDBCleaner()
     relational_tables = cleaner.clean_batch(records)
 
+    if not isinstance(relational_tables, dict):
+        raise RuntimeError("IGDB cleaner returned invalid relational structure")
+
     # --------------------------------------------------
-    # 3. Transform + Cross-Link
+    # 3. Transform → Weaviate-ready payloads
     # --------------------------------------------------
     payloads: List[Dict[str, Any]] = []
 
@@ -82,7 +94,7 @@ def fetch_and_prepare_igdb(
         for item in items:
             igdb_id = _safe_int(item.get("id"))
             if igdb_id is None:
-                # Defensive: skip malformed IGDB objects
+                # Defensive: skip malformed IGDB records
                 continue
 
             # --------------------------------------------------
@@ -96,16 +108,56 @@ def fetch_and_prepare_igdb(
                 "uuid": igdb_uuid,
                 "class": "IGDB_Game",
                 "properties": {
+                    # -------------------------------
+                    # Identity / classification
+                    # -------------------------------
                     "entity_category": entity_category,
-                    "id": igdb_id,
+                    "igdb_id": igdb_id,
+                    "checksum": item.get("checksum"),
+
+                    # -------------------------------
+                    # Core descriptors
+                    # -------------------------------
                     "name": item.get("name"),
                     "summary": item.get("summary"),
                     "storyline": item.get("storyline"),
+                    "version_title": item.get("version_title"),
+
+                    # -------------------------------
+                    # Relational lineage
+                    # -------------------------------
                     "parent_game": _safe_int(item.get("parent_game")),
                     "version_parent": _safe_int(item.get("version_parent")),
-                    # --------------------------------------------------
-                    # Hard reference to Canonical Game (MANDATORY)
-                    # --------------------------------------------------
+                    "game_type": _safe_int(item.get("game_type")),
+
+                    # -------------------------------
+                    # Temporal metadata
+                    # -------------------------------
+                    "first_release_date": item.get("first_release_date"),
+                    "created_at": item.get("created_at"),
+                    "updated_at": item.get("updated_at"),
+
+                    # -------------------------------
+                    # Ratings
+                    # -------------------------------
+                    "aggregated_rating": item.get("aggregated_rating"),
+                    "total_rating": item.get("total_rating"),
+
+                    # -------------------------------
+                    # Relational ID arrays
+                    # -------------------------------
+                    "genres": item.get("genres", []),
+                    "platforms": item.get("platforms", []),
+                    "themes": item.get("themes", []),
+                    "keywords": item.get("keywords", []),
+                    "tags": item.get("tags", []),
+                    "involved_companies": item.get("involved_companies", []),
+                    "franchises": item.get("franchises", []),
+                    "collections": item.get("collections", []),
+
+                    # -------------------------------
+                    # Mandatory Canonical Game link
+                    # -------------------------------
                     "game": {
                         "beacon": f"weaviate://localhost/Game/{canonical_game_uuid}"
                     },
@@ -118,7 +170,7 @@ def fetch_and_prepare_igdb(
 
 
 # ---------------------------------------------------------------------
-# CLI test harness
+# CLI test harness (local verification only)
 # ---------------------------------------------------------------------
 
 if __name__ == "__main__":

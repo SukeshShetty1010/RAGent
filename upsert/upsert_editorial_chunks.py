@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 import weaviate
+
+# Modal embedder (class-based, warm containers)
+from llm.modal_embed import E5Embedder
 
 
 # ------------------------------------------------------------------
@@ -19,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
-# Helper: Extract UUID from V3 Beacon
+# Helper: Extract UUID from Beacon
 # ------------------------------------------------------------------
 def uuid_from_beacon(beacon: Optional[str]) -> Optional[str]:
     """
@@ -40,8 +43,7 @@ def uuid_from_beacon(beacon: Optional[str]) -> Optional[str]:
 # ------------------------------------------------------------------
 def validate_chunk(chunk_uuid: str, properties: Dict) -> bool:
     """
-    Validate editorial chunk BEFORE upsert.
-    No embeddings are generated here.
+    Validate editorial chunk BEFORE embedding & upsert.
     """
 
     # ---- Required text ----
@@ -56,12 +58,12 @@ def validate_chunk(chunk_uuid: str, properties: Dict) -> bool:
         logger.warning("Skipping %s: Missing canonical Game reference", chunk_uuid)
         return False
 
-    # ---- Source check ----
+    # ---- Source integrity ----
     if properties.get("source") != "gamespot":
         logger.warning("Skipping %s: Invalid source", chunk_uuid)
         return False
 
-    # ---- Content type ----
+    # ---- Content type gate ----
     if properties.get("content_type") not in {"review", "article"}:
         logger.warning("Skipping %s: Invalid content_type", chunk_uuid)
         return False
@@ -74,8 +76,11 @@ def validate_chunk(chunk_uuid: str, properties: Dict) -> bool:
 # ------------------------------------------------------------------
 def upsert_chunk_batch(file_path: str) -> None:
     """
-    Validate and upsert editorial chunks using text2vec-openai.
-    Embeddings are generated server-side by Weaviate.
+    Validate → Embed (Modal e5-base-v2) → Upsert Editorial Chunks (Weaviate v4).
+
+    - Client-side embeddings
+    - Explicit vectors passed to Weaviate
+    - No OpenAI
     """
 
     # --------------------------------------------------
@@ -93,28 +98,62 @@ def upsert_chunk_batch(file_path: str) -> None:
     db_errors = 0
 
     # --------------------------------------------------
-    # 2. Connect to Weaviate (v4)
+    # 2. Validate & prepare embedding batch
+    # --------------------------------------------------
+    contents: List[str] = []
+    prepared_objects: List[Dict] = []
+
+    for obj in payloads:
+        chunk_uuid = obj.get("uuid")
+        properties = obj.get("properties", {})
+
+        if not chunk_uuid:
+            logger.warning("Skipping object with missing UUID")
+            skipped += 1
+            continue
+
+        if not validate_chunk(chunk_uuid, properties):
+            skipped += 1
+            continue
+
+        contents.append(properties["content"])
+        prepared_objects.append(obj)
+
+    if not prepared_objects:
+        logger.warning("No valid editorial chunks to upsert.")
+        return
+
+    # --------------------------------------------------
+    # 3. Generate embeddings via Modal (batched)
+    # --------------------------------------------------
+    logger.info(
+        "Generating embeddings for %d editorial chunks using e5-base-v2 (Modal)...",
+        len(contents),
+    )
+
+    embedder = E5Embedder()
+
+    vectors = embedder.embed_text.remote(
+        contents,
+        mode="passage",  # IMPORTANT: E5 requires passage prefix for corpus
+    )
+
+    if len(vectors) != len(prepared_objects):
+        raise RuntimeError("Embedding count mismatch — aborting upsert")
+
+    # --------------------------------------------------
+    # 4. Connect to Weaviate (v4)
     # --------------------------------------------------
     client = weaviate.connect_to_local()
     collection = client.collections.get("EditorialChunk")
 
     # --------------------------------------------------
-    # 3. Batch Insert (vectors generated server-side via OpenAI)
+    # 5. Batch Insert (explicit vectors)
     # --------------------------------------------------
     with collection.batch.dynamic() as batch:
-        for obj in payloads:
-            chunk_uuid = obj.get("uuid")
-            properties = obj.get("properties", {})
-
-            if not chunk_uuid:
-                logger.warning("Skipping object with missing UUID")
-                skipped += 1
-                continue
-
-            # ---- Validation Gate ----
-            if not validate_chunk(chunk_uuid, properties):
-                skipped += 1
-                continue
+        for obj, vector in zip(prepared_objects, vectors):
+            chunk_uuid = obj["uuid"]
+            properties = obj["properties"]
 
             # ---- Separate properties and references ----
             clean_properties = dict(properties)
@@ -137,16 +176,17 @@ def upsert_chunk_batch(file_path: str) -> None:
             if parent_uuid:
                 references["parent_editorial"] = parent_uuid
 
-            # ---- Add to batch (NO vector passed) ----
+            # ---- Add object with explicit vector ----
             batch.add_object(
                 uuid=chunk_uuid,
                 properties=clean_properties,
                 references=references,
+                vector=vector,
             )
             upserted += 1
 
     # --------------------------------------------------
-    # 4. Batch Error Handling
+    # 6. Batch Error Handling
     # --------------------------------------------------
     failed = collection.batch.failed_objects or []
     for failure in failed:
@@ -160,12 +200,12 @@ def upsert_chunk_batch(file_path: str) -> None:
     client.close()
 
     # --------------------------------------------------
-    # 5. Summary
+    # 7. Summary
     # --------------------------------------------------
     print(
-        f"Total: {total}, "
-        f"Upserted: {upserted}, "
-        f"Skipped: {skipped}, "
+        f"Total Loaded: {total} | "
+        f"Upserted: {upserted} | "
+        f"Skipped: {skipped} | "
         f"DB Errors: {db_errors}"
     )
 
@@ -175,7 +215,7 @@ def upsert_chunk_batch(file_path: str) -> None:
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Upsert Editorial Chunks (text2vec-openai)"
+        description="Upsert Editorial Chunks (Modal e5-base-v2 embeddings)"
     )
     parser.add_argument(
         "--file",

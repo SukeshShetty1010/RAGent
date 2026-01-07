@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def _uuid_from_beacon(beacon: Optional[str]) -> Optional[str]:
     """
     Extract UUID from a Weaviate beacon:
-      weaviate://localhost/Game/<uuid>  → <uuid>
+      weaviate://localhost/Game/<uuid> → <uuid>
     """
     if not beacon or not isinstance(beacon, str):
         return None
@@ -50,9 +50,10 @@ def upsert_platform_specs(
     Fetch RAWG data, extract platform specs, and upsert PlatformSpec
     objects into Weaviate (v4).
 
-    Soft-failure by design:
-    - Missing RAWG data → log + return 0
-    - Per-object insert errors → log + continue
+    Design:
+    - Deterministic UUIDs
+    - Idempotent inserts
+    - Soft-failure per object
     """
 
     # --------------------------------------------------
@@ -103,14 +104,25 @@ def upsert_platform_specs(
         return 0
 
     # --------------------------------------------------
-    # 4. Upsert using v4 Collections API (CORRECT REFERENCES)
+    # 4. Upsert (v4 collections, idempotent)
     # --------------------------------------------------
     collection = client.collections.get("PlatformSpec")
 
     success_count = 0
 
     for obj in payloads:
+        platform_name = obj["properties"].get("platform_name", "UNKNOWN")
+
         try:
+            # ---- Idempotency gate ----
+            if collection.data.exists(uuid=obj["uuid"]):
+                logger.info(
+                    "PlatformSpec already exists for '%s' (%s). Skipping.",
+                    game_name,
+                    platform_name,
+                )
+                continue
+
             # ---- Separate properties and references (v4 rule) ----
             properties: Dict = dict(obj["properties"])
             game_ref = properties.pop("game", None)
@@ -132,20 +144,18 @@ def upsert_platform_specs(
             success_count += 1
 
         except WeaviateBaseError as exc:
-            platform = obj["properties"].get("platform_name", "UNKNOWN")
             logger.warning(
                 "Failed to upsert PlatformSpec for '%s' (%s): %s",
                 game_name,
-                platform,
+                platform_name,
                 exc,
             )
 
         except Exception as exc:
-            platform = obj["properties"].get("platform_name", "UNKNOWN")
             logger.warning(
                 "Unexpected error for PlatformSpec '%s' (%s): %s",
                 game_name,
-                platform,
+                platform_name,
                 exc,
             )
 
