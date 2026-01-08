@@ -1,121 +1,132 @@
-# llm/modal_embed.py
+"""
+Modal-hosted embedding service for Stage 5: Editorial Chunk Embeddings
+
+Model:
+- intfloat/e5-base-v2
+
+GPU:
+- NVIDIA T4
+
+This file RUNS ON MODAL.
+"""
+
+from __future__ import annotations
+from typing import List
 
 import modal
-from typing import List
 
 # ------------------------------------------------------------------------------
 # Modal App
 # ------------------------------------------------------------------------------
-app = modal.App("e5-base-v2-embeddings")
+
+app = modal.App("editorial-embedding-service")
 
 # ------------------------------------------------------------------------------
-# Model constants
+# Image
 # ------------------------------------------------------------------------------
-MODEL_NAME = "intfloat/e5-base-v2"
-MODEL_DIR = "/models/e5-base-v2"
-
-# ------------------------------------------------------------------------------
-# Image definition
-# ------------------------------------------------------------------------------
-def download_model():
-    """
-    Download model weights at IMAGE BUILD time so they are baked
-    into the container and not re-downloaded on cold start.
-    """
-    from sentence_transformers import SentenceTransformer
-
-    SentenceTransformer(MODEL_NAME, cache_folder=MODEL_DIR)
-
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git")
     .pip_install(
-        "torch==2.4.0",
-        "sentence-transformers>=2.6.0",
-        "transformers>=4.45.0",
-        "huggingface-hub>=0.25.0",
+        "torch",
+        "transformers",
+        "sentencepiece",
+        "numpy",
     )
-    .run_function(download_model)
 )
 
 # ------------------------------------------------------------------------------
-# Embedding Service (Class-based, warm containers)
+# HF Cache Volume
 # ------------------------------------------------------------------------------
+
+model_volume = modal.Volume.from_name(
+    "hf-e5-embeddings",
+    create_if_missing=True,
+)
+
+# ------------------------------------------------------------------------------
+# Stateful Embedder (CORRECT LIFECYCLE)
+# ------------------------------------------------------------------------------
+
 @app.cls(
-    gpu="T4",
     image=image,
-    timeout=600,
-    container_idle_timeout=300,
-    max_containers=5,
+    gpu="T4",
+    timeout=60 * 5,
+    volumes={"/models": model_volume},
 )
 class E5Embedder:
-    """
-    Persistent embedding service using intfloat/e5-base-v2.
-    """
-
-    def __enter__(self):
+    @modal.enter()
+    def load_model(self):
         """
-        Runs once per container when it starts.
-        Loads the model into memory.
+        Runs ONCE per container lifecycle.
+        Guaranteed by Modal.
         """
-        from sentence_transformers import SentenceTransformer
+        import torch
+        from transformers import AutoTokenizer, AutoModel
 
-        self.model = SentenceTransformer(
-            MODEL_NAME,
-            cache_folder=MODEL_DIR,
-            device="cuda",
+        self.device = "cuda"
+        model_id = "intfloat/e5-base-v2"
+
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            cache_dir="/models",
         )
 
-    # --------------------------------------------------------------------------
-    # Public API
-    # --------------------------------------------------------------------------
-    def embed_text(
-        self,
-        texts: List[str],
-        *,
-        mode: str = "passage",
-    ) -> List[List[float]]:
+        self.model = AutoModel.from_pretrained(
+            model_id,
+            cache_dir="/models",
+        ).to(self.device)
+
+        self.model.eval()
+
+    @modal.method()
+    def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """
-        Embed a batch of texts.
-
-        Args:
-            texts: List of input strings
-            mode: "passage" (default) or "query"
-
-        Returns:
-            List of normalized embedding vectors (float lists)
+        Generate normalized E5 embeddings.
         """
+        import torch
 
-        if mode not in {"passage", "query"}:
-            raise ValueError("mode must be either 'passage' or 'query'")
+        if not texts:
+            return []
 
-        prefixed = [f"{mode}: {t}" for t in texts]
+        prefixed = [f"passage: {t}" for t in texts]
 
-        embeddings = self.model.encode(
-            prefixed,
-            batch_size=16,
-            normalize_embeddings=True,  # REQUIRED for cosine similarity
-            show_progress_bar=False,
-        )
+        with torch.no_grad():
+            encoded = self.tokenizer(
+                prefixed,
+                padding=True,
+                truncation=True,
+                max_length=512,
+                return_tensors="pt",
+            ).to(self.device)
 
-        return embeddings.tolist()
+            output = self.model(**encoded)
+
+            embeddings = self._mean_pool(
+                output.last_hidden_state,
+                encoded["attention_mask"],
+            )
+
+            embeddings = torch.nn.functional.normalize(
+                embeddings,
+                p=2,
+                dim=1,
+            )
+
+        return embeddings.cpu().tolist()
+
+    @staticmethod
+    def _mean_pool(token_embeddings, attention_mask):
+        mask = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        summed = (token_embeddings * mask).sum(dim=1)
+        counts = mask.sum(dim=1).clamp(min=1e-9)
+        return summed / counts
 
 
 # ------------------------------------------------------------------------------
-# Optional local test (Modal run)
+# Entrypoint
 # ------------------------------------------------------------------------------
+
 @app.local_entrypoint()
 def main():
-    embedder = E5Embedder()
-
-    vectors = embedder.embed_text.remote(
-        [
-            "Far Cry 5 is an open-world first-person shooter set in Montana.",
-            "The game emphasizes exploration and player choice.",
-        ],
-        mode="passage",
-    )
-
-    print(f"Returned {len(vectors)} embeddings")
-    print(f"Vector dimension: {len(vectors[0])}")
+    print("🚀 E5 embedding service ready.")

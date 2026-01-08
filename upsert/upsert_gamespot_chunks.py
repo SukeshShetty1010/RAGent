@@ -34,15 +34,16 @@ def upsert_gamespot_container(
     GameSpot_Game container object linked to the canonical Game.
 
     Returns:
-        UUID of the upserted GameSpot_Game object, or None if no data found.
+        UUID of the upserted GameSpot_Game object,
+        or None if no data found.
     """
 
     # --------------------------------------------------
-    # 1. Fetch GameSpot payload
+    # 1. Fetch GameSpot payload (SOURCE + CANONICAL UUID)
     # --------------------------------------------------
     payload = ingest_gamespot(
-        game_name=game_name,
-        game_uuid=game_uuid,
+        game_name,
+        game_uuid,
     )
 
     if payload is None:
