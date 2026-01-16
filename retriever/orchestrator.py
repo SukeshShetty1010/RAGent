@@ -1,6 +1,7 @@
 # ============================================================
 # retriever/orchestrator.py
-# Step 3: Retrieval Orchestrator (Execution Brain)
+# Step 3: Retrieval Orchestrator
+# Local-first with Transparent Web Augmentation
 # ============================================================
 
 from __future__ import annotations
@@ -11,10 +12,13 @@ from typing import List, Dict, Any, Iterable
 
 from retriever.strategy_selector import RetrievalConfiguration
 from retriever.rag_retriever import RAGRetriever
+from retriever.quality_gate import RetrievalQualityGate, QualityStatus
+from agent.tools.web_search import WebSearchTool
+from agent.task_router import TaskType
 
 
 # ============================================================
-# Logging Setup
+# Logging
 # ============================================================
 
 logger = logging.getLogger("RAG_ORCHESTRATOR")
@@ -23,58 +27,166 @@ if not logger.handlers:
 
 
 # ============================================================
-# Retrieval Orchestrator
+# Orchestrator
 # ============================================================
 
 class RetrievalOrchestrator:
     """
-    Executes retrieval strategies based on RetrievalConfiguration.
+    Local-first retrieval orchestrator.
 
-    This class:
-    - Coordinates multiple retrieval calls
-    - Merges and deduplicates results
-    - Handles fail-soft fallback logic
+    Principles:
+    - Local is authoritative
+    - Web is corrective / augmentative
+    - Never replace good local evidence
+    - Be explicit about merge outcome
     """
+
+    MAX_WEB_CHUNKS = 3
 
     def __init__(self) -> None:
         self.retriever = RAGRetriever()
-        # Future hook for web search
-        self.web_tool = None
+        self.quality_gate = RetrievalQualityGate()
 
-    # --------------------------------------------------------
+        try:
+            self.web_tool = WebSearchTool()
+        except Exception as exc:
+            logger.warning(f"WebSearchTool unavailable: {exc}")
+            self.web_tool = None
+
+    # =========================================================
     # Public API
-    # --------------------------------------------------------
+    # =========================================================
 
-    def run(self, query: str, config: RetrievalConfiguration) -> List[Dict[str, Any]]:
-        """
-        Execute retrieval based on configuration.
-        """
+    def run(
+        self,
+        query: str,
+        task: TaskType,
+        config: RetrievalConfiguration,
+    ) -> List[Dict[str, Any]]:
+
+        # -----------------------------------------------------
+        # STEP 1: LOCAL RETRIEVAL (ALWAYS)
+        # -----------------------------------------------------
 
         if config.use_query_decomposition:
-            return self._execute_comparison(query, config)
+            local_chunks = self._execute_comparison(query, config)
+        elif config.use_window_expansion:
+            local_chunks = self._execute_listicle(query, config)
+        else:
+            local_chunks = self._execute_factual(query, config)
 
-        if config.use_window_expansion:
-            return self._execute_listicle(query, config)
+        # -----------------------------------------------------
+        # STEP 2: QUALITY EVALUATION
+        # -----------------------------------------------------
 
-        if config.allow_web_fallback:
-            return self._execute_open(query, config)
+        report = self.quality_gate.evaluate(query, task, local_chunks)
 
-        return self._execute_factual(query, config)
+        merge_state = "LOCAL_ONLY"
+        web_chunks: List[Dict[str, Any]] = []
 
-    # --------------------------------------------------------
-    # Execution Modes
-    # --------------------------------------------------------
+        # -----------------------------------------------------
+        # STEP 3: SHOULD WE ATTEMPT WEB?
+        # -----------------------------------------------------
+
+        should_attempt_web = False
+
+        # Hard failure → try web
+        if report.status in {
+            QualityStatus.QUALITY_EMPTY,
+            QualityStatus.QUALITY_WEAK,
+        }:
+            should_attempt_web = True
+
+        # Soft augmentation → temporal signal + allowed
+        elif (
+            config.allow_web_fallback
+            and report.has_temporal_signal
+        ):
+            should_attempt_web = True
+
+        # -----------------------------------------------------
+        # STEP 4: WEB AUGMENTATION (NOT REPLACEMENT)
+        # -----------------------------------------------------
+
+        if should_attempt_web and self.web_tool:
+            logger.info("🌍 Attempting Web augmentation")
+            merge_state = "LOCAL_WEB_ATTEMPTED"
+
+            raw_web_chunks = self.web_tool.search(
+                query=query,
+                max_results=self.MAX_WEB_CHUNKS,
+            )
+
+            refined_web_chunks = self._refine_web_results(raw_web_chunks)
+
+            if refined_web_chunks:
+                web_chunks = refined_web_chunks[: self.MAX_WEB_CHUNKS]
+                merge_state = "LOCAL_PLUS_WEB"
+
+        logger.info(f"[ORCHESTRATOR] Merge State: {merge_state}")
+
+        # -----------------------------------------------------
+        # STEP 5: FINAL CONTEXT ASSEMBLY
+        # -----------------------------------------------------
+
+        # Case A: No local at all → web only
+        if not local_chunks and web_chunks:
+            return web_chunks
+
+        # Case B: Local + web augmentation
+        if web_chunks:
+            return local_chunks + web_chunks
+
+        # Case C: Local only
+        return local_chunks
+
+    # =========================================================
+    # Web refinement (Second Pass)
+    # =========================================================
+
+    def _refine_web_results(
+        self,
+        chunks: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+
+        refined: List[Dict[str, Any]] = []
+
+        for c in chunks:
+            score = float(c.get("score", 0.0))
+            title = (c.get("source_title") or "").lower()
+            content = (c.get("content") or "").lower()
+            url = (c.get("source_url") or "").lower()
+
+            # Minimum semantic quality
+            if score < 0.5:
+                continue
+
+            # Noise filtering
+            if self.quality_gate.is_noise(title, content):
+                continue
+
+            # Social / forum content: stricter threshold
+            if any(
+                d in url
+                for d in ("steamcommunity.com", "reddit.com", "twitter.com")
+            ):
+                if score <= 0.8:
+                    continue
+
+            refined.append(c)
+
+        return refined
+
+    # =========================================================
+    # Local execution modes
+    # =========================================================
 
     def _execute_factual(
         self,
         query: str,
         config: RetrievalConfiguration,
     ) -> List[Dict[str, Any]]:
-        """
-        High-precision, single retrieval.
-        """
         logger.info("Executing FACTUAL retrieval")
-
         return self.retriever.retrieve(query, limit=config.limit)
 
     def _execute_comparison(
@@ -82,196 +194,61 @@ class RetrievalOrchestrator:
         query: str,
         config: RetrievalConfiguration,
     ) -> List[Dict[str, Any]]:
-        """
-        Query decomposition for comparison tasks.
-        """
         logger.info("Executing COMPARISON retrieval (query decomposition)")
 
         sub_queries = self._decompose_query(query)
+        results: List[List[Dict[str, Any]]] = []
 
-        all_results: List[List[Dict[str, Any]]] = []
-
-        for sub_query in sub_queries:
-            logger.info(f"Retrieving for entity: '{sub_query}'")
-            try:
-                chunks = self.retriever.retrieve(
-                    sub_query,
-                    limit=config.limit,
-                )
-            except Exception as exc:
-                logger.warning(f"Retrieval failed for '{sub_query}': {exc}")
-                continue
-
-            # Tag chunks with retrieval context
+        for sq in sub_queries:
+            logger.info(f"Retrieving for entity: '{sq}'")
+            chunks = self.retriever.retrieve(sq, limit=config.limit)
             for c in chunks:
-                c["retrieval_context"] = sub_query
+                c["retrieval_context"] = sq
+            results.append(chunks)
 
-            all_results.append(chunks)
-
-        return self._merge_and_dedupe(all_results)
+        return self._merge_and_dedupe(results)
 
     def _execute_listicle(
         self,
         query: str,
         config: RetrievalConfiguration,
     ) -> List[Dict[str, Any]]:
-        """
-        Window expansion simulation for listicle tasks.
-        """
         logger.info("Executing LISTICLE retrieval (window expansion simulation)")
-
         chunks = self.retriever.retrieve(query, limit=config.limit)
+        return sorted(chunks, key=lambda c: c.get("chunk_index", 0))
 
-        chunk_ids = [
-            c.get("chunk_index")
-            for c in chunks
-            if c.get("chunk_index") is not None
-        ]
-
-        logger.info(
-            f"Simulating window expansion for chunk IDs: {chunk_ids}"
-        )
-        # Future:
-        # for chunk_id in chunk_ids:
-        #     retriever.fetch_adjacent(chunk_id)
-
-        return sorted(
-            chunks,
-            key=lambda c: c.get("chunk_index", 0),
-        )
-
-    def _execute_open(
-        self,
-        query: str,
-        config: RetrievalConfiguration,
-    ) -> List[Dict[str, Any]]:
-        """
-        Open retrieval with quality check and web fallback stub.
-        """
-        logger.info("Executing OPEN retrieval (web fallback enabled)")
-
-        chunks = self.retriever.retrieve(query, limit=config.limit)
-
-        if not chunks:
-            avg_score = 0.0
-        else:
-            top_scores = [
-                c.get("score", 0.0)
-                for c in chunks[:3]
-                if isinstance(c.get("score"), (int, float))
-            ]
-            avg_score = sum(top_scores) / len(top_scores) if top_scores else 0.0
-
-        if not chunks or avg_score < 0.4:
-            logger.warning(
-                f"⚠️ Local retrieval quality low (Score: {avg_score:.2f}). "
-                "Triggering Web Search (Stub)..."
-            )
-            for c in chunks:
-                c["low_confidence"] = True
-        else:
-            logger.info("✅ Local retrieval quality sufficient.")
-
-        return chunks
-
-    # --------------------------------------------------------
+    # =========================================================
     # Helpers
-    # --------------------------------------------------------
+    # =========================================================
 
     def _decompose_query(self, query: str) -> List[str]:
-        """
-        Simple heuristic-based query decomposition.
-        Fail-soft: returns original query if split fails.
-        """
         parts = re.split(
-            r"\bvs\b|\bversus\b|\bcompare\b|\band\b",
+            r"\bvs\b|\bversus\b|\band\b|\bcompare\b",
             query,
             flags=re.IGNORECASE,
         )
-
         cleaned = [p.strip() for p in parts if p.strip()]
-
-        if len(cleaned) < 2:
-            logger.warning("Query decomposition failed; using full query.")
-            return [query]
-
-        return cleaned
+        return cleaned if len(cleaned) >= 2 else [query]
 
     def _merge_and_dedupe(
         self,
-        results: Iterable[List[Dict[str, Any]]],
+        groups: Iterable[List[Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
-        """
-        Merge and deduplicate chunks using content hash.
-        """
         seen = set()
         merged: List[Dict[str, Any]] = []
 
-        for group in results:
-            for chunk in group:
-                content = chunk.get("content", "")
-                key = hash(content)
-
-                if key in seen:
-                    continue
-
-                seen.add(key)
-                merged.append(chunk)
+        for g in groups:
+            for c in g:
+                key = hash(c.get("content", ""))
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(c)
 
         return merged
 
-    # --------------------------------------------------------
+    # =========================================================
     # Cleanup
-    # --------------------------------------------------------
+    # =========================================================
 
     def close(self) -> None:
         self.retriever.close()
-
-
-# ============================================================
-# Test Harness
-# ============================================================
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    orchestrator = RetrievalOrchestrator()
-
-    test_configs = [
-        RetrievalConfiguration(
-            limit=3,
-            use_window_expansion=False,
-            use_query_decomposition=False,
-            allow_web_fallback=False,
-        ),
-        RetrievalConfiguration(
-            limit=5,
-            use_window_expansion=False,
-            use_query_decomposition=True,
-            allow_web_fallback=False,
-        ),
-        RetrievalConfiguration(
-            limit=10,
-            use_window_expansion=True,
-            use_query_decomposition=False,
-            allow_web_fallback=False,
-        ),
-        RetrievalConfiguration(
-            limit=5,
-            use_window_expansion=False,
-            use_query_decomposition=False,
-            allow_web_fallback=True,
-        ),
-    ]
-
-    test_query = "Compare Assassin's Creed Valhalla vs Far Cry 5"
-
-    for idx, cfg in enumerate(test_configs, start=1):
-        logger.info("\n" + "=" * 60)
-        logger.info(f"TEST MODE {idx}")
-        logger.info("=" * 60)
-
-        results = orchestrator.run(test_query, cfg)
-        logger.info(f"Result count: {len(results)}")
-
-    orchestrator.close()

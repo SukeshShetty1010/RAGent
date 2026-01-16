@@ -1,142 +1,79 @@
-import weaviate
-from weaviate import WeaviateClient
-from weaviate.collections.classes.filters import Filter
+"""
+usage.py
+========
+Standalone validation script for WebSearchTool (Tavily).
 
-# ------------------------------------------------------------------
-# CONFIG
-# ------------------------------------------------------------------
-GAME_UUID = "00404ce3-ab9d-55a3-a239-6b4722f77900"  # Far Cry 5
-PREVIEW_CHUNKS = 3  # how many editorial chunks to preview
+Purpose:
+- Verify TAVILY_API_KEY is loaded
+- Verify Tavily search executes
+- Verify results are normalized into EditorialChunk schema
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+from agent.tools.web_search import WebSearchTool
 
 
-# ------------------------------------------------------------------
-# CONNECT
-# ------------------------------------------------------------------
-client: WeaviateClient = weaviate.connect_to_local()
+# ============================================================
+# Logging Setup
+# ============================================================
 
-try:
-    # ==============================================================
-    # STAGE 1 — CANONICAL GAME
-    # ==============================================================
-    game_collection = client.collections.get("Game")
-    game_obj = game_collection.query.fetch_object_by_id(GAME_UUID)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
 
-    print("\n==============================")
-    print(" STAGE 1: CANONICAL GAME ")
-    print("==============================")
+logger = logging.getLogger("WEB_SEARCH_USAGE")
 
-    if not game_obj:
-        print(f"❌ No Game found for UUID: {GAME_UUID}")
-    else:
-        print("✅ Game found")
-        print(game_obj.properties)
 
-    # ==============================================================
-    # STAGE 2 — PLATFORM SPECS
-    # ==============================================================
-    platform_collection = client.collections.get("PlatformSpec")
-    platform_results = platform_collection.query.fetch_objects(
-        filters=Filter.by_ref("game").by_id().equal(GAME_UUID)
-    )
+# ============================================================
+# Main
+# ============================================================
 
-    print("\n==============================")
-    print(" STAGE 2: PLATFORM SPECS ")
-    print("==============================")
+def main() -> None:
+    logger.info("=== WebSearchTool Usage Test ===")
 
-    if not platform_results.objects:
-        print("⚠️ No PlatformSpec objects found.")
-    else:
-        print(f"✅ Found {len(platform_results.objects)} PlatformSpec objects")
+    try:
+        tool = WebSearchTool()
+    except RuntimeError as exc:
+        logger.error("❌ WebSearchTool initialization failed")
+        logger.error(str(exc))
+        return
 
-    # ==============================================================
-    # STAGE 3 — IGDB METADATA
-    # ==============================================================
-    igdb_collection = client.collections.get("IGDB_Game")
-    igdb_results = igdb_collection.query.fetch_objects(
-        filters=Filter.by_ref("game").by_id().equal(GAME_UUID)
-    )
+    test_query = "Latest patch notes for Assassin's Creed Valhalla"
 
-    print("\n==============================")
-    print(" STAGE 3: IGDB METADATA ")
-    print("==============================")
+    logger.info(f"\nRunning test query:\n{test_query}\n")
 
-    if not igdb_results.objects:
-        print("⚠️ No IGDB_Game objects found.")
-    else:
-        print(f"✅ Found {len(igdb_results.objects)} IGDB entities")
+    results = tool.search(test_query, max_results=5)
 
-    # ==============================================================
-    # STAGE 4 — GAMESPOT EDITORIAL CONTAINER
-    # ==============================================================
-    gamespot_collection = client.collections.get("GameSpot_Game")
-    gamespot_results = gamespot_collection.query.fetch_objects(
-        filters=Filter.by_ref("game").by_id().equal(GAME_UUID)
-    )
+    if not results:
+        logger.warning("⚠️ No results returned from Tavily")
+        return
 
-    print("\n==============================")
-    print(" STAGE 4: GAMESPOT CONTAINER ")
-    print("==============================")
+    logger.info(f"✅ Retrieved {len(results)} normalized web chunks\n")
 
-    if not gamespot_results.objects:
-        print("⚠️ No GameSpot_Game container found.")
-        parent_editorial_uuid = None
-    else:
-        parent_editorial_uuid = gamespot_results.objects[0].uuid
-        print("✅ GameSpot container found")
-        print(f"Container UUID: {parent_editorial_uuid}")
+    # --------------------------------------------------------
+    # Print normalized results
+    # --------------------------------------------------------
+    for idx, chunk in enumerate(results, start=1):
+        logger.info(f"--- Result {idx} ---")
+        logger.info(f"source_title      : {chunk.get('source_title')}")
+        logger.info(f"source_type       : {chunk.get('source_type')}")
+        logger.info(f"source_url        : {chunk.get('source_url')}")
+        logger.info(f"score             : {chunk.get('score')}")
+        logger.info(f"chunk_index       : {chunk.get('chunk_index')}")
+        logger.info(f"retrieval_context : {chunk.get('retrieval_context')}")
+        logger.info(f"content (preview) : {chunk.get('content', '')[:200]}...")
+        logger.info("-" * 80)
 
-    # ==============================================================
-    # STAGE 5 — EDITORIAL CHUNKS (VECTORS)
-    # ==============================================================
-    editorial_collection = client.collections.get("EditorialChunk")
 
-    editorial_results = editorial_collection.query.fetch_objects(
-        filters=Filter.by_ref("game").by_id().equal(GAME_UUID),
-        limit=1000,
-        include_vector=True,
-    )
+# ============================================================
+# Entrypoint
+# ============================================================
 
-    print("\n==============================")
-    print(" STAGE 5: EDITORIAL CHUNKS ")
-    print("==============================")
-
-    if not editorial_results.objects:
-        print("❌ No EditorialChunk objects found.")
-    else:
-        print(f"✅ Found {len(editorial_results.objects)} editorial chunks")
-
-        # --- vector inspection ---
-        sample_vector = editorial_results.objects[0].vector
-        if sample_vector:
-            print(f"✅ Vector present (dim={len(sample_vector)})")
-        else:
-            print("❌ Vector missing!")
-
-        # --- reference validation ---
-        with_game_ref = 0
-        with_parent_editorial_ref = 0
-
-        for obj in editorial_results.objects:
-            refs = obj.references or {}
-            if "game" in refs:
-                with_game_ref += 1
-            if "parent_editorial" in refs:
-                with_parent_editorial_ref += 1
-
-        print(f"🔗 game reference count: {with_game_ref}")
-        print(f"🔗 parent_editorial reference count: {with_parent_editorial_ref}")
-
-        # --- preview chunks ---
-        print("\n📄 Sample Editorial Chunks:")
-        for idx, obj in enumerate(editorial_results.objects[:PREVIEW_CHUNKS], start=1):
-            props = obj.properties
-            print(f"\n--- Chunk #{idx} ---")
-            print({
-                "uuid": obj.uuid,
-                "chunk_index": props.get("chunk_index"),
-                "content_type": props.get("content_type"),
-                "content_preview": (props.get("content") or "")[:200] + "...",
-            })
-
-finally:
-    client.close()
+if __name__ == "__main__":
+    main()
