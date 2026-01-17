@@ -1,15 +1,11 @@
 """
-RAG Retriever CLI (Production-Ready)
+RAG Retriever (FULLY OBSERVABLE)
 
-Enhancements:
-- Hybrid Search (BM25 + Vector) via Weaviate v4
-- Strict citation enforcement in Llama 3 prompt
-- Fail-soft generation (retrieval always works)
-
-Usage:
-    python -m retriever.rag_retriever \
-        --query "What are the main criticisms of Far Cry 5?" \
-        --limit 5
+Hybrid Search (BM25 + Vector) via Weaviate v4
+Instrumentation added for:
+- Embedding generation
+- Vector query
+- Result formatting
 """
 
 from __future__ import annotations
@@ -19,6 +15,8 @@ from typing import List, Dict
 
 import modal
 import weaviate
+
+from tests.observability import ProfileBlock, MetricsRegistry
 
 
 # ---------------------------------------------------------------------
@@ -37,7 +35,6 @@ E5Embedder = modal.Cls.from_name(
 
 class RAGRetriever:
     def __init__(self) -> None:
-        # ---- Fail fast on Weaviate connectivity ----
         try:
             self.client = weaviate.connect_to_local()
         except Exception as exc:
@@ -45,72 +42,87 @@ class RAGRetriever:
                 "❌ Failed to connect to Weaviate. Is it running?"
             ) from exc
 
-        # ---- Stateful Modal embedder ----
         self.embedder = E5Embedder()
 
     def close(self) -> None:
-        self.client.close()
+        if self.client:
+            self.client.close()
 
     def retrieve(self, query: str, limit: int = 5) -> List[Dict]:
         """
-        Hybrid retrieval: BM25 (keyword) + Vector (semantic)
+        Hybrid retrieval: BM25 + Vector
         """
         if not query or not isinstance(query, str):
             raise ValueError("Query must be a non-empty string")
 
-        # --------------------------------------------------
-        # Client-side embedding (same as ingestion)
-        # --------------------------------------------------
-        vector = self.embedder.embed_texts.remote([query])[0]
+        with ProfileBlock("LocalVectorSearch"):
 
-        try:
-            collection = self.client.collections.get("EditorialChunk")
-        except Exception as exc:
-            raise RuntimeError(
-                "❌ EditorialChunk collection not found in Weaviate"
-            ) from exc
+            # --------------------------------------------------
+            # Embedding generation
+            # --------------------------------------------------
+            with ProfileBlock("EmbeddingGeneration"):
+                vector = self.embedder.embed_texts.remote([query])[0]
 
-        # --------------------------------------------------
-        # Hybrid Search (Weaviate v4)
-        # --------------------------------------------------
-        response = collection.query.hybrid(
-            query=query,          # BM25 text query
-            vector=vector,        # semantic vector
-            alpha=0.5,            # balance keyword vs semantic
-            limit=limit,
-            return_metadata=["score"],
-            return_properties=[
-                "content",
-                "source_title",
-                "chunk_index",
-            ],
-        )
-
-        results: List[Dict] = []
-
-        for obj in response.objects:
-            results.append(
-                {
-                    "content": obj.properties.get("content"),
-                    "source_title": obj.properties.get("source_title"),
-                    "chunk_index": obj.properties.get("chunk_index"),
-                    "score": obj.metadata.score,
-                }
+            MetricsRegistry.get().observe(
+                "embedding_batch_size", 1
             )
 
-        return results
+            try:
+                collection = self.client.collections.get("EditorialChunk")
+            except Exception as exc:
+                raise RuntimeError(
+                    "❌ EditorialChunk collection not found in Weaviate"
+                ) from exc
+
+            # --------------------------------------------------
+            # Hybrid search
+            # --------------------------------------------------
+            with ProfileBlock("VectorQuery"):
+                response = collection.query.hybrid(
+                    query=query,
+                    vector=vector,
+                    alpha=0.5,
+                    limit=limit,
+                    return_metadata=["score"],
+                    return_properties=[
+                        "content",
+                        "source_title",
+                        "chunk_index",
+                    ],
+                )
+
+            # --------------------------------------------------
+            # Result formatting
+            # --------------------------------------------------
+            with ProfileBlock("ResultFormatting"):
+                results: List[Dict] = []
+
+                for obj in response.objects:
+                    results.append(
+                        {
+                            "content": obj.properties.get("content"),
+                            "source_title": obj.properties.get(
+                                "source_title"
+                            ),
+                            "chunk_index": obj.properties.get(
+                                "chunk_index"
+                            ),
+                            "score": obj.metadata.score,
+                        }
+                    )
+
+            MetricsRegistry.get().observe(
+                "retrieval_results_count", len(results)
+            )
+
+            return results
 
 
 # ---------------------------------------------------------------------
-# Prompt Engineering (Llama 3 Instruct + Citation Enforcement)
+# Prompt Engineering (UNCHANGED)
 # ---------------------------------------------------------------------
 
 def format_llama3_prompt(query: str, chunks: List[Dict]) -> str:
-    """
-    Construct a Llama 3 Instruct–compatible prompt
-    with strict citation discipline.
-    """
-
     context_blocks: List[str] = []
 
     for chunk in chunks:
@@ -139,11 +151,13 @@ def format_llama3_prompt(query: str, chunks: List[Dict]) -> str:
 
 
 # ---------------------------------------------------------------------
-# CLI Entrypoint
+# CLI Entrypoint (UNCHANGED)
 # ---------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="RAG Retriever CLI (Hybrid + Cited)")
+    parser = argparse.ArgumentParser(
+        description="RAG Retriever CLI (Hybrid + Cited)"
+    )
     parser.add_argument("--query", required=True, help="User question")
     parser.add_argument(
         "--limit",
@@ -157,10 +171,8 @@ def main() -> None:
     retriever = RAGRetriever()
 
     try:
-        # --------------------------------------------------
-        # Step 1: Retrieve
-        # --------------------------------------------------
-        chunks = retriever.retrieve(args.query, limit=args.limit)
+        with ProfileBlock("REQUEST_TOTAL"):
+            chunks = retriever.retrieve(args.query, limit=args.limit)
 
         if not chunks:
             print("\n⚠️ No relevant context found.\n")
@@ -172,34 +184,36 @@ def main() -> None:
             print(c["content"][:500])
             print("-" * 70)
 
-        # --------------------------------------------------
-        # Step 2: Prompt Assembly
-        # --------------------------------------------------
         prompt = format_llama3_prompt(args.query, chunks)
 
-        # --------------------------------------------------
-        # Step 3: Generation (Fail-soft)
-        # --------------------------------------------------
         try:
             from llm.ragent_client import chat_completion_remote
         except Exception as exc:
             print(
-                "\n⚠️ Generation skipped: unable to import ragent_client "
-                "(is Modal installed and authenticated?)\n"
+                "\n⚠️ Generation skipped: unable to import ragent_client\n"
             )
             print(f"Reason: {exc}")
             return
 
         print("\n--- Generated Answer ---\n")
 
-        answer = chat_completion_remote.remote(
-            prompt,
-            max_tokens=512,
-            temperature=0.1,
-        )
+        with ProfileBlock("LLMGeneration"):
+            answer = chat_completion_remote.remote(
+                prompt,
+                max_tokens=512,
+                temperature=0.1,
+            )
 
         print(answer.strip())
         print("\n------------------------\n")
+
+        # --------------------------------------------------
+        # Final observability report
+        # --------------------------------------------------
+        print("\n--- OBSERVABILITY REPORT ---")
+        print(
+            MetricsRegistry.get().generate_report()
+        )
 
     finally:
         retriever.close()

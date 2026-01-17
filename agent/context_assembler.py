@@ -1,6 +1,6 @@
 # ============================================================
 # agent/context_assembler.py
-# Step 6: Context Assembly & Ranking
+# Context Assembly & Ranking (FULLY OBSERVABLE)
 # ============================================================
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from typing import List, Dict, Any, DefaultDict
 from collections import defaultdict
 
 from agent.task_router import TaskType
+from tests.observability import ProfileBlock, MetricsRegistry
 
 # ============================================================
 # Logging
@@ -34,11 +35,7 @@ class ContextAssembler:
     """
     Final structural processing layer before prompt injection.
 
-    Responsibilities:
-    - Content-based deduplication
-    - Task-aware ordering
-    - Source normalization
-    - Budget control
+    Fully instrumented for observability.
     """
 
     # --------------------------------------------------------
@@ -54,38 +51,60 @@ class ContextAssembler:
         Assemble a coherent, ordered context for the given task.
         """
 
-        if not chunks:
-            return []
+        with ProfileBlock("ContextAssembly"):
 
-        # ----------------------------------------------------
-        # Step A: Deduplication
-        # ----------------------------------------------------
-        deduped = self._deduplicate(chunks)
+            if not chunks:
+                return []
 
-        # ----------------------------------------------------
-        # Step B: Task-aware ordering
-        # ----------------------------------------------------
-        if task == TaskType.COMPARISON:
-            ordered = self._order_comparison(deduped)
-        elif task == TaskType.LISTICLE:
-            ordered = self._order_listicle(deduped)
-        else:
-            ordered = self._order_factual(deduped)
+            MetricsRegistry.get().observe(
+                "context_input_chunks", len(chunks)
+            )
 
-        # ----------------------------------------------------
-        # Step C: Source labeling
-        # ----------------------------------------------------
-        for c in ordered:
-            if "source_type" not in c or not c["source_type"]:
-                c["source_type"] = "local"
+            # ------------------------------------------------
+            # Step A: Deduplication
+            # ------------------------------------------------
+            with ProfileBlock("Deduplication"):
+                deduped = self._deduplicate(chunks)
 
-        # ----------------------------------------------------
-        # Step D: Budget control
-        # ----------------------------------------------------
-        return ordered[:MAX_CONTEXT_CHUNKS]
+            MetricsRegistry.get().observe(
+                "context_deduped_chunks", len(deduped)
+            )
+
+            # ------------------------------------------------
+            # Step B: Task-aware ordering
+            # ------------------------------------------------
+            with ProfileBlock("Ordering"):
+                if task == TaskType.COMPARISON:
+                    with ProfileBlock("OrderComparison"):
+                        ordered = self._order_comparison(deduped)
+                elif task == TaskType.LISTICLE:
+                    with ProfileBlock("OrderListicle"):
+                        ordered = self._order_listicle(deduped)
+                else:
+                    with ProfileBlock("OrderFactual"):
+                        ordered = self._order_factual(deduped)
+
+            # ------------------------------------------------
+            # Step C: Source labeling
+            # ------------------------------------------------
+            for c in ordered:
+                if "source_type" not in c or not c["source_type"]:
+                    c["source_type"] = "local"
+
+            # ------------------------------------------------
+            # Step D: Budget control
+            # ------------------------------------------------
+            with ProfileBlock("BudgetControl"):
+                final_chunks = ordered[:MAX_CONTEXT_CHUNKS]
+
+            MetricsRegistry.get().observe(
+                "context_final_chunks", len(final_chunks)
+            )
+
+            return final_chunks
 
     # ========================================================
-    # Step A — Deduplication (FIXED)
+    # Step A — Deduplication
     # ========================================================
 
     def _deduplicate(
@@ -94,9 +113,6 @@ class ContextAssembler:
     ) -> List[Dict[str, Any]]:
         """
         Content-based deduplication with substring suppression.
-
-        Dedup key:
-        - source_title + normalized content
         """
 
         normalized_map: Dict[str, Dict[str, Any]] = {}
@@ -116,7 +132,6 @@ class ContextAssembler:
             if not existing:
                 normalized_map[key] = c
             else:
-                # Keep richer (longer) version
                 if len(content) > len(existing.get("content", "")):
                     normalized_map[key] = c
 

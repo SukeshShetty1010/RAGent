@@ -1,6 +1,6 @@
 # ============================================================
 # agent/prompt_manager.py
-# Step 7: Task-Specific Prompt Templates
+# Task-Specific Prompt Templates (FULLY OBSERVABLE)
 # ============================================================
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import List, Dict, Any
 
 from agent.task_router import TaskType
+from tests.observability import ProfileBlock
 
 
 # ============================================================
@@ -25,10 +26,7 @@ class PromptManager:
 
     into a final, structured prompt string for the LLM.
 
-    This module:
-    - Obeys TaskType strictly
-    - Performs NO reasoning
-    - Uses deterministic templates only
+    Fully observable, deterministic, no reasoning.
     """
 
     # --------------------------------------------------------
@@ -45,28 +43,31 @@ class PromptManager:
         Generate the final prompt string for the LLM.
         """
 
-        context_block = self._format_context(chunks)
+        with ProfileBlock("PromptConstruction"):
 
-        if task == TaskType.COMPARISON:
-            system_instruction = self._comparison_instruction()
-        elif task == TaskType.LISTICLE:
-            system_instruction = self._listicle_instruction()
-        elif task == TaskType.FACTUAL:
-            system_instruction = self._factual_instruction()
-        else:
-            system_instruction = self._open_instruction()
+            with ProfileBlock("ContextFormatting"):
+                context_block = self._format_context(chunks)
 
-        prompt = (
-            f"{system_instruction}\n\n"
-            f"=== BEGIN CONTEXT ===\n"
-            f"{context_block}\n"
-            f"=== END CONTEXT ===\n\n"
-            f"=== USER QUERY ===\n"
-            f"{query}\n\n"
-            f"=== ANSWER ===\n"
-        )
+            if task == TaskType.COMPARISON:
+                system_instruction = self._comparison_instruction()
+            elif task == TaskType.LISTICLE:
+                system_instruction = self._listicle_instruction()
+            elif task == TaskType.FACTUAL:
+                system_instruction = self._factual_instruction()
+            else:
+                system_instruction = self._open_instruction()
 
-        return prompt
+            prompt = (
+                f"{system_instruction}\n\n"
+                f"=== BEGIN CONTEXT ===\n"
+                f"{context_block}\n"
+                f"=== END CONTEXT ===\n\n"
+                f"=== USER QUERY ===\n"
+                f"{query}\n\n"
+                f"=== ANSWER ===\n"
+            )
+
+            return prompt
 
     # ========================================================
     # Context Formatting

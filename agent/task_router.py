@@ -1,6 +1,6 @@
 # ============================================================
-# agents/task_router.py
-# Deterministic Task Router (Brain Stem)
+# agent/task_router.py
+# Deterministic Task Router (FULLY OBSERVABLE)
 # ============================================================
 
 from __future__ import annotations
@@ -10,6 +10,9 @@ import string
 from dataclasses import dataclass
 from enum import Enum
 from typing import List
+
+from tests.observability import ProfileBlock, MetricsRegistry
+from tests.caching import cacheable
 
 
 # ============================================================
@@ -53,11 +56,11 @@ class TaskRouter:
     - O(1) regex checks
     - No LLM
     - No DB
-    - Pure heuristic brain-stem
+    - Fully observable
     """
 
     # --------------------------------------------------------
-    # Regex triggers (compiled once → O(1))
+    # Regex triggers
     # --------------------------------------------------------
 
     _COMPARISON_PATTERNS: List[re.Pattern] = [
@@ -95,76 +98,102 @@ class TaskRouter:
     # Public API
     # --------------------------------------------------------
 
+    @cacheable(ttl_seconds=3600)
     def route(self, query: str) -> RouterDecision:
         """
         Route a user query into a deterministic task type.
-        Fail-safe: always returns a RouterDecision.
+
+        This method is:
+        - Profiled
+        - Cacheable
+        - Fail-safe
         """
 
-        try:
-            normalized = self._normalize(query)
+        with ProfileBlock("TaskRouting"):
+            try:
+                normalized = self._normalize(query)
 
-            # ------------------------------------------------
-            # Priority 1: COMPARISON
-            # ------------------------------------------------
-            for pattern in self._COMPARISON_PATTERNS:
-                if pattern.search(normalized):
-                    return RouterDecision(
-                        task=TaskType.COMPARISON,
-                        reason=f"Matched comparison trigger: '{pattern.pattern}'",
-                        retrieval_strategy="decomposition",
-                        web_search_allowed=False,
-                        max_results=5,
-                    )
+                # --------------------------------------------
+                # Priority 1: COMPARISON
+                # --------------------------------------------
+                for pattern in self._COMPARISON_PATTERNS:
+                    if pattern.search(normalized):
+                        decision = RouterDecision(
+                            task=TaskType.COMPARISON,
+                            reason=f"Matched comparison trigger: '{pattern.pattern}'",
+                            retrieval_strategy="decomposition",
+                            web_search_allowed=False,
+                            max_results=5,
+                        )
+                        MetricsRegistry.get().record(
+                            "routing_decisions", decision.task.value
+                        )
+                        return decision
 
-            # ------------------------------------------------
-            # Priority 2: LISTICLE
-            # ------------------------------------------------
-            for pattern in self._LISTICLE_PATTERNS:
-                if pattern.search(normalized):
-                    return RouterDecision(
-                        task=TaskType.LISTICLE,
-                        reason=f"Matched listicle trigger: '{pattern.pattern}'",
-                        retrieval_strategy="window_expansion",
-                        web_search_allowed=False,
-                        max_results=10,
-                    )
+                # --------------------------------------------
+                # Priority 2: LISTICLE
+                # --------------------------------------------
+                for pattern in self._LISTICLE_PATTERNS:
+                    if pattern.search(normalized):
+                        decision = RouterDecision(
+                            task=TaskType.LISTICLE,
+                            reason=f"Matched listicle trigger: '{pattern.pattern}'",
+                            retrieval_strategy="window_expansion",
+                            web_search_allowed=False,
+                            max_results=10,
+                        )
+                        MetricsRegistry.get().record(
+                            "routing_decisions", decision.task.value
+                        )
+                        return decision
 
-            # ------------------------------------------------
-            # Priority 3: FACTUAL
-            # ------------------------------------------------
-            for pattern in self._FACTUAL_PATTERNS:
-                if pattern.search(normalized):
-                    return RouterDecision(
-                        task=TaskType.FACTUAL,
-                        reason=f"Matched factual trigger: '{pattern.pattern}'",
-                        retrieval_strategy="standard",
-                        web_search_allowed=False,
-                        max_results=5,
-                    )
+                # --------------------------------------------
+                # Priority 3: FACTUAL
+                # --------------------------------------------
+                for pattern in self._FACTUAL_PATTERNS:
+                    if pattern.search(normalized):
+                        decision = RouterDecision(
+                            task=TaskType.FACTUAL,
+                            reason=f"Matched factual trigger: '{pattern.pattern}'",
+                            retrieval_strategy="standard",
+                            web_search_allowed=False,
+                            max_results=5,
+                        )
+                        MetricsRegistry.get().record(
+                            "routing_decisions", decision.task.value
+                        )
+                        return decision
 
-            # ------------------------------------------------
-            # Priority 4: OPEN (fallback)
-            # ------------------------------------------------
-            return RouterDecision(
-                task=TaskType.OPEN,
-                reason="No deterministic rule matched; fallback to OPEN",
-                retrieval_strategy="hybrid",
-                web_search_allowed=True,
-                max_results=5,
-            )
+                # --------------------------------------------
+                # Priority 4: OPEN (fallback)
+                # --------------------------------------------
+                decision = RouterDecision(
+                    task=TaskType.OPEN,
+                    reason="No deterministic rule matched; fallback to OPEN",
+                    retrieval_strategy="hybrid",
+                    web_search_allowed=True,
+                    max_results=5,
+                )
+                MetricsRegistry.get().record(
+                    "routing_decisions", decision.task.value
+                )
+                return decision
 
-        except Exception as exc:
-            # ------------------------------------------------
-            # Absolute fail-safe
-            # ------------------------------------------------
-            return RouterDecision(
-                task=TaskType.OPEN,
-                reason=f"Router exception fallback: {exc}",
-                retrieval_strategy="hybrid",
-                web_search_allowed=True,
-                max_results=5,
-            )
+            except Exception as exc:
+                # --------------------------------------------
+                # Absolute fail-safe
+                # --------------------------------------------
+                decision = RouterDecision(
+                    task=TaskType.OPEN,
+                    reason=f"Router exception fallback: {exc}",
+                    retrieval_strategy="hybrid",
+                    web_search_allowed=True,
+                    max_results=5,
+                )
+                MetricsRegistry.get().record(
+                    "routing_decisions", decision.task.value
+                )
+                return decision
 
     # --------------------------------------------------------
     # Normalization
@@ -191,13 +220,9 @@ if __name__ == "__main__":
     router = TaskRouter()
 
     test_queries = [
-        # Comparison beats listicle
         "Compare the top 10 RPG games of all time",
-        # Pure listicle
         "Top 5 open world games to play in 2024",
-        # Factual
         "What is the release date of Far Cry 5?",
-        # Open-ended
         "Explain why Far Cry 5 is controversial",
     ]
 

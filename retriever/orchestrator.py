@@ -1,20 +1,21 @@
 # ============================================================
 # retriever/orchestrator.py
-# Step 3: Retrieval Orchestrator
-# Local-first with Transparent Web Augmentation
+# Retrieval Orchestrator (FULLY OBSERVABLE)
 # ============================================================
 
 from __future__ import annotations
 
 import logging
 import re
-from typing import List, Dict, Any, Iterable
+from typing import List, Dict, Any, Iterable, Tuple
 
 from retriever.strategy_selector import RetrievalConfiguration
 from retriever.rag_retriever import RAGRetriever
 from retriever.quality_gate import RetrievalQualityGate, QualityStatus
 from agent.tools.web_search import WebSearchTool
 from agent.task_router import TaskType
+
+from tests.observability import ProfileBlock, MetricsRegistry
 
 
 # ============================================================
@@ -34,11 +35,7 @@ class RetrievalOrchestrator:
     """
     Local-first retrieval orchestrator.
 
-    Principles:
-    - Local is authoritative
-    - Web is corrective / augmentative
-    - Never replace good local evidence
-    - Be explicit about merge outcome
+    Fully instrumented for observability.
     """
 
     MAX_WEB_CHUNKS = 3
@@ -62,86 +59,110 @@ class RetrievalOrchestrator:
         query: str,
         task: TaskType,
         config: RetrievalConfiguration,
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], str, Any]:
+        """
+        Returns:
+            chunks
+            merge_state
+            quality_report
+        """
 
-        # -----------------------------------------------------
-        # STEP 1: LOCAL RETRIEVAL (ALWAYS)
-        # -----------------------------------------------------
+        with ProfileBlock("Retrieval"):
 
-        if config.use_query_decomposition:
-            local_chunks = self._execute_comparison(query, config)
-        elif config.use_window_expansion:
-            local_chunks = self._execute_listicle(query, config)
-        else:
-            local_chunks = self._execute_factual(query, config)
+            # -------------------------------------------------
+            # STEP 1: LOCAL RETRIEVAL
+            # -------------------------------------------------
 
-        # -----------------------------------------------------
-        # STEP 2: QUALITY EVALUATION
-        # -----------------------------------------------------
+            if config.use_query_decomposition:
+                with ProfileBlock("QueryDecomposition"):
+                    local_chunks = self._execute_comparison(query, config)
 
-        report = self.quality_gate.evaluate(query, task, local_chunks)
+            elif config.use_window_expansion:
+                with ProfileBlock("LocalVectorSearch"):
+                    local_chunks = self._execute_listicle(query, config)
 
-        merge_state = "LOCAL_ONLY"
-        web_chunks: List[Dict[str, Any]] = []
+            else:
+                with ProfileBlock("LocalVectorSearch"):
+                    local_chunks = self._execute_factual(query, config)
 
-        # -----------------------------------------------------
-        # STEP 3: SHOULD WE ATTEMPT WEB?
-        # -----------------------------------------------------
+            # -------------------------------------------------
+            # STEP 2: QUALITY EVALUATION
+            # -------------------------------------------------
 
-        should_attempt_web = False
+            with ProfileBlock("QualityGate"):
+                quality_report = self.quality_gate.evaluate(
+                    query, task, local_chunks
+                )
 
-        # Hard failure → try web
-        if report.status in {
-            QualityStatus.QUALITY_EMPTY,
-            QualityStatus.QUALITY_WEAK,
-        }:
-            should_attempt_web = True
+            merge_state = "LOCAL_ONLY"
+            web_chunks: List[Dict[str, Any]] = []
 
-        # Soft augmentation → temporal signal + allowed
-        elif (
-            config.allow_web_fallback
-            and report.has_temporal_signal
-        ):
-            should_attempt_web = True
+            # -------------------------------------------------
+            # STEP 3: SHOULD WE ATTEMPT WEB?
+            # -------------------------------------------------
 
-        # -----------------------------------------------------
-        # STEP 4: WEB AUGMENTATION (NOT REPLACEMENT)
-        # -----------------------------------------------------
+            should_attempt_web = False
 
-        if should_attempt_web and self.web_tool:
-            logger.info("🌍 Attempting Web augmentation")
-            merge_state = "LOCAL_WEB_ATTEMPTED"
+            if quality_report.status in {
+                QualityStatus.QUALITY_EMPTY,
+                QualityStatus.QUALITY_WEAK,
+            }:
+                should_attempt_web = True
 
-            raw_web_chunks = self.web_tool.search(
-                query=query,
-                max_results=self.MAX_WEB_CHUNKS,
-            )
+            elif (
+                config.allow_web_fallback
+                and quality_report.has_temporal_signal
+            ):
+                should_attempt_web = True
 
-            refined_web_chunks = self._refine_web_results(raw_web_chunks)
+            # -------------------------------------------------
+            # STEP 4: WEB AUGMENTATION
+            # -------------------------------------------------
 
-            if refined_web_chunks:
-                web_chunks = refined_web_chunks[: self.MAX_WEB_CHUNKS]
-                merge_state = "LOCAL_PLUS_WEB"
+            if should_attempt_web and self.web_tool:
+                MetricsRegistry.get().inc("web_search_triggers")
 
-        logger.info(f"[ORCHESTRATOR] Merge State: {merge_state}")
+                with ProfileBlock("WebSearch"):
+                    logger.info("🌍 Attempting Web augmentation")
+                    merge_state = "LOCAL_WEB_ATTEMPTED"
 
-        # -----------------------------------------------------
-        # STEP 5: FINAL CONTEXT ASSEMBLY
-        # -----------------------------------------------------
+                    raw_web_chunks = self.web_tool.search(
+                        query=query,
+                        max_results=self.MAX_WEB_CHUNKS,
+                    )
 
-        # Case A: No local at all → web only
-        if not local_chunks and web_chunks:
-            return web_chunks
+                    refined_web_chunks = self._refine_web_results(
+                        raw_web_chunks
+                    )
 
-        # Case B: Local + web augmentation
-        if web_chunks:
-            return local_chunks + web_chunks
+                    if refined_web_chunks:
+                        web_chunks = refined_web_chunks[
+                            : self.MAX_WEB_CHUNKS
+                        ]
+                        merge_state = "LOCAL_PLUS_WEB"
 
-        # Case C: Local only
-        return local_chunks
+            logger.info(f"[ORCHESTRATOR] Merge State: {merge_state}")
+
+            # -------------------------------------------------
+            # STEP 5: FINAL CONTEXT MERGE
+            # -------------------------------------------------
+
+            with ProfileBlock("ChunkMerge"):
+
+                if not local_chunks and web_chunks:
+                    return web_chunks, merge_state, quality_report
+
+                if web_chunks:
+                    return (
+                        local_chunks + web_chunks,
+                        merge_state,
+                        quality_report,
+                    )
+
+                return local_chunks, merge_state, quality_report
 
     # =========================================================
-    # Web refinement (Second Pass)
+    # Web refinement
     # =========================================================
 
     def _refine_web_results(
@@ -157,18 +178,19 @@ class RetrievalOrchestrator:
             content = (c.get("content") or "").lower()
             url = (c.get("source_url") or "").lower()
 
-            # Minimum semantic quality
             if score < 0.5:
                 continue
 
-            # Noise filtering
             if self.quality_gate.is_noise(title, content):
                 continue
 
-            # Social / forum content: stricter threshold
             if any(
                 d in url
-                for d in ("steamcommunity.com", "reddit.com", "twitter.com")
+                for d in (
+                    "steamcommunity.com",
+                    "reddit.com",
+                    "twitter.com",
+                )
             ):
                 if score <= 0.8:
                     continue
@@ -201,19 +223,28 @@ class RetrievalOrchestrator:
 
         for sq in sub_queries:
             logger.info(f"Retrieving for entity: '{sq}'")
-            chunks = self.retriever.retrieve(sq, limit=config.limit)
+
+            with ProfileBlock("LocalVectorSearch"):
+                chunks = self.retriever.retrieve(
+                    sq, limit=config.limit
+                )
+
             for c in chunks:
                 c["retrieval_context"] = sq
+
             results.append(chunks)
 
-        return self._merge_and_dedupe(results)
+        with ProfileBlock("ChunkMerge"):
+            return self._merge_and_dedupe(results)
 
     def _execute_listicle(
         self,
         query: str,
         config: RetrievalConfiguration,
     ) -> List[Dict[str, Any]]:
-        logger.info("Executing LISTICLE retrieval (window expansion simulation)")
+        logger.info(
+            "Executing LISTICLE retrieval (window expansion simulation)"
+        )
         chunks = self.retriever.retrieve(query, limit=config.limit)
         return sorted(chunks, key=lambda c: c.get("chunk_index", 0))
 

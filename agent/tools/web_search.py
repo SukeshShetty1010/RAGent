@@ -1,17 +1,13 @@
 """
-agents/tools/web_search.py
-==========================
+agent/tools/web_search.py
+=========================
 
-Step 5: Web Search Tool (Tavily Integration)
+Web Search Tool (Tavily Integration) — FULLY OBSERVABLE
 
 Purpose:
-- Acts as a strict fallback retrieval tool when local evidence is weak or empty
-- Queries Tavily Search API for high-quality editorial content
-- Normalizes web results into the SAME schema as local EditorialChunk objects
-
-Requirements:
-- pip install tavily-python
-- Environment variable: TAVILY_API_KEY
+- Strict fallback retrieval when local evidence is weak or empty
+- Queries Tavily Search API
+- Normalizes results into EditorialChunk-compatible schema
 """
 
 from __future__ import annotations
@@ -19,8 +15,12 @@ from __future__ import annotations
 import os
 import logging
 from typing import List, Dict, Any
+
 from dotenv import load_dotenv
 from tavily import TavilyClient
+
+from tests.observability import ProfileBlock, MetricsRegistry
+
 load_dotenv()
 
 # ============================================================
@@ -68,37 +68,52 @@ class WebSearchTool:
         into local EditorialChunk-compatible dictionaries.
         """
 
-        logger.info(f"🌍 Triggering Tavily Search for: '{query}'")
+        with ProfileBlock("WebSearch"):
+            logger.info(f"🌍 Triggering Tavily Search for: '{query}'")
 
-        try:
-            response = self.client.search(
-                query=query,
-                max_results=max_results,
-                search_depth="advanced",
-                include_answer=False,
-                include_raw_content=False,
-            )
-        except Exception as exc:
-            logger.error(f"❌ Tavily search failed: {exc}")
-            return []
+            # ------------------------------------------------
+            # Tavily API call
+            # ------------------------------------------------
+            try:
+                with ProfileBlock("TavilyAPICall"):
+                    response = self.client.search(
+                        query=query,
+                        max_results=max_results,
+                        search_depth="advanced",
+                        include_answer=False,
+                        include_raw_content=False,
+                    )
+            except Exception as exc:
+                logger.error(f"❌ Tavily search failed: {exc}")
+                MetricsRegistry.get().inc("web_search_failures")
+                return []
 
-        raw_results = response.get("results", [])
-        normalized: List[Dict[str, Any]] = []
+            raw_results = response.get("results", [])
 
-        for r in raw_results:
-            normalized.append(
-                {
-                    "content": r.get("content", ""),
-                    "source_title": r.get("title", ""),
-                    "source_type": "web",
-                    "source_url": r.get("url", ""),
-                    "score": r.get("score", 0.0),
-                    "chunk_index": -1,          # Non-sequential web content
-                    "retrieval_context": "fallback",
-                }
+            MetricsRegistry.get().observe(
+                "web_results_returned", len(raw_results)
             )
 
-        return normalized
+            # ------------------------------------------------
+            # Result normalization
+            # ------------------------------------------------
+            with ProfileBlock("WebResultNormalization"):
+                normalized: List[Dict[str, Any]] = []
+
+                for r in raw_results:
+                    normalized.append(
+                        {
+                            "content": r.get("content", ""),
+                            "source_title": r.get("title", ""),
+                            "source_type": "web",
+                            "source_url": r.get("url", ""),
+                            "score": r.get("score", 0.0),
+                            "chunk_index": -1,  # Non-sequential web content
+                            "retrieval_context": "fallback",
+                        }
+                    )
+
+            return normalized
 
 
 # ============================================================
@@ -115,7 +130,9 @@ if __name__ == "__main__":
         tool = WebSearchTool()
 
         test_query = "Latest patch notes for Assassin's Creed Valhalla"
-        results = tool.search(test_query, max_results=3)
+
+        with ProfileBlock("REQUEST_TOTAL"):
+            results = tool.search(test_query, max_results=3)
 
         print("\n=== NORMALIZED WEB SEARCH OUTPUT ===\n")
         for idx, chunk in enumerate(results, start=1):
@@ -123,3 +140,8 @@ if __name__ == "__main__":
             for k, v in chunk.items():
                 print(f"  {k}: {v}")
             print("-" * 60)
+
+        print("\n--- OBSERVABILITY REPORT ---")
+        print(
+            MetricsRegistry.get().generate_report()
+        )
