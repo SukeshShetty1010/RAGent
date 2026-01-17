@@ -8,7 +8,7 @@ from __future__ import annotations
 import modal
 from typing import Any, Dict
 
-from retriever.observability import ProfileBlock, MetricsRegistry
+from tests.observability import ProfileBlock, MetricsRegistry
 
 
 # ------------------------------------------------------------
