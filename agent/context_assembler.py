@@ -1,13 +1,14 @@
 # ============================================================
 # agent/context_assembler.py
-# Context Assembly & Ranking (FULLY OBSERVABLE)
+# Context Assembly & Ranking (SAFE CONTEXT CAP — FULLY OBSERVABLE)
 # ============================================================
 
 from __future__ import annotations
 
 import logging
 import hashlib
-from typing import List, Dict, Any, DefaultDict
+import re
+from typing import List, Dict, Any, DefaultDict, Set
 from collections import defaultdict
 
 from agent.task_router import TaskType
@@ -25,7 +26,11 @@ if not logger.handlers:
 # Constants
 # ============================================================
 
-MAX_CONTEXT_CHUNKS = 15
+# HARD safety cap — never exceed this
+MAX_CONTEXT_CHARS = 4000
+
+# Jaccard similarity threshold for redundancy rejection
+JACCARD_REDUNDANCY_THRESHOLD = 0.85
 
 # ============================================================
 # Context Assembler
@@ -34,6 +39,12 @@ MAX_CONTEXT_CHUNKS = 15
 class ContextAssembler:
     """
     Final structural processing layer before prompt injection.
+
+    Responsibilities:
+    - Coarse deduplication (existing logic)
+    - Task-aware ordering
+    - Fine-grained redundancy filtering (Jaccard)
+    - Strict character-budget enforcement (atomic inclusion only)
 
     Fully instrumented for observability.
     """
@@ -49,6 +60,12 @@ class ContextAssembler:
     ) -> List[Dict[str, Any]]:
         """
         Assemble a coherent, ordered context for the given task.
+
+        IMPORTANT DESIGN NOTES:
+        - We enforce a HARD character budget (MAX_CONTEXT_CHARS).
+        - Chunks are indivisible units — no truncation allowed.
+        - Ordering happens BEFORE budget enforcement.
+        - Redundancy filtering happens DURING budget assembly.
         """
 
         with ProfileBlock("ContextAssembly"):
@@ -61,7 +78,7 @@ class ContextAssembler:
             )
 
             # ------------------------------------------------
-            # Step A: Deduplication
+            # Step A: Coarse Deduplication (UNCHANGED)
             # ------------------------------------------------
             with ProfileBlock("Deduplication"):
                 deduped = self._deduplicate(chunks)
@@ -85,26 +102,31 @@ class ContextAssembler:
                         ordered = self._order_factual(deduped)
 
             # ------------------------------------------------
-            # Step C: Source labeling
+            # Step C: Source labeling (safety)
             # ------------------------------------------------
             for c in ordered:
                 if "source_type" not in c or not c["source_type"]:
                     c["source_type"] = "local"
 
             # ------------------------------------------------
-            # Step D: Budget control
+            # Step D: Safe Context Cap (CHAR BUDGET + REDUNDANCY)
             # ------------------------------------------------
-            with ProfileBlock("BudgetControl"):
-                final_chunks = ordered[:MAX_CONTEXT_CHUNKS]
+            with ProfileBlock("SafeContextCap"):
+                final_chunks = self._apply_character_budget(ordered)
 
             MetricsRegistry.get().observe(
                 "context_final_chunks", len(final_chunks)
             )
 
+            MetricsRegistry.get().observe(
+                "context_final_chars",
+                sum(len(c.get("content", "")) for c in final_chunks),
+            )
+
             return final_chunks
 
     # ========================================================
-    # Step A — Deduplication
+    # Step A — Deduplication (UNCHANGED)
     # ========================================================
 
     def _deduplicate(
@@ -113,6 +135,8 @@ class ContextAssembler:
     ) -> List[Dict[str, Any]]:
         """
         Content-based deduplication with substring suppression.
+
+        This is a COARSE filter and must remain intact.
         """
 
         normalized_map: Dict[str, Dict[str, Any]] = {}
@@ -172,8 +196,13 @@ class ContextAssembler:
         chunks: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """
-        Group by retrieval_context:
-        [General] → [Entity A] → [Entity B]
+        FAIR comparison ordering.
+
+        Guarantees:
+        1. Each entity contributes at least ONE chunk (if available).
+        2. Remaining chunks are globally score-sorted.
+
+        This prevents one entity from dominating early context.
         """
 
         grouped: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -186,18 +215,32 @@ class ContextAssembler:
             else:
                 grouped[ctx].append(c)
 
+        # Sort each group by score
+        for items in grouped.values():
+            items.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+
         general.sort(key=lambda c: c.get("score", 0.0), reverse=True)
 
         ordered: List[Dict[str, Any]] = []
-        ordered.extend(general)
 
+        # --- Fairness pass: one per entity ---
         for entity, items in grouped.items():
-            items.sort(key=lambda c: c.get("score", 0.0), reverse=True)
-            ordered.extend(items)
+            if items:
+                ordered.append(items.pop(0))
+
+        # --- Remaining chunks by global score ---
+        remaining: List[Dict[str, Any]] = []
+        for items in grouped.values():
+            remaining.extend(items)
+
+        remaining.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+
+        ordered.extend(general)
+        ordered.extend(remaining)
 
         logger.info(
             f"🧩 Assembling context for COMPARISON: "
-            f"Grouped {len(chunks)} chunks into {len(grouped)} entities"
+            f"{len(grouped)} entities, fairness enforced"
         )
 
         return ordered
@@ -239,7 +282,7 @@ class ContextAssembler:
         """
 
         logger.info(
-            f"📌 Assembling context for {TaskType.FACTUAL.value.upper()}: "
+            f"📌 Assembling context for FACTUAL: "
             f"{len(chunks)} chunks sorted by score"
         )
 
@@ -248,6 +291,83 @@ class ContextAssembler:
             key=lambda c: c.get("score", 0.0),
             reverse=True,
         )
+
+    # ========================================================
+    # Step D — Safe Context Cap (CORE LOGIC)
+    # ========================================================
+
+    def _apply_character_budget(
+        self,
+        ordered_chunks: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Incrementally build context until MAX_CONTEXT_CHARS is reached.
+
+        Rules:
+        - Atomic inclusion only (no truncation).
+        - Redundant chunks rejected via Jaccard similarity.
+        - First-fit, order-preserving strategy.
+        """
+
+        final_chunks: List[Dict[str, Any]] = []
+        used_chars = 0
+
+        accepted_token_sets: List[Set[str]] = []
+
+        for c in ordered_chunks:
+            content = (c.get("content") or "").strip()
+            if not content:
+                continue
+
+            content_len = len(content)
+
+            # --- Hard safety gate ---
+            if used_chars + content_len > MAX_CONTEXT_CHARS:
+                MetricsRegistry.get().inc("context_budget_rejections")
+                continue
+
+            # --- Redundancy check ---
+            if self._is_redundant(content, accepted_token_sets):
+                MetricsRegistry.get().inc("context_redundant_rejections")
+                continue
+
+            # --- Accept chunk ---
+            final_chunks.append(c)
+            used_chars += content_len
+            accepted_token_sets.append(self._tokenize(content))
+
+        return final_chunks
+
+    # ========================================================
+    # Redundancy Detection (Jaccard)
+    # ========================================================
+
+    def _is_redundant(
+        self,
+        content: str,
+        existing_token_sets: List[Set[str]],
+    ) -> bool:
+        """
+        Fine-grained redundancy detection using Jaccard similarity.
+
+        This complements (not replaces) coarse deduplication.
+        """
+
+        tokens = self._tokenize(content)
+        if not tokens:
+            return True
+
+        for existing in existing_token_sets:
+            intersection = tokens & existing
+            union = tokens | existing
+            if not union:
+                continue
+
+            similarity = len(intersection) / len(union)
+            if similarity >= JACCARD_REDUNDANCY_THRESHOLD:
+                return True
+
+        return False
 
     # ========================================================
     # Utilities
@@ -260,3 +380,12 @@ class ContextAssembler:
     @staticmethod
     def _hash_text(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _tokenize(text: str) -> Set[str]:
+        """
+        Lightweight tokenization:
+        - lowercase
+        - alphanumeric words only
+        """
+        return set(re.findall(r"[a-z0-9]+", text.lower()))

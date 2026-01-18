@@ -1,14 +1,33 @@
 # ============================================================
 # agent/prompt_manager.py
-# Task-Specific Prompt Templates (FULLY OBSERVABLE)
+# Dynamic Prompt Budgeting Engine + Slim Comparison Template
+# (FULLY OBSERVABLE)
 # ============================================================
 
 from __future__ import annotations
 
+import logging
 from typing import List, Dict, Any
 
 from agent.task_router import TaskType
-from tests.observability import ProfileBlock
+from tests.observability import ProfileBlock, MetricsRegistry
+
+
+# ============================================================
+# Logging
+# ============================================================
+
+logger = logging.getLogger("RAG_PROMPT_MANAGER")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+
+# ============================================================
+# Constants
+# ============================================================
+
+# HARD safety cap for the FINAL serialized prompt string
+MAX_TOTAL_PROMPT_CHARS = 4500
 
 
 # ============================================================
@@ -17,16 +36,15 @@ from tests.observability import ProfileBlock
 
 class PromptManager:
     """
-    Instruction Layer.
+    Prompt container responsible for enforcing a HARD total
+    character budget across:
 
-    Translates:
-    - TaskType
-    - Assembled Context
-    - User Query
+      1. Instructions (boilerplate)
+      2. Evidence (context)
+      3. Query (mandatory)
 
-    into a final, structured prompt string for the LLM.
-
-    Fully observable, deterministic, no reasoning.
+    Hierarchy of importance:
+      Query > Evidence > Structure > Instructions
     """
 
     # --------------------------------------------------------
@@ -40,34 +58,131 @@ class PromptManager:
         task: TaskType,
     ) -> str:
         """
-        Generate the final prompt string for the LLM.
+        Generate a prompt that NEVER exceeds MAX_TOTAL_PROMPT_CHARS.
+
+        Degradation strategy:
+          Attempt 1: Verbose instructions + full context
+          Fallback A: Concise instructions + full context
+          Fallback B: Concise instructions + truncated context (tail-drop)
         """
 
         with ProfileBlock("PromptConstruction"):
 
+            # ------------------------------------------------
+            # Prepare context (highest value payload)
+            # ------------------------------------------------
             with ProfileBlock("ContextFormatting"):
-                context_block = self._format_context(chunks)
+                context_chunks = list(chunks)  # copy; may truncate
+                context_block = self._format_context(context_chunks)
 
-            if task == TaskType.COMPARISON:
-                system_instruction = self._comparison_instruction()
-            elif task == TaskType.LISTICLE:
-                system_instruction = self._listicle_instruction()
-            elif task == TaskType.FACTUAL:
-                system_instruction = self._factual_instruction()
-            else:
-                system_instruction = self._open_instruction()
+            # ------------------------------------------------
+            # Select instruction sets
+            # ------------------------------------------------
+            verbose_instruction = self._get_verbose_instruction(task)
+            concise_instruction = self._get_concise_instruction(task)
 
-            prompt = (
-                f"{system_instruction}\n\n"
-                f"=== BEGIN CONTEXT ===\n"
-                f"{context_block}\n"
-                f"=== END CONTEXT ===\n\n"
-                f"=== USER QUERY ===\n"
-                f"{query}\n\n"
-                f"=== ANSWER ===\n"
+            # =================================================
+            # ATTEMPT 1 — VERBOSE + FULL CONTEXT
+            # =================================================
+            prompt = self._construct_final_string(
+                verbose_instruction,
+                context_block,
+                query,
             )
 
-            return prompt
+            if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
+                MetricsRegistry.get().record(
+                    "prompt_budget_mode", "verbose"
+                )
+                return prompt
+
+            logger.warning("📉 Prompt overflow — switching to concise mode")
+
+            # =================================================
+            # FALLBACK A — CONCISE + FULL CONTEXT
+            # =================================================
+            prompt = self._construct_final_string(
+                concise_instruction,
+                context_block,
+                query,
+            )
+
+            if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
+                MetricsRegistry.get().record(
+                    "prompt_budget_mode", "concise"
+                )
+                return prompt
+
+            logger.warning(
+                "📉 Prompt still too large — truncating context tail"
+            )
+
+            # =================================================
+            # FALLBACK B — CONCISE + TRUNCATED CONTEXT
+            # =================================================
+            # Drop lowest-priority chunks (from the end) until it fits
+            while context_chunks:
+                context_chunks.pop()
+                context_block = self._format_context(context_chunks)
+
+                prompt = self._construct_final_string(
+                    concise_instruction,
+                    context_block,
+                    query,
+                )
+
+                if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
+                    MetricsRegistry.get().record(
+                        "prompt_budget_mode", "truncated"
+                    )
+                    MetricsRegistry.get().observe(
+                        "prompt_context_chunks_used",
+                        len(context_chunks),
+                    )
+                    return prompt
+
+            # ------------------------------------------------
+            # ABSOLUTE FAIL-SAFE
+            # ------------------------------------------------
+            logger.warning(
+                "⚠️ Prompt severely constrained — context removed entirely"
+            )
+
+            MetricsRegistry.get().record(
+                "prompt_budget_mode", "minimal"
+            )
+
+            return self._construct_final_string(
+                concise_instruction,
+                "No supporting context was retrieved.",
+                query,
+            )
+
+    # ========================================================
+    # Core Assembly Helper (DRY)
+    # ========================================================
+
+    @staticmethod
+    def _construct_final_string(
+        instruction: str,
+        context_block: str,
+        query: str,
+    ) -> str:
+        """
+        Assemble the FINAL serialized prompt string.
+
+        This method is the single source of truth for
+        budget measurement via len(prompt).
+        """
+        return (
+            f"{instruction}\n\n"
+            f"=== BEGIN CONTEXT ===\n"
+            f"{context_block}\n"
+            f"=== END CONTEXT ===\n\n"
+            f"=== USER QUERY ===\n"
+            f"{query}\n\n"
+            f"=== ANSWER ===\n"
+        )
 
     # ========================================================
     # Context Formatting
@@ -77,86 +192,112 @@ class PromptManager:
         self,
         chunks: List[Dict[str, Any]],
     ) -> str:
-        """
-        Convert chunks into a single formatted context string.
-        """
-
         if not chunks:
             return "No supporting context was retrieved."
 
-        formatted_chunks: List[str] = []
+        formatted: List[str] = []
 
         for c in chunks:
             source_title = c.get("source_title") or "Unknown Source"
             source_type = c.get("source_type") or "local"
             content = c.get("content") or ""
 
-            formatted_chunks.append(
+            formatted.append(
                 f"[Source: {source_title} | Type: {source_type}]\n"
                 f"{content}\n"
             )
 
-        return "\n".join(formatted_chunks)
+        return "\n".join(formatted)
 
     # ========================================================
-    # System Instructions (Templates)
+    # Instruction Dispatch
+    # ========================================================
+
+    def _get_verbose_instruction(self, task: TaskType) -> str:
+        if task == TaskType.COMPARISON:
+            return self._comparison_instruction_verbose()
+        if task == TaskType.LISTICLE:
+            return self._listicle_instruction_verbose()
+        if task == TaskType.FACTUAL:
+            return self._factual_instruction_verbose()
+        return self._open_instruction_verbose()
+
+    def _get_concise_instruction(self, task: TaskType) -> str:
+        if task == TaskType.COMPARISON:
+            return self._comparison_instruction_concise()
+        if task == TaskType.LISTICLE:
+            return self._listicle_instruction_concise()
+        if task == TaskType.FACTUAL:
+            return self._factual_instruction_concise()
+        return self._open_instruction_concise()
+
+    # ========================================================
+    # VERBOSE INSTRUCTIONS (SLIM, HIGH-SIGNAL)
     # ========================================================
 
     @staticmethod
-    def _comparison_instruction() -> str:
+    def _comparison_instruction_verbose() -> str:
         return (
-            "You are an objective video game analyst. "
-            "Your task is to compare two or more entities strictly based on the provided context.\n\n"
-            "You must output your answer in this exact structure:\n"
-            "1. **Overview**: High-level summary of the comparison.\n"
-            "2. **Gameplay**: Contrast mechanics, difficulty, and loops.\n"
-            "3. **Story/Atmosphere**: Contrast narrative and world design.\n"
-            "4. **Conclusion**: A final summary statement.\n\n"
-            "Constraint:\n"
-            "If the context is missing information for one side, explicitly state:\n"
-            "\"I lack sufficient information to compare [Topic].\"\n\n"
-            "Global Citation Rule:\n"
-            "You must cite your sources. When using information from a specific chunk, "
-            "append (Source: [Source Title]) at the end of the sentence."
+            "Compare entities across these dimensions:\n"
+            "1. Gameplay (core mechanics, loops, player agency)\n"
+            "2. Story (narrative focus, themes, delivery)\n"
+            "3. World Design (structure, exploration, activities)\n"
+            "4. Tone (emotional register, satire vs seriousness)\n"
+            "5. Systems (progression, AI, combat, economy)\n\n"
+            "Use only the provided context. "
+            "Cite sources at the end of each factual statement."
         )
 
     @staticmethod
-    def _listicle_instruction() -> str:
+    def _listicle_instruction_verbose() -> str:
         return (
-            "You are a helpful gaming guide editor. "
-            "Your task is to create an ordered list based on the provided context.\n\n"
-            "You must preserve the original order of the items found in the context if they are numbered.\n"
-            "Format your output as:\n"
-            "1. **[Item Name]**: [Description]\n"
-            "2. **[Item Name]**: [Description]\n"
-            "...\n\n"
-            "Constraint:\n"
-            "Do not invent list items. Only include items present in the context.\n\n"
-            "Global Citation Rule:\n"
-            "You must cite your sources. When using information from a specific chunk, "
-            "append (Source: [Source Title]) at the end of the sentence."
+            "Produce an ordered list strictly from the provided context.\n"
+            "Preserve original ordering when present.\n"
+            "Do not invent items.\n"
+            "Cite sources for each item."
         )
 
     @staticmethod
-    def _factual_instruction() -> str:
+    def _factual_instruction_verbose() -> str:
         return (
-            "You are a precise gaming database assistant. "
-            "Answer the user's question concisely.\n\n"
-            "Structure Instruction:\n"
-            "Provide a direct, factual answer in 1–2 paragraphs. Do not use filler words.\n\n"
-            "Global Citation Rule:\n"
-            "You must cite your sources. When using information from a specific chunk, "
-            "append (Source: [Source Title]) at the end of the sentence."
+            "Answer concisely using only the provided context.\n"
+            "Limit to factual information.\n"
+            "Cite all facts."
         )
 
     @staticmethod
-    def _open_instruction() -> str:
+    def _open_instruction_verbose() -> str:
         return (
-            "You are a knowledgeable gaming assistant. "
-            "Provide a comprehensive answer based on the context.\n\n"
-            "Structure Instruction:\n"
-            "Use clear paragraphs and headings where appropriate.\n\n"
-            "Global Citation Rule:\n"
-            "You must cite your sources. When using information from a specific chunk, "
-            "append (Source: [Source Title]) at the end of the sentence."
+            "Answer using only the provided context.\n"
+            "Organize clearly by topic.\n"
+            "Cite all factual claims."
+        )
+
+    # ========================================================
+    # CONCISE INSTRUCTIONS (ULTRA-DENSE)
+    # ========================================================
+
+    @staticmethod
+    def _comparison_instruction_concise() -> str:
+        return (
+            "Compare entities by: Gameplay, Story, World Design, "
+            "Tone, Systems. Use context only. Cite sources."
+        )
+
+    @staticmethod
+    def _listicle_instruction_concise() -> str:
+        return (
+            "Create an ordered list from context only. Cite sources."
+        )
+
+    @staticmethod
+    def _factual_instruction_concise() -> str:
+        return (
+            "Answer factually from the context. Cite sources."
+        )
+
+    @staticmethod
+    def _open_instruction_concise() -> str:
+        return (
+            "Answer using the context. Cite sources."
         )

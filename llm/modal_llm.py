@@ -15,21 +15,25 @@ image = (
 )
 
 @app.function(
-    gpu="T4",
+    gpu="L40S",  # ← Upgraded to Ada Lovelace (48GB VRAM)
     timeout=300,
     image=image,
     secrets=[modal.Secret.from_name("rag-secrets")],
     max_containers=5,
 )
-def chat_completion_remote(prompt: str, max_tokens: int = 512, temperature: float = 0.1) -> str:
+def chat_completion_remote(
+    prompt: str,
+    max_tokens: int = 512,
+    temperature: float = 0.1,
+) -> str:
     from vllm import LLM, SamplingParams
 
     llm = LLM(
         model="meta-llama/Llama-3.2-3B-Instruct",
-        dtype=torch.float16,  # ← FIXED: T4 needs float16, NOT bfloat16
-        tensor_parallel_size=1,
+        dtype=torch.bfloat16,  # ← L40S supports BF16; this matches Llama 3 training and improves numerical stability
+        tensor_parallel_size=1,  # Single L40S is sufficient for a 3B model
         max_model_len=8192,
-        gpu_memory_utilization=0.85,
+        gpu_memory_utilization=0.85,  # Conservative headroom; well within 48GB
         trust_remote_code=True,
         enforce_eager=True,
         seed=42,
