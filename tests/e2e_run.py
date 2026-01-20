@@ -1,7 +1,7 @@
 # ============================================================
 # tests/e2e_run.py
 # End-to-End Black Box Recorder for RAG Pipeline
-# (SAFE QUALITY FALLBACK ENABLED)
+# (SAFE QUALITY FALLBACK — CHAR-BUDGET AWARE)
 # ============================================================
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from tests.observability import MetricsRegistry, ProfileBlock
 
 
 # ------------------------------------------------------------
-# ANSI Colors (no dependency)
+# ANSI Colors
 # ------------------------------------------------------------
 
 YELLOW = "\033[93m"
@@ -34,12 +34,12 @@ RESET = "\033[0m"
 
 class E2EProbe:
     """
-    Black-box probe that manually orchestrates the RAG pipeline
-    to surface all hidden intermediate telemetry.
+    Black-box probe that executes the full RAG pipeline
+    and records behavioral + metric deltas.
 
-    Now includes:
-    - Safe Quality Fallback (single retry)
-    - Dynamic Context Cap patching
+    Includes:
+    - Single-pass Safe Quality Fallback
+    - Character-budget based auto-recovery (CURRENT ARCH)
     """
 
     def __init__(self) -> None:
@@ -51,7 +51,7 @@ class E2EProbe:
         self.metrics = MetricsRegistry.get()
 
     # --------------------------------------------------------
-    # Metrics Snapshotting (CRITICAL)
+    # Metrics Snapshotting
     # --------------------------------------------------------
 
     def _snapshot_metrics(self) -> Dict[str, Any]:
@@ -112,11 +112,6 @@ class E2EProbe:
     ) -> bool:
         """
         Detect silent under-answering for COMPARISON tasks.
-
-        Trigger if:
-        - COMPARISON task
-        - AND output < 650 chars
-        - OR missing required headers
         """
 
         if task != TaskType.COMPARISON:
@@ -136,12 +131,12 @@ class E2EProbe:
         return any(h not in output for h in required_headers)
 
     # --------------------------------------------------------
-    # Pipeline Execution (RESILIENT)
+    # Pipeline Execution
     # --------------------------------------------------------
 
     def run_pipeline(self, query: str) -> Dict[str, Any]:
         """
-        Execute a full RAG pipeline run with auto-recovery.
+        Execute one full RAG pipeline run with auto-recovery.
         """
 
         metrics_before = self._snapshot_metrics()
@@ -149,28 +144,20 @@ class E2EProbe:
 
         with ProfileBlock("REQUEST_TOTAL"):
 
-            # ---------------------------------------------
-            # Step 1: Task Routing
-            # ---------------------------------------------
+            # ---------------- Step 1: Routing ----------------
             decision = self.router.route(query)
 
-            # ---------------------------------------------
-            # Step 2: Strategy Selection
-            # ---------------------------------------------
+            # ---------------- Step 2: Strategy ----------------
             retrieval_config = self.strategy_selector.select(decision)
 
-            # ---------------------------------------------
-            # Step 3: Retrieval Orchestration
-            # ---------------------------------------------
+            # ---------------- Step 3: Retrieval ----------------
             chunks, merge_state, quality_report = self.orchestrator.run(
                 query=query,
                 task=decision.task,
                 config=retrieval_config,
             )
 
-            # ---------------------------------------------
-            # Step 4: Context Assembly (PASS 1)
-            # ---------------------------------------------
+            # ---------------- Step 4: Context Assembly (Pass 1) ----------------
             assembled_chunks = self.context_assembler.assemble(
                 chunks,
                 decision.task,
@@ -180,23 +167,17 @@ class E2EProbe:
                 len(c.get("content", "")) for c in assembled_chunks
             )
 
-            # ---------------------------------------------
-            # Step 5: Prompt Construction
-            # ---------------------------------------------
+            # ---------------- Step 5: Prompt ----------------
             prompt = self.prompt_manager.generate_prompt(
                 query=query,
                 chunks=assembled_chunks,
                 task=decision.task,
             )
 
-            # ---------------------------------------------
-            # Step 6: LLM Generation (PASS 1)
-            # ---------------------------------------------
+            # ---------------- Step 6: LLM (Pass 1) ----------------
             response = chat_completion_remote(prompt)
 
-            # ---------------------------------------------
-            # Step 7: Safe Quality Fallback (SINGLE RETRY)
-            # ---------------------------------------------
+            # ---------------- Step 7: Safe Quality Fallback ----------------
             if (
                 self._is_suspiciously_short(decision.task, response)
                 and quality_report.status == QualityStatus.QUALITY_OK
@@ -206,15 +187,17 @@ class E2EProbe:
                 )
                 fallback_triggered = True
 
-                original_cap = (
+                # 🔑 REAL control knob (current architecture)
+                original_char_cap = (
                     self.context_assembler.__class__.MAX_CONTEXT_CHARS
                 )
 
                 try:
-                    # 🔧 Dynamic runtime patch (NO FILE EDIT)
-                    self.context_assembler.__class__.MAX_CONTEXT_CHARS = 6000
+                    # Expand character budget (single retry)
+                    self.context_assembler.__class__.MAX_CONTEXT_CHARS = int(
+                        original_char_cap * 1.75
+                    )
 
-                    # Re-assemble with larger budget
                     assembled_chunks = self.context_assembler.assemble(
                         chunks,
                         decision.task,
@@ -224,27 +207,25 @@ class E2EProbe:
                         len(c.get("content", "")) for c in assembled_chunks
                     )
 
-                    # Re-prompt
                     prompt = self.prompt_manager.generate_prompt(
                         query=query,
                         chunks=assembled_chunks,
                         task=decision.task,
                     )
 
-                    # Re-generate (NO WEB)
                     response = chat_completion_remote(prompt)
 
                 finally:
-                    # 🛡️ CRITICAL: prevent silent regression
+                    # 🛡️ Restore global invariant
                     self.context_assembler.__class__.MAX_CONTEXT_CHARS = (
-                        original_cap
+                        original_char_cap
                     )
 
         metrics_after = self._snapshot_metrics()
         metrics_delta = self._diff_metrics(metrics_before, metrics_after)
 
         # ------------------------------------------------
-        # Structured Telemetry Report
+        # Structured Telemetry
         # ------------------------------------------------
 
         return {
@@ -266,15 +247,13 @@ class E2EProbe:
 
 
 # ============================================================
-# Experiment Runner
+# Manual Test Harness
 # ============================================================
 
 if __name__ == "__main__":
     probe = E2EProbe()
-
     QUERY = "Compare Assassin's Creed Valhalla vs Far Cry 5"
 
     print("\n🧪 E2E RUN WITH AUTO-RECOVERY\n" + "=" * 60)
     result = probe.run_pipeline(QUERY)
-
     print(json.dumps(result, indent=2))
