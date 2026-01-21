@@ -116,10 +116,37 @@ class RetrievalOrchestrator:
                 should_attempt_web = True
 
             # -------------------------------------------------
-            # STEP 4: WEB AUGMENTATION
+            # STEP 4: WEB AUGMENTATION (KPI-9 INSTRUMENTED)
             # -------------------------------------------------
 
             if should_attempt_web and self.web_tool:
+
+                # ---------------------------------------------
+                # KPI-9: Causal Web Trigger Reason
+                # ---------------------------------------------
+                trigger_reason = None
+
+                if quality_report.status == QualityStatus.QUALITY_EMPTY:
+                    trigger_reason = "quality_empty"
+
+                elif quality_report.status == QualityStatus.QUALITY_WEAK:
+                    trigger_reason = "quality_weak"
+
+                elif (
+                    quality_report.has_temporal_signal
+                    and config.allow_web_fallback
+                ):
+                    trigger_reason = "temporal_signal"
+
+                elif task == TaskType.OPEN and config.allow_web_fallback:
+                    trigger_reason = "task_fallback"
+
+                if trigger_reason:
+                    MetricsRegistry.get().record(
+                        "web_trigger_reason",
+                        trigger_reason,
+                    )
+
                 MetricsRegistry.get().inc("web_search_triggers")
 
                 with ProfileBlock("WebSearch"):

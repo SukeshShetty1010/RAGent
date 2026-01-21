@@ -1,6 +1,6 @@
 # ============================================================
 # tests/KPI_run.py
-# Executive KPI Aggregation Harness (FINAL + KPI 8)
+# Executive KPI Aggregation Harness (FINAL + KPI 10)
 # ============================================================
 
 from __future__ import annotations
@@ -85,6 +85,26 @@ class ConfidenceKPI:
     p95_score: float
 
 
+# ---------------- KPI 9 ----------------
+
+@dataclass
+class WebAugmentationKPI:
+    quality_empty_pct: float
+    quality_weak_pct: float
+    temporal_signal_pct: float
+    task_fallback_pct: float
+    total_triggers: int
+
+
+# ---------------- KPI 10 ----------------
+
+@dataclass
+class AutomationDepthKPI:
+    avg_stages: float
+    max_stages: int
+    min_stages: int
+
+
 @dataclass
 class KPIReport:
     latency: LatencyKPI
@@ -95,6 +115,8 @@ class KPIReport:
     task_routing: TaskRoutingKPI
     task_completion: TaskCompletionKPI
     confidence: ConfidenceKPI
+    web_augmentation: WebAugmentationKPI
+    automation_depth: AutomationDepthKPI
 
 
 # ============================================================
@@ -130,7 +152,7 @@ class KPISuite:
         probe = E2EProbe()
 
         # =====================================================
-        # KPI 2 — Cache Speedup (ISOLATED FIRST)
+        # KPI 2 — Cache Speedup
         # =====================================================
 
         COLD_QUERY = "History of AI architectures"
@@ -152,7 +174,7 @@ class KPISuite:
         )
 
         # =====================================================
-        # Ground-Truth Traffic Sweep (KPI 3 + 6 + 7 + 8)
+        # Ground-Truth Traffic Sweep (KPI 3 + 6 + 7 + 8 + 10)
         # =====================================================
 
         TRAFFIC_SWEEP: List[Tuple[str, TaskType]] = [
@@ -163,7 +185,7 @@ class KPISuite:
             ("Latest patch notes for Assassin's Creed Valhalla", TaskType.OPEN),
         ]
 
-        quality_counts: Dict[str, int] = {
+        quality_counts = {
             "quality_ok": 0,
             "quality_weak": 0,
             "quality_empty": 0,
@@ -174,29 +196,30 @@ class KPISuite:
         successful_attempts = 0
         confidence_scores: List[float] = []
 
+        automation_depths: List[int] = []
+
         for query, expected_task in TRAFFIC_SWEEP:
             total_attempts += 1
 
             try:
                 result = probe.run_pipeline(query)
-            except Exception as exc:
-                logging.error(f"KPI-7 failure (exception): {exc}")
-                continue  # fail-soft
+            except Exception:
+                continue
 
             behavior = result.get("behavior", {})
             quality_status = behavior.get("quality_status")
             output_preview = result.get("output_preview")
             confidence = behavior.get("confidence_score")
 
-            # ---- KPI 3: Retrieval Quality ----
+            # ---- KPI 3 ----
             if quality_status in quality_counts:
                 quality_counts[quality_status] += 1
 
-            # ---- KPI 6: Task Routing Accuracy ----
+            # ---- KPI 6 ----
             if behavior.get("task_type") == expected_task.value:
                 routing_correct += 1
 
-            # ---- KPI 7: Task Completion Success ----
+            # ---- KPI 7 ----
             if (
                 quality_status != "quality_empty"
                 and isinstance(output_preview, str)
@@ -204,9 +227,22 @@ class KPISuite:
             ):
                 successful_attempts += 1
 
-            # ---- KPI 8: Confidence Distribution ----
+            # ---- KPI 8 ----
             if isinstance(confidence, (int, float)):
                 confidence_scores.append(float(confidence))
+
+            # ---- KPI 10: Automation Depth ----
+            snapshot = result.get("final_metrics_snapshot", {})
+            distributions = snapshot.get("distributions", {})
+
+            stages_executed = sum(
+                1
+                for k in distributions.keys()
+                if k.startswith("latency::")
+                and k != "latency::REQUEST_TOTAL"
+            )
+
+            automation_depths.append(stages_executed)
 
         total_runs = len(TRAFFIC_SWEEP) or 1
 
@@ -224,7 +260,7 @@ class KPISuite:
 
         completion_kpi = TaskCompletionKPI(
             success_rate_pct=round((successful_attempts / total_attempts) * 100.0, 2)
-            if total_attempts > 0 else 0.0,
+            if total_attempts else 0.0,
             total_attempts=total_attempts,
             successful_attempts=successful_attempts,
         )
@@ -235,6 +271,18 @@ class KPISuite:
             min_score=round(min(confidence_scores), 4) if confidence_scores else 0.0,
             max_score=round(max(confidence_scores), 4) if confidence_scores else 0.0,
             p95_score=self._percentile(confidence_scores, 95),
+        )
+
+        # =====================================================
+        # KPI 10 — Automation Depth
+        # =====================================================
+
+        automation_kpi = AutomationDepthKPI(
+            avg_stages=round(
+                sum(automation_depths) / len(automation_depths), 2
+            ) if automation_depths else 0.0,
+            max_stages=max(automation_depths) if automation_depths else 0,
+            min_stages=min(automation_depths) if automation_depths else 0,
         )
 
         # =====================================================
@@ -275,6 +323,26 @@ class KPISuite:
         )
 
         # =====================================================
+        # KPI 9 — Web Augmentation Precision
+        # =====================================================
+
+        cat = registry._categoricals.get("web_trigger_reason")
+        total_web = sum(cat.values.values()) if cat else 0
+
+        def pct(label: str) -> float:
+            if not cat or total_web == 0:
+                return 0.0
+            return round((cat.values.get(label, 0) / total_web) * 100.0, 2)
+
+        web_kpi = WebAugmentationKPI(
+            quality_empty_pct=pct("quality_empty"),
+            quality_weak_pct=pct("quality_weak"),
+            temporal_signal_pct=pct("temporal_signal"),
+            task_fallback_pct=pct("task_fallback"),
+            total_triggers=total_web,
+        )
+
+        # =====================================================
         # Final Report
         # =====================================================
 
@@ -287,6 +355,8 @@ class KPISuite:
             task_routing=routing_kpi,
             task_completion=completion_kpi,
             confidence=confidence_kpi,
+            web_augmentation=web_kpi,
+            automation_depth=automation_kpi,
         )
 
         self._print_dashboard(report)
@@ -338,6 +408,21 @@ class KPISuite:
         print(f"  Min: {report.confidence.min_score}")
         print(f"  Max: {report.confidence.max_score}")
         print(f"  P95: {report.confidence.p95_score}\n")
+
+        print(f"{CYAN}🌐 Web Augmentation Precision{RESET}")
+        print(f"  Total Web Searches: {report.web_augmentation.total_triggers}")
+        if report.web_augmentation.total_triggers == 0:
+            print("  No web augmentation occurred.\n")
+        else:
+            print(f"  QUALITY_EMPTY:   {report.web_augmentation.quality_empty_pct}%")
+            print(f"  QUALITY_WEAK:    {report.web_augmentation.quality_weak_pct}%")
+            print(f"  TEMPORAL_SIGNAL: {report.web_augmentation.temporal_signal_pct}%")
+            print(f"  TASK_FALLBACK:   {report.web_augmentation.task_fallback_pct}%\n")
+
+        print(f"{CYAN}⚙️ Automation Depth{RESET}")
+        print(f"  Avg Stages: {report.automation_depth.avg_stages}")
+        print(f"  Max Stages: {report.automation_depth.max_stages}")
+        print(f"  Min Stages: {report.automation_depth.min_stages}\n")
 
     @staticmethod
     def _print_json(report: KPIReport) -> None:
