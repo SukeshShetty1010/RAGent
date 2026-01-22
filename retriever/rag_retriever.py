@@ -11,7 +11,7 @@ Instrumentation added for:
 from __future__ import annotations
 
 import argparse
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 import modal
 import weaviate
@@ -34,7 +34,17 @@ E5Embedder = modal.Cls.from_name(
 # ---------------------------------------------------------------------
 
 class RAGRetriever:
+    """
+    Thin, stateful wrapper around Weaviate + embedding service.
+
+    IMPORTANT:
+    - Owns a Weaviate client
+    - MUST be explicitly closed by caller
+    """
+
     def __init__(self) -> None:
+        self.client: Optional[weaviate.WeaviateClient] = None
+
         try:
             self.client = weaviate.connect_to_local()
         except Exception as exc:
@@ -44,9 +54,9 @@ class RAGRetriever:
 
         self.embedder = E5Embedder()
 
-    def close(self) -> None:
-        if self.client:
-            self.client.close()
+    # --------------------------------------------------
+    # Public API
+    # --------------------------------------------------
 
     def retrieve(self, query: str, limit: int = 5) -> List[Dict]:
         """
@@ -54,6 +64,11 @@ class RAGRetriever:
         """
         if not query or not isinstance(query, str):
             raise ValueError("Query must be a non-empty string")
+
+        if self.client is None:
+            raise RuntimeError(
+                "RAGRetriever used after close() was called"
+            )
 
         with ProfileBlock("LocalVectorSearch"):
 
@@ -116,6 +131,24 @@ class RAGRetriever:
             )
 
             return results
+
+    # --------------------------------------------------
+    # Resource Management
+    # --------------------------------------------------
+
+    def close(self) -> None:
+        """
+        Explicit teardown of Weaviate resources.
+
+        - Idempotent
+        - Safe to call multiple times
+        - REQUIRED for UI / CI / long-running processes
+        """
+        if self.client is not None:
+            try:
+                self.client.close()
+            finally:
+                self.client = None
 
 
 # ---------------------------------------------------------------------
