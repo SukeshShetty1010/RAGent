@@ -1,4 +1,3 @@
-# ui/panels/query_panel.py
 """
 Query Panel — Request Initiator
 
@@ -38,6 +37,8 @@ Forbidden Actions:
 - Must never render answers, evidence, KPIs, or traces.
 """
 
+from __future__ import annotations
+
 import streamlit as st
 
 
@@ -49,17 +50,33 @@ def render_panel() -> None:
     Execution is handled by the application controller (`ui/app.py`).
     """
 
+    # --------------------------------------------------
+    # Fail-safe state access (critical for first render)
+    # --------------------------------------------------
+    current_query = st.session_state.get("current_query", "")
+    is_running = st.session_state.get("is_running", False)
+
+    # --------------------------------------------------
+    # Input field (always renders)
+    # --------------------------------------------------
     query_value = st.text_input(
         "Enter your query",
-        value=st.session_state.current_query or "",
-        disabled=st.session_state.is_running,
+        value=current_query or "",
+        disabled=is_running,
+        placeholder="Ask a question to begin…",
     )
 
+    # --------------------------------------------------
+    # Run trigger
+    # --------------------------------------------------
     run_clicked = st.button(
         "Run Analysis",
-        disabled=st.session_state.is_running,
+        disabled=is_running,
     )
 
+    # --------------------------------------------------
+    # Intent signaling (no execution here)
+    # --------------------------------------------------
     if run_clicked:
         st.session_state.current_query = query_value
 
