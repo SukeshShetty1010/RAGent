@@ -1,6 +1,6 @@
 # ============================================================
 # tests/KPI_run.py
-# Executive KPI Aggregation Harness (FINAL + KPI 10)
+# Executive KPI Aggregation Harness (CAPABILITY-AWARE, FINAL)
 # ============================================================
 
 from __future__ import annotations
@@ -12,14 +12,16 @@ import logging
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Tuple
 
+from engine.execution_engine import RageEngine
 from agent.task_router import TaskType
+from agent.capability.capability_types import AnswerCapability
+
 from tests.observability import MetricsRegistry
-from tests.e2e_run import E2EProbe
 from tests.regression_suite import RegressionRunner
 
 
 # ------------------------------------------------------------
-# ANSI Colors (Dashboard)
+# ANSI Colors (CLI Dashboard)
 # ------------------------------------------------------------
 
 GREEN = "\033[92m"
@@ -29,9 +31,9 @@ RED = "\033[91m"
 RESET = "\033[0m"
 
 
-# ------------------------------------------------------------
-# KPI Report Contracts
-# ------------------------------------------------------------
+# ============================================================
+# KPI Contracts
+# ============================================================
 
 @dataclass
 class LatencyKPI:
@@ -85,24 +87,11 @@ class ConfidenceKPI:
     p95_score: float
 
 
-# ---------------- KPI 9 ----------------
-
 @dataclass
-class WebAugmentationKPI:
-    quality_empty_pct: float
-    quality_weak_pct: float
-    temporal_signal_pct: float
-    task_fallback_pct: float
-    total_triggers: int
-
-
-# ---------------- KPI 10 ----------------
-
-@dataclass
-class AutomationDepthKPI:
-    avg_stages: float
-    max_stages: int
-    min_stages: int
+class CapabilityKPI:
+    full_pct: float
+    partial_pct: float
+    insufficient_pct: float
 
 
 @dataclass
@@ -115,8 +104,7 @@ class KPIReport:
     task_routing: TaskRoutingKPI
     task_completion: TaskCompletionKPI
     confidence: ConfidenceKPI
-    web_augmentation: WebAugmentationKPI
-    automation_depth: AutomationDepthKPI
+    capability: CapabilityKPI
 
 
 # ============================================================
@@ -125,11 +113,15 @@ class KPIReport:
 
 class KPISuite:
     """
-    Executive KPI aggregation harness.
+    Executive KPI runner aligned with the capability-aware engine.
     """
 
+    def __init__(self) -> None:
+        self.engine = RageEngine()
+        self.registry = MetricsRegistry.get()
+
     # --------------------------------------------------------
-    # Percentile Helper (NO numpy)
+    # Percentile Helper (no numpy)
     # --------------------------------------------------------
 
     @staticmethod
@@ -142,125 +134,103 @@ class KPISuite:
         return round(values[k], 4)
 
     # --------------------------------------------------------
-    # Run
+    # Run KPI Suite
     # --------------------------------------------------------
 
     def run(self) -> KPIReport:
         logging.getLogger().setLevel(logging.WARNING)
 
-        registry = MetricsRegistry.get()
-        probe = E2EProbe()
-
         # =====================================================
-        # KPI 2 — Cache Speedup
+        # KPI 1 — Cache Performance
         # =====================================================
 
-        COLD_QUERY = "History of AI architectures"
+        COLD_QUERY = "History of artificial intelligence"
 
         start = time.perf_counter()
-        probe.run_pipeline(COLD_QUERY)
-        cold_time = (time.perf_counter() - start) * 1000.0
+        self.engine.run(COLD_QUERY)
+        cold_ms = (time.perf_counter() - start) * 1000.0
 
         start = time.perf_counter()
-        probe.run_pipeline(COLD_QUERY)
-        warm_time = (time.perf_counter() - start) * 1000.0
+        self.engine.run(COLD_QUERY)
+        warm_ms = (time.perf_counter() - start) * 1000.0
 
-        speedup = round(cold_time / warm_time, 2) if warm_time > 0 else 0.0
+        speedup = round(cold_ms / warm_ms, 2) if warm_ms > 0 else 0.0
 
         cache_kpi = CacheKPI(
-            cold_ms=round(cold_time, 2),
-            warm_ms=round(warm_time, 2),
+            cold_ms=round(cold_ms, 2),
+            warm_ms=round(warm_ms, 2),
             speedup=speedup,
         )
 
         # =====================================================
-        # Ground-Truth Traffic Sweep (KPI 3 + 6 + 7 + 8 + 10)
+        # Traffic Sweep (Core KPIs)
         # =====================================================
 
-        TRAFFIC_SWEEP: List[Tuple[str, TaskType]] = [
-            ("Compare Assassin's Creed Valhalla vs Far Cry 5", TaskType.COMPARISON),
-            ("Top 10 things to do in Far Cry 5", TaskType.LISTICLE),
+        TRAFFIC: List[Tuple[str, TaskType]] = [
+            ("Compare Far Cry 5 vs Assassin’s Creed Valhalla", TaskType.COMPARISON),
+            ("Top 5 things to do in Far Cry 5", TaskType.LISTICLE),
             ("What is the release date of Far Cry 5?", TaskType.FACTUAL),
             ("Explain why Far Cry 5 is controversial", TaskType.OPEN),
-            ("Latest patch notes for Assassin's Creed Valhalla", TaskType.OPEN),
+            ("Latest update for Assassin’s Creed Valhalla", TaskType.OPEN),
         ]
 
-        quality_counts = {
-            "quality_ok": 0,
-            "quality_weak": 0,
-            "quality_empty": 0,
-        }
-
+        quality_counts = {"QUALITY_OK": 0, "QUALITY_WEAK": 0, "QUALITY_EMPTY": 0}
         routing_correct = 0
         total_attempts = 0
         successful_attempts = 0
         confidence_scores: List[float] = []
 
-        automation_depths: List[int] = []
+        capability_counts = {
+            AnswerCapability.FULL.value: 0,
+            AnswerCapability.PARTIAL.value: 0,
+            AnswerCapability.INSUFFICIENT.value: 0,
+        }
 
-        for query, expected_task in TRAFFIC_SWEEP:
+        for query, expected_task in TRAFFIC:
             total_attempts += 1
+            result = self.engine.run(query)
 
-            try:
-                result = probe.run_pipeline(query)
-            except Exception:
-                continue
+            agent = result["agent_decisions"]
+            kpis = result["kpis"]
 
-            behavior = result.get("behavior", {})
-            quality_status = behavior.get("quality_status")
-            output_preview = result.get("output_preview")
-            confidence = behavior.get("confidence_score")
-
-            # ---- KPI 3 ----
-            if quality_status in quality_counts:
-                quality_counts[quality_status] += 1
-
-            # ---- KPI 6 ----
-            if behavior.get("task_type") == expected_task.value:
+            # ---- Routing Accuracy ----
+            if agent.get("task") == expected_task.value:
                 routing_correct += 1
 
-            # ---- KPI 7 ----
-            if (
-                quality_status != "quality_empty"
-                and isinstance(output_preview, str)
-                and output_preview.strip()
-            ):
+            # ---- Task Completion ----
+            if kpis.get("llm_ran"):
                 successful_attempts += 1
 
-            # ---- KPI 8 ----
-            if isinstance(confidence, (int, float)):
-                confidence_scores.append(float(confidence))
+            # ---- Confidence ----
+            if isinstance(kpis.get("confidence_score"), (int, float)):
+                confidence_scores.append(float(kpis["confidence_score"]))
 
-            # ---- KPI 10: Automation Depth ----
-            snapshot = result.get("final_metrics_snapshot", {})
-            distributions = snapshot.get("distributions", {})
+            # ---- Retrieval Quality ----
+            qs = kpis.get("quality_status")
+            if qs in quality_counts:
+                quality_counts[qs] += 1
 
-            stages_executed = sum(
-                1
-                for k in distributions.keys()
-                if k.startswith("latency::")
-                and k != "latency::REQUEST_TOTAL"
-            )
+            # ---- Capability ----
+            cap = agent.get("answer_capability")
+            if cap in capability_counts:
+                capability_counts[cap] += 1
 
-            automation_depths.append(stages_executed)
-
-        total_runs = len(TRAFFIC_SWEEP) or 1
+        runs = len(TRAFFIC)
 
         quality_kpi = QualityKPI(
-            quality_ok_pct=round((quality_counts["quality_ok"] / total_runs) * 100.0, 2),
-            quality_weak_pct=round((quality_counts["quality_weak"] / total_runs) * 100.0, 2),
-            quality_empty_pct=round((quality_counts["quality_empty"] / total_runs) * 100.0, 2),
+            quality_ok_pct=round((quality_counts["QUALITY_OK"] / runs) * 100, 2),
+            quality_weak_pct=round((quality_counts["QUALITY_WEAK"] / runs) * 100, 2),
+            quality_empty_pct=round((quality_counts["QUALITY_EMPTY"] / runs) * 100, 2),
         )
 
         routing_kpi = TaskRoutingKPI(
-            accuracy_pct=round((routing_correct / total_runs) * 100.0, 2),
-            total_samples=total_runs,
+            accuracy_pct=round((routing_correct / runs) * 100, 2),
+            total_samples=runs,
             correct_samples=routing_correct,
         )
 
         completion_kpi = TaskCompletionKPI(
-            success_rate_pct=round((successful_attempts / total_attempts) * 100.0, 2)
-            if total_attempts else 0.0,
+            success_rate_pct=round((successful_attempts / total_attempts) * 100, 2),
             total_attempts=total_attempts,
             successful_attempts=successful_attempts,
         )
@@ -268,83 +238,54 @@ class KPISuite:
         confidence_kpi = ConfidenceKPI(
             avg_score=round(sum(confidence_scores) / len(confidence_scores), 4)
             if confidence_scores else 0.0,
-            min_score=round(min(confidence_scores), 4) if confidence_scores else 0.0,
-            max_score=round(max(confidence_scores), 4) if confidence_scores else 0.0,
+            min_score=min(confidence_scores) if confidence_scores else 0.0,
+            max_score=max(confidence_scores) if confidence_scores else 0.0,
             p95_score=self._percentile(confidence_scores, 95),
         )
 
-        # =====================================================
-        # KPI 10 — Automation Depth
-        # =====================================================
-
-        automation_kpi = AutomationDepthKPI(
-            avg_stages=round(
-                sum(automation_depths) / len(automation_depths), 2
-            ) if automation_depths else 0.0,
-            max_stages=max(automation_depths) if automation_depths else 0,
-            min_stages=min(automation_depths) if automation_depths else 0,
+        capability_kpi = CapabilityKPI(
+            full_pct=round((capability_counts["full"] / runs) * 100, 2),
+            partial_pct=round((capability_counts["partial"] / runs) * 100, 2),
+            insufficient_pct=round((capability_counts["insufficient"] / runs) * 100, 2),
         )
 
         # =====================================================
-        # KPI 1 — Latency
+        # Latency KPI
         # =====================================================
 
-        latency_values = registry._distributions.get(
-            "latency::REQUEST_TOTAL"
-        ).values
+        latency_vals = (
+            self.registry._distributions
+            .get("latency::REQUEST_TOTAL", {})
+            .values
+        )
 
         latency_kpi = LatencyKPI(
-            p50_ms=self._percentile(latency_values, 50),
-            p95_ms=self._percentile(latency_values, 95),
+            p50_ms=self._percentile(latency_vals, 50),
+            p95_ms=self._percentile(latency_vals, 95),
         )
 
         # =====================================================
-        # KPI 4 — Context Noise Reduction
+        # Context Efficiency
         # =====================================================
 
-        input_chunks = sum(
-            registry._distributions.get("context_input_chunks").values
+        in_chunks = sum(
+            self.registry._distributions.get("context_input_chunks", {}).values
         )
-        final_chunks = sum(
-            registry._distributions.get("context_final_chunks").values
+        out_chunks = sum(
+            self.registry._distributions.get("context_final_chunks", {}).values
         )
 
-        reduction = 1.0 - (final_chunks / input_chunks) if input_chunks > 0 else 0.0
-
+        reduction = 1.0 - (out_chunks / in_chunks) if in_chunks else 0.0
         context_kpi = ContextKPI(noise_reduction_ratio=round(reduction, 4))
 
         # =====================================================
-        # KPI 5 — Regression Stability
+        # Regression Stability
         # =====================================================
 
-        regression_passed = RegressionRunner().run()
+        regression_ok = RegressionRunner().run()
         regression_kpi = RegressionKPI(
-            stability_rate=1.0 if regression_passed else 0.0
+            stability_rate=1.0 if regression_ok else 0.0
         )
-
-        # =====================================================
-        # KPI 9 — Web Augmentation Precision
-        # =====================================================
-
-        cat = registry._categoricals.get("web_trigger_reason")
-        total_web = sum(cat.values.values()) if cat else 0
-
-        def pct(label: str) -> float:
-            if not cat or total_web == 0:
-                return 0.0
-            return round((cat.values.get(label, 0) / total_web) * 100.0, 2)
-
-        web_kpi = WebAugmentationKPI(
-            quality_empty_pct=pct("quality_empty"),
-            quality_weak_pct=pct("quality_weak"),
-            temporal_signal_pct=pct("temporal_signal"),
-            task_fallback_pct=pct("task_fallback"),
-            total_triggers=total_web,
-        )
-
-        # =====================================================
-        # Final Report
-        # =====================================================
 
         report = KPIReport(
             latency=latency_kpi,
@@ -355,12 +296,10 @@ class KPISuite:
             task_routing=routing_kpi,
             task_completion=completion_kpi,
             confidence=confidence_kpi,
-            web_augmentation=web_kpi,
-            automation_depth=automation_kpi,
+            capability=capability_kpi,
         )
 
-        self._print_dashboard(report)
-        self._print_json(report)
+        self._print(report)
         return report
 
     # --------------------------------------------------------
@@ -368,65 +307,8 @@ class KPISuite:
     # --------------------------------------------------------
 
     @staticmethod
-    def _print_dashboard(report: KPIReport) -> None:
-        print(f"\n{CYAN}=== RAGent Executive KPI Dashboard ==={RESET}\n")
-
-        print(f"{GREEN}Latency (ms){RESET}")
-        print(f"  P50: {report.latency.p50_ms}")
-        print(f"  P95: {report.latency.p95_ms}\n")
-
-        print(f"{GREEN}Cache Performance{RESET}")
-        print(f"  Cold: {report.cache.cold_ms} ms")
-        print(f"  Warm: {report.cache.warm_ms} ms")
-        print(f"  Speedup: {report.cache.speedup}×\n")
-
-        print(f"{GREEN}Retrieval Quality Distribution{RESET}")
-        print(f"  QUALITY_OK: {report.retrieval_quality.quality_ok_pct}%")
-        print(f"  QUALITY_WEAK: {report.retrieval_quality.quality_weak_pct}%")
-        print(f"  QUALITY_EMPTY: {report.retrieval_quality.quality_empty_pct}%\n")
-
-        print(f"{GREEN}Context Efficiency{RESET}")
-        print(f"  Noise Reduction: {report.context_efficiency.noise_reduction_ratio * 100:.2f}%\n")
-
-        print(f"{GREEN}Regression Stability{RESET}")
-        print(f"  Stability Rate: {report.regression.stability_rate * 100}%\n")
-
-        print(f"{CYAN}🚦 Task Routing Accuracy{RESET}")
-        print(
-            f"  Accuracy: {report.task_routing.accuracy_pct}% "
-            f"({report.task_routing.correct_samples}/{report.task_routing.total_samples})\n"
-        )
-
-        print(f"{GREEN}✅ Task Completion Success{RESET}")
-        print(
-            f"  Success Rate: {report.task_completion.success_rate_pct}% "
-            f"({report.task_completion.successful_attempts}/{report.task_completion.total_attempts})\n"
-        )
-
-        print(f"{CYAN}🧠 Confidence Distribution{RESET}")
-        print(f"  Avg: {report.confidence.avg_score}")
-        print(f"  Min: {report.confidence.min_score}")
-        print(f"  Max: {report.confidence.max_score}")
-        print(f"  P95: {report.confidence.p95_score}\n")
-
-        print(f"{CYAN}🌐 Web Augmentation Precision{RESET}")
-        print(f"  Total Web Searches: {report.web_augmentation.total_triggers}")
-        if report.web_augmentation.total_triggers == 0:
-            print("  No web augmentation occurred.\n")
-        else:
-            print(f"  QUALITY_EMPTY:   {report.web_augmentation.quality_empty_pct}%")
-            print(f"  QUALITY_WEAK:    {report.web_augmentation.quality_weak_pct}%")
-            print(f"  TEMPORAL_SIGNAL: {report.web_augmentation.temporal_signal_pct}%")
-            print(f"  TASK_FALLBACK:   {report.web_augmentation.task_fallback_pct}%\n")
-
-        print(f"{CYAN}⚙️ Automation Depth{RESET}")
-        print(f"  Avg Stages: {report.automation_depth.avg_stages}")
-        print(f"  Max Stages: {report.automation_depth.max_stages}")
-        print(f"  Min Stages: {report.automation_depth.min_stages}\n")
-
-    @staticmethod
-    def _print_json(report: KPIReport) -> None:
-        print(f"{CYAN}=== KPI JSON SUMMARY ==={RESET}")
+    def _print(report: KPIReport) -> None:
+        print(f"\n{CYAN}=== RAGent KPI Dashboard ==={RESET}\n")
         print(json.dumps(asdict(report), indent=2))
 
 

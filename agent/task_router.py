@@ -1,18 +1,27 @@
 # ============================================================
 # agent/task_router.py
-# Deterministic Task Router (FULLY OBSERVABLE)
+# Intent-Aware Deterministic Task Router (CACHE-SAFE)
 # ============================================================
 
 from __future__ import annotations
 
-import re
-import string
 from dataclasses import dataclass
 from enum import Enum
-from typing import List
+from typing import Set
 
 from tests.observability import ProfileBlock, MetricsRegistry
 from tests.caching import cacheable
+
+from agent.intent.intent_signals import IntentSignal
+from agent.intent.intent_extractor import IntentSignalExtractor
+
+
+# ============================================================
+# INTENT SCHEMA VERSIONING
+# ============================================================
+
+INTENT_SCHEMA_VERSION = "v2"
+# ⬆️ Bump this whenever intent extraction logic changes
 
 
 # ============================================================
@@ -21,7 +30,7 @@ from tests.caching import cacheable
 
 class TaskType(Enum):
     """
-    Strict task classification enum (priority-ordered externally).
+    Primary execution modes for retrieval and prompting.
     """
     COMPARISON = "comparison"
     LISTICLE = "listicle"
@@ -39,6 +48,7 @@ class RouterDecision:
     Immutable routing decision contract.
     """
     task: TaskType
+    intent_signals: Set[IntentSignal]
     reason: str
     retrieval_strategy: str
     web_search_allowed: bool
@@ -51,184 +61,134 @@ class RouterDecision:
 
 class TaskRouter:
     """
-    Deterministic, stateless task router.
+    Intent-aware, deterministic, cache-safe task router.
 
-    - O(1) regex checks
-    - No LLM
-    - No DB
-    - Fully observable
+    ✔ Cache-safe with schema versioning
+    ✔ Deterministic
+    ✔ Observable
+    ✔ No feasibility or quality reasoning
     """
 
-    # --------------------------------------------------------
-    # Regex triggers
-    # --------------------------------------------------------
-
-    _COMPARISON_PATTERNS: List[re.Pattern] = [
-        re.compile(r"\bvs\b"),
-        re.compile(r"\bversus\b"),
-        re.compile(r"\bcompare\b"),
-        re.compile(r"\bdifference between\b"),
-        re.compile(r"\bbetter than\b"),
-        re.compile(r"\bworse than\b"),
-    ]
-
-    _LISTICLE_PATTERNS: List[re.Pattern] = [
-        re.compile(r"\btop\s*\d+\b"),
-        re.compile(r"\bbest\b"),
-        re.compile(r"\bworst\b"),
-        re.compile(r"\blist\b"),
-        re.compile(r"\branking\b"),
-        re.compile(r"\brecommendations\b"),
-        re.compile(r"\bthings to do\b"),
-        re.compile(r"\btips\b"),
-    ]
-
-    _FACTUAL_PATTERNS: List[re.Pattern] = [
-        re.compile(r"\bwhat is\b"),
-        re.compile(r"\bwho is\b"),
-        re.compile(r"\bwhen did\b"),
-        re.compile(r"\brelease date\b"),
-        re.compile(r"\bdeveloper\b"),
-        re.compile(r"\bpublisher\b"),
-        re.compile(r"\bspecs\b"),
-        re.compile(r"\brequirements\b"),
-    ]
+    def __init__(self) -> None:
+        self._intent_extractor = IntentSignalExtractor()
 
     # --------------------------------------------------------
     # Public API
     # --------------------------------------------------------
 
     @cacheable(ttl_seconds=3600)
-    def route(self, query: str) -> RouterDecision:
+    def route(
+        self,
+        query: str,
+        intent_schema_version: str = INTENT_SCHEMA_VERSION,
+    ) -> RouterDecision:
         """
-        Route a user query into a deterministic task type.
+        Route a user query into a primary TaskType.
 
-        This method is:
-        - Profiled
-        - Cacheable
-        - Fail-safe
+        IMPORTANT:
+        intent_schema_version is intentionally part of the
+        cache key (handled correctly by updated cacheable).
         """
 
         with ProfileBlock("TaskRouting"):
-            try:
-                normalized = self._normalize(query)
+            intent_signals = self._intent_extractor.extract(query)
 
-                # --------------------------------------------
-                # Priority 1: COMPARISON
-                # --------------------------------------------
-                for pattern in self._COMPARISON_PATTERNS:
-                    if pattern.search(normalized):
-                        decision = RouterDecision(
-                            task=TaskType.COMPARISON,
-                            reason=f"Matched comparison trigger: '{pattern.pattern}'",
-                            retrieval_strategy="decomposition",
-                            web_search_allowed=False,
-                            max_results=5,
-                        )
-                        MetricsRegistry.get().record(
-                            "routing_decisions", decision.task.value
-                        )
-                        return decision
+            task = self._select_primary_task(intent_signals)
 
-                # --------------------------------------------
-                # Priority 2: LISTICLE
-                # --------------------------------------------
-                for pattern in self._LISTICLE_PATTERNS:
-                    if pattern.search(normalized):
-                        decision = RouterDecision(
-                            task=TaskType.LISTICLE,
-                            reason=f"Matched listicle trigger: '{pattern.pattern}'",
-                            retrieval_strategy="window_expansion",
-                            web_search_allowed=False,
-                            max_results=10,
-                        )
-                        MetricsRegistry.get().record(
-                            "routing_decisions", decision.task.value
-                        )
-                        return decision
+            decision = RouterDecision(
+                task=task,
+                intent_signals=intent_signals,
+                reason=self._explain(task, intent_signals),
+                retrieval_strategy=self._retrieval_strategy(task),
+                web_search_allowed=self._web_allowed(task),
+                max_results=self._max_results(task),
+            )
 
-                # --------------------------------------------
-                # Priority 3: FACTUAL
-                # --------------------------------------------
-                for pattern in self._FACTUAL_PATTERNS:
-                    if pattern.search(normalized):
-                        decision = RouterDecision(
-                            task=TaskType.FACTUAL,
-                            reason=f"Matched factual trigger: '{pattern.pattern}'",
-                            retrieval_strategy="standard",
-                            web_search_allowed=False,
-                            max_results=5,
-                        )
-                        MetricsRegistry.get().record(
-                            "routing_decisions", decision.task.value
-                        )
-                        return decision
+            MetricsRegistry.get().record(
+                "routing_decisions",
+                decision.task.value,
+            )
 
-                # --------------------------------------------
-                # Priority 4: OPEN (fallback)
-                # --------------------------------------------
-                decision = RouterDecision(
-                    task=TaskType.OPEN,
-                    reason="No deterministic rule matched; fallback to OPEN",
-                    retrieval_strategy="hybrid",
-                    web_search_allowed=True,
-                    max_results=5,
-                )
-                MetricsRegistry.get().record(
-                    "routing_decisions", decision.task.value
-                )
-                return decision
-
-            except Exception as exc:
-                # --------------------------------------------
-                # Absolute fail-safe
-                # --------------------------------------------
-                decision = RouterDecision(
-                    task=TaskType.OPEN,
-                    reason=f"Router exception fallback: {exc}",
-                    retrieval_strategy="hybrid",
-                    web_search_allowed=True,
-                    max_results=5,
-                )
-                MetricsRegistry.get().record(
-                    "routing_decisions", decision.task.value
-                )
-                return decision
+            return decision
 
     # --------------------------------------------------------
-    # Normalization
+    # Routing Policy
     # --------------------------------------------------------
 
     @staticmethod
-    def _normalize(query: str) -> str:
+    def _select_primary_task(
+        intent_signals: Set[IntentSignal],
+    ) -> TaskType:
         """
-        Lowercase and strip punctuation.
+        Select the most expressive task given intent signals.
+        Priority order matters.
         """
-        if not isinstance(query, str):
-            return ""
 
-        text = query.lower().strip()
-        text = text.translate(str.maketrans("", "", string.punctuation))
-        return text
+        if IntentSignal.COMPARISON in intent_signals:
+            return TaskType.COMPARISON
+
+        if IntentSignal.LISTICLE in intent_signals:
+            return TaskType.LISTICLE
+
+        if IntentSignal.FACTUAL in intent_signals:
+            return TaskType.FACTUAL
+
+        return TaskType.OPEN
+
+    # --------------------------------------------------------
+    # Retrieval Policy
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _retrieval_strategy(task: TaskType) -> str:
+        if task == TaskType.COMPARISON:
+            return "decomposition"
+        if task == TaskType.LISTICLE:
+            return "window_expansion"
+        if task == TaskType.FACTUAL:
+            return "standard"
+        return "hybrid"
+
+    @staticmethod
+    def _web_allowed(task: TaskType) -> bool:
+        return task == TaskType.OPEN
+
+    @staticmethod
+    def _max_results(task: TaskType) -> int:
+        return 10 if task == TaskType.LISTICLE else 5
+
+    # --------------------------------------------------------
+    # Explainability
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _explain(
+        task: TaskType,
+        intent_signals: Set[IntentSignal],
+    ) -> str:
+        if not intent_signals:
+            return "No intent signals detected; fallback to OPEN"
+
+        signals = ", ".join(sorted(s.value for s in intent_signals))
+        return (
+            f"Selected {task.value} as primary task "
+            f"based on intent signals: {signals}"
+        )
 
 
 # ============================================================
-# TEST HARNESS
+# LOCAL TEST HARNESS
 # ============================================================
 
 if __name__ == "__main__":
     router = TaskRouter()
 
-    test_queries = [
-        "Compare the top 10 RPG games of all time",
+    queries = [
+        "what is the comparison in the storyline between Far Cry 5 and Assassins Creed Valhalla?",
         "Top 5 open world games to play in 2024",
         "What is the release date of Far Cry 5?",
         "Explain why Far Cry 5 is controversial",
     ]
 
-    print("\n=== Task Router Test Output ===\n")
-    for q in test_queries:
-        decision = router.route(q)
-        print(f"Query: {q}")
-        print(decision)
-        print("-" * 60)
+    for q in queries:
+        print(router.route(q))

@@ -1,7 +1,7 @@
 # ============================================================
 # tests/regression_suite.py
 # Permanent Regression Memory for RAG Behavioral Guarantees
-# (BUDGET-AWARE STRUCTURE CHECKS)
+# (CAPABILITY-AWARE)
 # ============================================================
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import List
 
 from agent.task_router import TaskType
+from agent.capability.capability_types import AnswerCapability
 from tests.evaluation_runner import (
     EvaluationRunner,
     TestCase,
@@ -19,7 +20,7 @@ from tests.evaluation_runner import (
 )
 
 # ------------------------------------------------------------
-# ANSI colors
+# ANSI colors (CLI feedback)
 # ------------------------------------------------------------
 
 GREEN = "\033[92m"
@@ -37,10 +38,8 @@ class RegressionCase:
     """
     Represents a historical bug that MUST never reappear.
 
-    This is not a unit test.
-    This is a behavioral guarantee enforced forever.
+    These are behavioral guarantees, not unit tests.
     """
-
     bug_id: str
     description: str
     test_case: TestCase
@@ -51,61 +50,70 @@ class RegressionCase:
 # ============================================================
 
 REGRESSION_VAULT: List[RegressionCase] = [
+
+    # --------------------------------------------------------
+    # BUG-001: Mixed-intent comparison collapsed to factual
+    # --------------------------------------------------------
     RegressionCase(
         bug_id="BUG-001",
         description=(
-            "Semantic intersection trap: comparison queries previously mixed "
-            "evidence across entities, causing context soup and wrong task routing."
+            "Mixed-intent comparison queries were incorrectly routed "
+            "as FACTUAL, producing misleading answers instead of honest "
+            "partial comparisons."
         ),
         test_case=TestCase(
-            query="Compare Assassin's Creed Valhalla vs Far Cry 5",
+            query="What is the comparison and differences between Far Cry 5 and Assassin’s Creed Valhalla",
             expected_task=TaskType.COMPARISON,
-            expected_web_trigger=False,
+            expected_capability=AnswerCapability.PARTIAL,
             expected_source_titles=[
-                "Assassin's Creed Valhalla",
                 "Far Cry 5",
+                "Assassin’s Creed Valhalla",
             ],
-            # Accept verbose OR concise comparison structure
             required_structure_pattern=re.compile(
-                r"(\*\*Overview\*\*.*\*\*Gameplay\*\*)|"
-                r"(Gameplay, Story, World Design, Tone, Systems)",
-                re.S,
+                r"(Gameplay|Story|World Design|Tone|Systems)",
+                re.I,
             ),
         ),
     ),
+
+    # --------------------------------------------------------
+    # BUG-002: Listicle ordering corruption
+    # --------------------------------------------------------
     RegressionCase(
         bug_id="BUG-002",
         description=(
-            "Listicle ordering regression: editorial chunks lost ordering and "
-            "web/news articles polluted the ordered list."
+            "Listicle queries lost ordering guarantees or polluted "
+            "results with unrelated sources."
         ),
         test_case=TestCase(
-            query="Top 10 things to do in Far Cry 5",
+            query="Top 5 things to do in Far Cry 5",
             expected_task=TaskType.LISTICLE,
-            expected_web_trigger=False,
+            expected_capability=AnswerCapability.FULL,
             expected_source_titles=["Far Cry 5"],
-            # Accept numbered list OR listicle phrasing
             required_structure_pattern=re.compile(
-                r"(1\.\s+)|"
-                r"(ordered list)|(Top\s+\d+)",
-                re.I | re.S,
+                r"(1\.\s+)|(Top\s+\d+)",
+                re.I,
             ),
         ),
     ),
+
+    # --------------------------------------------------------
+    # BUG-003: Temporal factual answers hallucinated freshness
+    # --------------------------------------------------------
     RegressionCase(
         bug_id="BUG-003",
         description=(
-            "Temporal knowledge failure: factual queries with time sensitivity "
-            "did not trigger web augmentation when local data was stale."
+            "Temporal or update-seeking queries previously hallucinated "
+            "freshness instead of degrading honestly."
         ),
         test_case=TestCase(
-            query="Latest patch notes for Assassin's Creed Valhalla",
+            query="Latest update for Assassin’s Creed Valhalla",
             expected_task=TaskType.OPEN,
-            expected_web_trigger=True,
-            expected_source_titles=["Assassin's Creed Valhalla"],
-            # Accept any factual answer body
+            expected_capability=AnswerCapability.PARTIAL,
+            expected_source_titles=["Assassin’s Creed Valhalla"],
             required_structure_pattern=re.compile(
-                r".{40,}", re.S
+                r"(latest|update|patch|version)",
+                re.I,
             ),
         ),
     ),
@@ -180,17 +188,16 @@ class RegressionRunner:
 
         if not actual.routing_accuracy:
             diffs.append(
-                f"Expected task {expected.expected_task.name}, routing failed"
+                f"Routing failed (expected {expected.expected_task.name})"
             )
 
-        if not actual.web_trigger_accuracy:
+        if not actual.capability_accuracy:
             diffs.append(
-                "Web trigger behavior incorrect "
-                f"(expected={expected.expected_web_trigger})"
+                f"Capability mismatch (expected {expected.expected_capability.value})"
             )
 
         if not actual.structure_compliance:
-            diffs.append("Prompt structure constraint violated")
+            diffs.append("Answer structure constraint violated")
 
         return (len(diffs) == 0, diffs)
 

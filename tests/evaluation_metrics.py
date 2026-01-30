@@ -1,6 +1,6 @@
 # ============================================================
 # tests/evaluation_metrics.py
-# Deterministic Scoring Engine for RAG Evaluation (FINAL)
+# Deterministic Scoring Engine for RAG Evaluation (CAPABILITY-AWARE)
 # ============================================================
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import List, Dict, Any
+
 
 # ============================================================
 # Metric Result Contracts
@@ -41,14 +42,21 @@ class StabilityRateResult:
     total_runs: int
 
 
+@dataclass(frozen=True)
+class CapabilityDistributionResult:
+    full_rate: float
+    partial_rate: float
+    insufficient_rate: float
+    total_runs: int
+
+
 # ============================================================
-# Internal Utilities (Deterministic Normalization)
+# Internal Utilities
 # ============================================================
 
 def _normalize_title(title: str) -> str:
     """
     Deterministic normalization for source titles.
-    No fuzzy matching, no NLP.
     """
     return title.lower().strip()
 
@@ -62,9 +70,7 @@ def calculate_precision_at_k(
     expected_source_titles: List[str],
     k: int,
 ) -> PrecisionAtKResult:
-    """
-    Precision@K = (# of relevant chunks in top K) / K
-    """
+
     if k <= 0:
         return PrecisionAtKResult(0.0, 0, k)
 
@@ -72,15 +78,12 @@ def calculate_precision_at_k(
         return PrecisionAtKResult(0.0, 0, k)
 
     top_k = retrieved_chunks[:k]
-
-    expected_set = {
-        _normalize_title(t) for t in expected_source_titles
-    }
+    expected = {_normalize_title(t) for t in expected_source_titles}
 
     hits = sum(
         1
         for c in top_k
-        if _normalize_title(c.get("source_title", "")) in expected_set
+        if _normalize_title(c.get("source_title", "")) in expected
     )
 
     precision = round(hits / float(k), 4)
@@ -95,14 +98,8 @@ def calculate_grounding_fidelity(
     answer_text: str,
     context_chunks: List[Dict[str, Any]],
 ) -> GroundingFidelityResult:
-    """
-    Grounding Fidelity = grounded_sentences / total_sentences
 
-    A sentence is grounded ONLY if:
-    - It contains a (Source: 'Title') citation
-    - The cited title exists in the provided context
-    """
-    if not answer_text or not isinstance(answer_text, str):
+    if not answer_text:
         return GroundingFidelityResult(0.0, 0, 0)
 
     sentences = [
@@ -121,14 +118,13 @@ def calculate_grounding_fidelity(
     }
 
     citation_pattern = re.compile(r"\(Source:\s*'([^']+)'\)")
-
     grounded = 0
 
     for sentence in sentences:
         match = citation_pattern.search(sentence)
         if match:
-            cited_title = _normalize_title(match.group(1))
-            if cited_title in context_titles:
+            cited = _normalize_title(match.group(1))
+            if cited in context_titles:
                 grounded += 1
 
     fidelity = round(grounded / float(len(sentences)), 4)
@@ -148,16 +144,17 @@ def calculate_compression_ratio(
     initial_retrieved_count: int,
     final_assembled_count: int,
 ) -> CompressionRatioResult:
-    """
-    Compression Ratio = final / initial
-    """
+
     if initial_retrieved_count <= 0:
         return CompressionRatioResult(
-            0.0, initial_retrieved_count, final_assembled_count
+            0.0,
+            initial_retrieved_count,
+            final_assembled_count,
         )
 
     ratio = round(
-        final_assembled_count / float(initial_retrieved_count), 4
+        final_assembled_count / float(initial_retrieved_count),
+        4,
     )
 
     return CompressionRatioResult(
@@ -171,18 +168,23 @@ def calculate_compression_ratio(
 # Metric 4: Latency Breakdown
 # ============================================================
 
-def analyze_latency_profile(metrics_dump: Dict[str, Any]) -> Dict[str, float]:
-    """
-    Extract and normalize latency:: metrics from MetricsRegistry output.
-    """
+def analyze_latency_profile(
+    metrics_dump: Dict[str, Any],
+) -> Dict[str, float]:
+
     if not metrics_dump or "distributions" not in metrics_dump:
         return {}
 
     latency_metrics: Dict[str, float] = {}
 
     for name, payload in metrics_dump["distributions"].items():
-        if name.startswith("latency::") and isinstance(payload.get("avg"), (int, float)):
-            latency_metrics[name] = round(float(payload["avg"]), 4)
+        if (
+            name.startswith("latency::")
+            and isinstance(payload.get("avg"), (int, float))
+        ):
+            latency_metrics[name] = round(
+                float(payload["avg"]), 4
+            )
 
     return latency_metrics
 
@@ -195,9 +197,7 @@ def calculate_stability_rate(
     total_runs: int,
     passed_runs: int,
 ) -> StabilityRateResult:
-    """
-    Stability Rate = passed_runs / total_runs
-    """
+
     if total_runs <= 0:
         return StabilityRateResult(0.0, passed_runs, total_runs)
 
@@ -210,55 +210,42 @@ def calculate_stability_rate(
     )
 
 
-
 # ============================================================
-# Mock Usage Examples
+# Metric 6: Capability Distribution (NEW, IMPORTANT)
 # ============================================================
 
-if __name__ == "__main__":
-    # ------------------ Precision@K ------------------
-    retrieved = [
-        {"source_title": "Doc A"},
-        {"source_title": "Doc B"},
-        {"source_title": "Doc C"},
-    ]
+def calculate_capability_distribution(
+    execution_results: List[Dict[str, Any]],
+) -> CapabilityDistributionResult:
+    """
+    Measures how often the system answers FULL / PARTIAL / INSUFFICIENT.
 
-    precision = calculate_precision_at_k(
-        retrieved_chunks=retrieved,
-        expected_source_titles=["Doc A", "Doc C"],
-        k=2,
+    This is the core honesty KPI.
+    """
+
+    total = len(execution_results)
+    if total == 0:
+        return CapabilityDistributionResult(0.0, 0.0, 0.0, 0)
+
+    full = 0
+    partial = 0
+    insufficient = 0
+
+    for r in execution_results:
+        cap = (
+            r.get("kpis", {}) or {}
+        ).get("answer_capability")
+
+        if cap == "full":
+            full += 1
+        elif cap == "partial":
+            partial += 1
+        elif cap == "insufficient":
+            insufficient += 1
+
+    return CapabilityDistributionResult(
+        full_rate=round(full / total, 4),
+        partial_rate=round(partial / total, 4),
+        insufficient_rate=round(insufficient / total, 4),
+        total_runs=total,
     )
-    print("Precision@K:", precision)
-
-    # ---------------- Grounding Fidelity --------------
-    answer = (
-        "Far Cry 5 was released in 2018 (Source: 'Doc A'). "
-        "It was developed by Ubisoft (Source: 'Fake Book')."
-    )
-
-    context = [
-        {"source_title": "Doc A"},
-        {"source_title": "Doc B"},
-    ]
-
-    grounding = calculate_grounding_fidelity(answer, context)
-    print("Grounding Fidelity:", grounding)
-
-    # ---------------- Compression Ratio ---------------
-    compression = calculate_compression_ratio(20, 8)
-    print("Compression Ratio:", compression)
-
-    # ---------------- Latency Profile -----------------
-    mock_metrics = {
-        "distributions": {
-            "latency::REQUEST_TOTAL": {"avg": 120.56789},
-            "latency::Retrieval": {"avg": 45.12345},
-        }
-    }
-
-    latency = analyze_latency_profile(mock_metrics)
-    print("Latency Profile:", latency)
-
-    # ---------------- Stability Rate ------------------
-    stability = calculate_stability_rate(total_runs=50, passed_runs=47)
-    print("Stability Rate:", stability)

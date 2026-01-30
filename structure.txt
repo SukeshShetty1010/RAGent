@@ -1,63 +1,86 @@
-agent
-├── tools
-│   └── web_search.py
-├── context_assembler.py
-├── prompt_manager.py
-└── task_router.py
-chunking
-├── chunk_contract.md
-└── editorial_chunker.py
-data
-├── gamespot_data.py
-├── igdb_data.py
-└── rawg_data.py
-embed
-└── prepare_editorial_payload...
-ingest
-├── gamespot_editorial_norm...
-├── igdb_metadata_ingest.py
-├── ingest_gamespot.py
-├── platformspec_ingest.py
-├── rawg_identity_ingest.py
-└── rawg_identity_validator.py
-llm
-├── modal_embed.py
-├── modal_llm.py
-└── ragent_client.py
-pre_process
-├── cleaner.py
-├── loader.py
-└── merge.py
-RAG_env
-retriever
-├── orchestrator.py
-├── quality_gate.py
-├── rag_retriever.py
-└── strategy_selector.py
-tests
-├── caching.py
-├── evaluation_runner.py
-├── observability.py
-├── regression_suite.py
-└── test_observability_cac...
-upsert
-├── upsert_all.py
-├── upsert_canonical_game.py
-├── upsert_editorial_chunks.py
-├── upsert_gamespot_chunks.py
-├── upsert_igdb_metadata.py
-└── upsert_platform_specs.py
-utils
-vector
-├── schemas
-│   ├── editorial_chunk_schema.json
-│   ├── game_canonical_contract.md
-│   ├── Game_Schema.json
-│   ├── GameSpot_Schema.JSON
-│   ├── IGDB_Schema.json
-│   ├── PlatformSpec_Schema.json
-│   ├── rawg_game_schema.json
-│   └── weaviate_class_responsibilities.md
-└── create_schema.py
-.env
-docker-compose.yml
+RAG_ENT/
+├── agent/
+│   ├── tools/
+│   │   ├── web_search.py
+│   │   ├── context_assembler.py
+│   │   ├── prompt_manager.py
+│   │   └── task_router.py
+│   ├── chunking/
+│   │   ├── chunk_contract.md
+│   │   └── editorial_chunker.py
+│   └── data/
+│       ├── gamespot_data.py
+│       ├── igdb_data.py
+│       └── rawg_data.py
+├── embed/
+│   └── prepare_editorial_payloads.py
+├── engine/
+│   └── execution_engine.py
+├── ingest/
+│   ├── gamespot_editorial_normalize.py
+│   ├── igdb_metadata_ingest.py
+│   ├── ingest_gamespot.py
+│   ├── platformspec_ingest.py
+│   ├── rawg_identity_ingest.py
+│   └── rawg_identity_validator.py
+├── llm/
+│   ├── modal_embed.py
+│   ├── modal_llm.py
+│   └── ragent_client.py
+├── pre_process/
+│   ├── cleaner.py
+│   ├── loader.py
+│   └── merge.py
+├── retriever/
+│   ├── orchestrator.py
+│   ├── quality_gate.py
+│   ├── rag_retriever.py
+│   └── strategy_selector.py
+├── tests/
+│   ├── caching.py
+│   ├── e2e_run.py
+│   ├── evaluation_metrics.py
+│   ├── evaluation_runner.py
+│   ├── KPI_run.py
+│   ├── observability.py
+│   ├── regression_suite.py
+│   └── verify_engine.py
+├── ui/
+│   ├── panels/
+│   │   ├── answer_panel.py
+│   │   ├── debug_panel.py
+│   │   ├── evidence_panel.py
+│   │   ├── kpi_panel.py
+│   │   ├── query_panel.py
+│   │   └── trace_panel.py
+│   ├── utils/
+│   │   ├── formatting.py
+│   │   └── guards.py
+│   ├── app.py
+│   ├── config.py
+│   ├── state.py
+│   └── UI_Map.md
+├── upsert/
+│   ├── upsert_all.py
+│   ├── upsert_canonical_game.py
+│   ├── upsert_editorial_chunks.py
+│   ├── upsert_gamespot_chunks.py
+│   ├── upsert_igdb_metadata.py
+│   └── upsert_platform_specs.py
+├── utils/
+├── vector/
+│   ├── schemas/
+│   │   ├── editorial_chunk_schema.json
+│   │   ├── game_canonical_contract.md
+│   │   ├── Game_Schema.json
+│   │   ├── GameSpot_Schema.JSON
+│   │   ├── IGDB_Schema.json
+│   │   ├── PlatformSpec_Schema.json
+│   │   ├── rawg_game_schema.json
+│   │   └── weaviate_class_responsibilities.md
+│   └── create_schema.py
+├── .env
+├── .gitignore
+├── docker-compose.yml
+├── RAG_env/
+└── reference_Scripts/

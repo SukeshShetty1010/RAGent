@@ -1,8 +1,13 @@
 """
-Deterministic Semantic Cache (FIXED)
+tests/caching.py
 
-Key fix:
-- Instance methods now IGNORE `self` when generating cache keys
+Deterministic Semantic Cache (FINAL)
+
+Key guarantees:
+- Instance methods IGNORE `self` when generating cache keys
+- Explicit args / kwargs ALWAYS participate in cache keys
+- Stable hashing across restarts
+- Disk-backed persistence via diskcache
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ from tests.observability import MetricsRegistry
 
 def _normalize(obj: Any) -> Any:
     """
-    Normalize objects into deterministic JSON-compatible forms.
+    Normalize objects into deterministic, JSON-serializable forms.
     """
     if isinstance(obj, dict):
         return {k: _normalize(obj[k]) for k in sorted(obj)}
@@ -36,11 +41,14 @@ def _normalize(obj: Any) -> Any:
     if isinstance(obj, (str, int, float, bool)) or obj is None:
         return obj
 
-    # Fallback: string representation for non-serializable objects
+    # Fallback for non-serializable objects
     return str(obj)
 
 
 def _stable_hash(*args: Any, **kwargs: Any) -> str:
+    """
+    Generate a stable SHA256 hash from normalized args + kwargs.
+    """
     payload = {
         "args": _normalize(args),
         "kwargs": _normalize(kwargs),
@@ -54,11 +62,15 @@ def _stable_hash(*args: Any, **kwargs: Any) -> str:
 # ============================================================
 
 class SemanticCache:
+    """
+    Thread-safe disk-backed semantic cache.
+    """
+
     def __init__(self, path: str = ".semantic_cache") -> None:
         if Cache is None:
             raise RuntimeError(
                 "diskcache is required for SemanticCache. "
-                "pip install diskcache"
+                "Install with: pip install diskcache"
             )
 
         self._cache = Cache(path)
@@ -74,10 +86,10 @@ class SemanticCache:
 
 
 # ============================================================
-# Decorator (FIXED)
+# Cache Singleton
 # ============================================================
 
-_DEFAULT_CACHE = None
+_DEFAULT_CACHE: Optional[SemanticCache] = None
 _CACHE_LOCK = threading.Lock()
 
 
@@ -90,12 +102,18 @@ def _get_cache() -> SemanticCache:
     return _DEFAULT_CACHE
 
 
+# ============================================================
+# Decorator (FIXED)
+# ============================================================
+
 def cacheable(ttl_seconds: int) -> Callable:
     """
-    Decorator for deterministic caching of pure functions or instance methods.
+    Decorator for deterministic caching of pure functions
+    or instance methods.
 
-    IMPORTANT FIX:
-    - Automatically ignores `self` when generating cache keys
+    FIXES:
+    - `self` is excluded from cache keys
+    - Explicit args/kwargs ALWAYS affect the cache key
     """
 
     def decorator(fn: Callable) -> Callable:
@@ -104,14 +122,14 @@ def cacheable(ttl_seconds: int) -> Callable:
             cache = _get_cache()
 
             # --------------------------------------------
-            # FIX: Drop `self` for instance methods
+            # FIX: Remove `self` from cache key if present
             # --------------------------------------------
             if args and hasattr(args[0], fn.__name__):
-                key_args = args[1:]
                 owner = args[0].__class__.__name__
+                key_args = args[1:]
             else:
-                key_args = args
                 owner = "function"
+                key_args = args
 
             key = _stable_hash(
                 f"{owner}.{fn.__qualname__}",

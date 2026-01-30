@@ -1,25 +1,23 @@
 # ============================================================
 # tests/evaluation_runner.py
-# Deterministic Behavioral + Metric Evaluation Harness (PATCHED)
+# Capability-Aware End-to-End Evaluation Runner (FINAL)
 # ============================================================
 
 from __future__ import annotations
 
-import logging
-import re
-import time
 import json
+import logging
+import time
 from dataclasses import dataclass
-from typing import List, Pattern, Any
+from typing import List, Pattern
 
-from agent.task_router import TaskRouter, TaskType
-from retriever.orchestrator import RetrievalOrchestrator
-from agent.prompt_manager import PromptManager
+from engine.execution_engine import RageEngine
+from agent.task_router import TaskType
+from agent.capability.capability_types import AnswerCapability
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from tests.observability import ProfileBlock
 from tests.evaluation_metrics import (
     calculate_precision_at_k,
-    calculate_compression_ratio,
     analyze_latency_profile,
 )
 
@@ -31,28 +29,35 @@ logger = logging.getLogger("RAG_EVALUATION_RUNNER")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+
 # ============================================================
 # Data Contracts
 # ============================================================
 
 @dataclass(frozen=True)
 class TestCase:
+    """
+    Declarative evaluation contract.
+    """
     query: str
     expected_task: TaskType
-    expected_web_trigger: bool
+    expected_capability: AnswerCapability
     required_structure_pattern: Pattern[str]
     expected_source_titles: List[str]
 
 
-@dataclass
+@dataclass(frozen=True)
 class EvaluationResult:
+    """
+    Atomic evaluation outcome for a single query.
+    """
     query: str
     routing_accuracy: bool
-    web_trigger_accuracy: bool
+    capability_accuracy: bool
     structure_compliance: bool
     latency_ms: float
     precision_at_k: float
-    compression_ratio: float
+    answer_capability: str
 
 
 # ============================================================
@@ -61,165 +66,149 @@ class EvaluationResult:
 
 class EvaluationRunner:
     """
-    Deterministic evaluation runner for RAG behavioral correctness
-    and portfolio-grade metrics.
+    Capability-aware, end-to-end evaluation harness.
 
-    PATCH:
-    - RetrievalOrchestrator is now lifecycle-scoped PER TEST CASE
-    - Prevents WeaviateClosedClientError
+    Evaluates:
+    - Intent → Task routing correctness
+    - Capability honesty (FULL / PARTIAL / INSUFFICIENT)
+    - Prompt structural compliance
+    - Retrieval precision
+    - Latency characteristics
+
+    IMPORTANT:
+    This runner exercises the *exact same execution path*
+    as production.
     """
 
     def __init__(self) -> None:
-        self.router = TaskRouter()
-        self.prompt_manager = PromptManager()
+        self.engine = RageEngine()
 
     # --------------------------------------------------------
 
-    def run_suite(self, test_cases: List[TestCase]) -> List[EvaluationResult]:
+    def run_suite(
+        self,
+        test_cases: List[TestCase],
+    ) -> List[EvaluationResult]:
+
         results: List[EvaluationResult] = []
 
         for tc in test_cases:
-            logger.info("\n" + "-" * 80)
+            logger.info("\n" + "=" * 80)
             logger.info(f"Evaluating query: {tc.query}")
 
-            registry = MetricsRegistry.get()
-            orchestrator = RetrievalOrchestrator()  # 🔑 PER-TEST INSTANCE
+            start = time.perf_counter()
 
-            try:
-                with ProfileBlock("REQUEST_TOTAL"):
-                    start = time.perf_counter()
+            with ProfileBlock("REQUEST_TOTAL"):
+                execution = self.engine.run(tc.query)
 
-                    # ---------------- Routing ----------------
-                    decision = self.router.route(tc.query)
-                    routing_ok = decision.task == tc.expected_task
+            latency_ms = round(
+                (time.perf_counter() - start) * 1000.0,
+                2,
+            )
 
-                    # ---------------- Retrieval ----------------
-                    chunks, merge_state, _quality = orchestrator.run(
-                        query=tc.query,
-                        task=decision.task,
-                        config=self._config_from_decision(decision),
-                    )
+            agent = execution["agent_decisions"]
+            kpis = execution["kpis"]
+            evidence = execution["evidence"]
+            answer = execution["final_answer"]
 
-                    web_triggered = merge_state in {
-                        "LOCAL_PLUS_WEB",
-                        "LOCAL_WEB_ATTEMPTED",
-                    }
-                    web_ok = web_triggered == tc.expected_web_trigger
+            # ---------------- Routing ----------------
+            routing_ok = (
+                agent.get("task")
+                == tc.expected_task.value
+            )
 
-                    # ---------------- Prompt ----------------
-                    prompt = self.prompt_manager.generate_prompt(
-                        query=tc.query,
-                        chunks=chunks,
-                        task=decision.task,
-                    )
+            # ---------------- Capability ----------------
+            actual_capability = agent.get("answer_capability")
+            capability_ok = (
+                actual_capability
+                == tc.expected_capability.value
+            )
 
-                    structure_ok = bool(
-                        tc.required_structure_pattern.search(prompt)
-                    )
+            # ---------------- Structure ----------------
+            structure_ok = bool(
+                tc.required_structure_pattern.search(answer)
+            )
 
-                    latency_ms = round(
-                        (time.perf_counter() - start) * 1000.0, 2
-                    )
+            # ---------------- Precision ----------------
+            precision = calculate_precision_at_k(
+                retrieved_chunks=evidence,
+                expected_source_titles=tc.expected_source_titles,
+                k=min(5, len(evidence)),
+            )
 
-                # =================================================
-                # METRICS
-                # =================================================
-
-                precision = calculate_precision_at_k(
-                    retrieved_chunks=chunks,
-                    expected_source_titles=tc.expected_source_titles,
-                    k=min(5, len(chunks)),
+            results.append(
+                EvaluationResult(
+                    query=tc.query,
+                    routing_accuracy=routing_ok,
+                    capability_accuracy=capability_ok,
+                    structure_compliance=structure_ok,
+                    latency_ms=latency_ms,
+                    precision_at_k=precision.precision,
+                    answer_capability=actual_capability,
                 )
+            )
 
-                raw_retrieved = len(chunks)
+            # ---------------- Logging ----------------
+            logger.info(f"Routing OK: {routing_ok}")
+            logger.info(f"Capability OK: {capability_ok}")
+            logger.info(f"Structure OK: {structure_ok}")
+            logger.info(f"Precision@K: {precision.precision}")
+            logger.info(f"Latency: {latency_ms:.2f} ms")
+            logger.info(f"Answer Capability: {actual_capability}")
+            logger.info(f"LLM Ran: {kpis.get('llm_ran')}")
 
-                compression = calculate_compression_ratio(
-                    initial_retrieved_count=raw_retrieved,
-                    final_assembled_count=len(chunks),
-                )
-
-                results.append(
-                    EvaluationResult(
-                        query=tc.query,
-                        routing_accuracy=routing_ok,
-                        web_trigger_accuracy=web_ok,
-                        structure_compliance=structure_ok,
-                        latency_ms=latency_ms,
-                        precision_at_k=precision.precision,
-                        compression_ratio=compression.ratio,
-                    )
-                )
-
-                logger.info(f"Routing OK: {routing_ok}")
-                logger.info(f"Web Trigger OK: {web_ok}")
-                logger.info(f"Structure OK: {structure_ok}")
-                logger.info(f"Precision@K: {precision.precision}")
-                logger.info(f"Compression Ratio: {compression.ratio}")
-                logger.info(f"Latency: {latency_ms:.2f} ms")
-
-                print(
-                    "\n--- LATENCY PROFILE ---\n",
-                    json.dumps(
-                        analyze_latency_profile(
-                            registry.generate_report()
-                        ),
-                        indent=2,
+            print(
+                "\n--- LATENCY PROFILE ---\n",
+                json.dumps(
+                    analyze_latency_profile(
+                        execution["raw_metrics"]
                     ),
-                )
-
-            finally:
-                # 🔒 HARD GUARANTEE: close per-test resources
-                try:
-                    orchestrator.close()
-                except Exception:
-                    pass
+                    indent=2,
+                ),
+            )
 
         return results
 
     # --------------------------------------------------------
 
-    @staticmethod
-    def _config_from_decision(decision: Any) -> Any:
-        class _Config:
-            limit = decision.max_results
-            allow_web_fallback = decision.web_search_allowed
-            use_query_decomposition = (
-                decision.retrieval_strategy == "decomposition"
-            )
-            use_window_expansion = (
-                decision.retrieval_strategy == "window_expansion"
-            )
-
-        return _Config()
+    def close(self) -> None:
+        self.engine.close()
 
 
 # ============================================================
-# Test Harness
+# Standalone Test Harness
 # ============================================================
 
 if __name__ == "__main__":
+    import re
+
     runner = EvaluationRunner()
 
     TEST_SUITE: List[TestCase] = [
         TestCase(
-            query="Compare Assassin's Creed Valhalla vs Far Cry 5",
+            query=(
+                "What is the comparison and differences between "
+                "Far Cry 5 and Assassin’s Creed Valhalla"
+            ),
             expected_task=TaskType.COMPARISON,
-            expected_web_trigger=False,
+            expected_capability=AnswerCapability.PARTIAL,
             expected_source_titles=[
-                "Assassin's Creed Valhalla",
                 "Far Cry 5",
+                "Assassin’s Creed Valhalla",
             ],
             required_structure_pattern=re.compile(
-                r"\*\*Overview\*\*.*\*\*Gameplay\*\*", re.S
+                r"(Gameplay|Story|World Design|Tone|Systems)",
+                re.I,
             ),
         ),
         TestCase(
             query="What is the release date of Far Cry 5?",
             expected_task=TaskType.FACTUAL,
-            expected_web_trigger=False,
+            expected_capability=AnswerCapability.FULL,
             expected_source_titles=["Far Cry 5"],
             required_structure_pattern=re.compile(
-                r"Answer.*", re.S
+                r"\d{4}",
+                re.I,
             ),
         ),
     ]
@@ -228,3 +217,5 @@ if __name__ == "__main__":
 
     print("\n=== EVALUATION SUMMARY ===")
     print(json.dumps([r.__dict__ for r in results], indent=2))
+
+    runner.close()

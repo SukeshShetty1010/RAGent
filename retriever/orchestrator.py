@@ -1,6 +1,6 @@
 # ============================================================
 # retriever/orchestrator.py
-# Retrieval Orchestrator (FULLY OBSERVABLE)
+# Intent-Aware Retrieval Orchestrator (QUALITY REPORT FIXED)
 # ============================================================
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from retriever.strategy_selector import RetrievalConfiguration
 from retriever.rag_retriever import RAGRetriever
 from retriever.quality_gate import RetrievalQualityGate, QualityStatus
 from agent.tools.web_search import WebSearchTool
-from agent.task_router import TaskType
+from agent.task_router import TaskType, RouterDecision
 
 from tests.observability import ProfileBlock, MetricsRegistry
 
@@ -33,9 +33,13 @@ if not logger.handlers:
 
 class RetrievalOrchestrator:
     """
-    Local-first retrieval orchestrator.
+    Intent-aware, local-first retrieval orchestrator.
 
-    Fully instrumented for observability.
+    Responsibilities:
+    - Execute retrieval based on RetrievalConfiguration
+    - Evaluate retrieval quality
+    - Optionally augment with web data
+    - NEVER judge answer feasibility (CapabilityAssessor owns that)
     """
 
     MAX_WEB_CHUNKS = 3
@@ -56,16 +60,21 @@ class RetrievalOrchestrator:
 
     def run(
         self,
+        *,
         query: str,
-        task: TaskType,
+        decision: RouterDecision,
         config: RetrievalConfiguration,
     ) -> Tuple[List[Dict[str, Any]], str, Any]:
         """
+        Execute retrieval according to routing + strategy.
+
         Returns:
             chunks
             merge_state
-            quality_report
+            quality_report (QualityReport object)
         """
+
+        task = decision.task
 
         with ProfileBlock("Retrieval"):
 
@@ -91,7 +100,9 @@ class RetrievalOrchestrator:
 
             with ProfileBlock("QualityGate"):
                 quality_report = self.quality_gate.evaluate(
-                    query, task, local_chunks
+                    query=query,
+                    task=task,
+                    chunks=local_chunks,
                 )
 
             merge_state = "LOCAL_ONLY"
@@ -109,21 +120,15 @@ class RetrievalOrchestrator:
             }:
                 should_attempt_web = True
 
-            elif (
-                config.allow_web_fallback
-                and quality_report.has_temporal_signal
-            ):
+            elif config.allow_web_fallback and quality_report.has_temporal_signal:
                 should_attempt_web = True
 
             # -------------------------------------------------
-            # STEP 4: WEB AUGMENTATION (KPI-9 INSTRUMENTED)
+            # STEP 4: WEB AUGMENTATION (OBSERVABLE)
             # -------------------------------------------------
 
             if should_attempt_web and self.web_tool:
 
-                # ---------------------------------------------
-                # KPI-9: Causal Web Trigger Reason
-                # ---------------------------------------------
                 trigger_reason = None
 
                 if quality_report.status == QualityStatus.QUALITY_EMPTY:
@@ -132,14 +137,8 @@ class RetrievalOrchestrator:
                 elif quality_report.status == QualityStatus.QUALITY_WEAK:
                     trigger_reason = "quality_weak"
 
-                elif (
-                    quality_report.has_temporal_signal
-                    and config.allow_web_fallback
-                ):
+                elif quality_report.has_temporal_signal:
                     trigger_reason = "temporal_signal"
-
-                elif task == TaskType.OPEN and config.allow_web_fallback:
-                    trigger_reason = "task_fallback"
 
                 if trigger_reason:
                     MetricsRegistry.get().record(
@@ -163,15 +162,13 @@ class RetrievalOrchestrator:
                     )
 
                     if refined_web_chunks:
-                        web_chunks = refined_web_chunks[
-                            : self.MAX_WEB_CHUNKS
-                        ]
+                        web_chunks = refined_web_chunks[: self.MAX_WEB_CHUNKS]
                         merge_state = "LOCAL_PLUS_WEB"
 
             logger.info(f"[ORCHESTRATOR] Merge State: {merge_state}")
 
             # -------------------------------------------------
-            # STEP 5: FINAL CONTEXT MERGE
+            # STEP 5: FINAL MERGE
             # -------------------------------------------------
 
             with ProfileBlock("ChunkMerge"):
@@ -249,8 +246,6 @@ class RetrievalOrchestrator:
         results: List[List[Dict[str, Any]]] = []
 
         for sq in sub_queries:
-            logger.info(f"Retrieving for entity: '{sq}'")
-
             with ProfileBlock("LocalVectorSearch"):
                 chunks = self.retriever.retrieve(
                     sq, limit=config.limit
@@ -261,17 +256,14 @@ class RetrievalOrchestrator:
 
             results.append(chunks)
 
-        with ProfileBlock("ChunkMerge"):
-            return self._merge_and_dedupe(results)
+        return self._merge_and_dedupe(results)
 
     def _execute_listicle(
         self,
         query: str,
         config: RetrievalConfiguration,
     ) -> List[Dict[str, Any]]:
-        logger.info(
-            "Executing LISTICLE retrieval (window expansion simulation)"
-        )
+        logger.info("Executing LISTICLE retrieval")
         chunks = self.retriever.retrieve(query, limit=config.limit)
         return sorted(chunks, key=lambda c: c.get("chunk_index", 0))
 

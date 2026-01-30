@@ -1,6 +1,6 @@
 # ============================================================
 # engine/execution_engine.py
-# RAG Execution Engine (API-First, UI-Safe)
+# Capability-Aware RAG Execution Engine (FINAL)
 # ============================================================
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from typing import Dict, List, Any, Optional, TypedDict
 from agent.task_router import TaskRouter
 from retriever.strategy_selector import StrategySelector
 from retriever.orchestrator import RetrievalOrchestrator
+from agent.capability.capability_assessor import CapabilityAssessor
+from agent.capability.capability_types import AnswerCapability
 from agent.context_assembler import ContextAssembler
 from agent.prompt_manager import PromptManager
 
@@ -45,19 +47,20 @@ class ExecutionResult(TypedDict):
 
 class RageEngine:
     """
-    Callable, API-first execution engine for the RAG pipeline.
+    Capability-aware, API-first execution engine.
 
     Guarantees:
-    - Silent (no stdout prints)
-    - Deterministic return schema
-    - Per-request metric isolation
-    - Explicit resource lifecycle (close())
+    - Deterministic control flow
+    - Honest answer degradation
+    - Correct intent routing
+    - Full observability
     """
 
     def __init__(self) -> None:
         self.router = TaskRouter()
         self.strategy_selector = StrategySelector()
         self.orchestrator = RetrievalOrchestrator()
+        self.capability_assessor = CapabilityAssessor()
         self.context_assembler = ContextAssembler()
         self.prompt_manager = PromptManager()
         self._closed = False
@@ -71,34 +74,25 @@ class RageEngine:
         query: str,
         options: Optional[Dict[str, Any]] = None,
     ) -> ExecutionResult:
-        """
-        Execute the full RAG pipeline for a single query and
-        return a structured, JSON-ready result.
-        """
 
         if self._closed:
-            raise RuntimeError(
-                "RageEngine.run() called after engine was closed"
-            )
+            raise RuntimeError("Engine already closed")
 
-        options = options or {}
         registry = MetricsRegistry.get()
-
-        # ----------------------------------------------------
-        # Session Boundary (hard reset)
-        # ----------------------------------------------------
         self._reset_metrics(registry)
 
         engine_start = time.perf_counter()
 
-        final_answer: str = ""
+        final_answer = ""
         llm_ran = False
         llm_latency_ms: Optional[float] = None
 
         agent_decisions: Dict[str, Any] = {}
         assembled_chunks: List[Dict[str, Any]] = []
-        quality_status: str = "unknown"
-        confidence_score: float = 0.0
+
+        capability: AnswerCapability = AnswerCapability.INSUFFICIENT
+        quality_status = "unknown"
+        confidence_score = 0.0
 
         try:
             # =================================================
@@ -107,11 +101,17 @@ class RageEngine:
             with ProfileBlock("REQUEST_TOTAL"):
 
                 # ------------------------------------------------
-                # STEP 1: TASK ROUTING
+                # STEP 1: ROUTING (EXPLICIT VERSIONING)
                 # ------------------------------------------------
-                decision = self.router.route(query)
+                decision = self.router.route(
+                    query,
+                    intent_schema_version="v2",
+                )
 
                 agent_decisions["task"] = decision.task.value
+                agent_decisions["intent_signals"] = [
+                    s.value for s in decision.intent_signals
+                ]
                 agent_decisions["routing_reason"] = decision.reason
 
                 # ------------------------------------------------
@@ -131,23 +131,35 @@ class RageEngine:
                 # ------------------------------------------------
                 raw_chunks, merge_state, quality = self.orchestrator.run(
                     query=query,
-                    task=decision.task,
+                    decision=decision,
                     config=config,
                 )
 
                 agent_decisions["merge_state"] = merge_state
 
+                # QualityReport is an OBJECT (correct)
                 quality_status = quality.status.value
                 confidence_score = quality.confidence_score
 
                 agent_decisions["quality"] = {
-                    "status": quality_status,
-                    "confidence_score": confidence_score,
+                    "status": quality.status.value,
+                    "confidence_score": quality.confidence_score,
                     "has_temporal_signal": quality.has_temporal_signal,
                 }
 
                 # ------------------------------------------------
-                # STEP 4: CONTEXT ASSEMBLY
+                # STEP 4: CAPABILITY ASSESSMENT
+                # ------------------------------------------------
+                capability = self.capability_assessor.assess(
+                    intent_signals=decision.intent_signals,
+                    evidence=raw_chunks,
+                    quality=quality,
+                )
+
+                agent_decisions["answer_capability"] = capability.value
+
+                # ------------------------------------------------
+                # STEP 5: CONTEXT ASSEMBLY
                 # ------------------------------------------------
                 assembled_chunks = self.context_assembler.assemble(
                     raw_chunks,
@@ -155,33 +167,42 @@ class RageEngine:
                 )
 
                 # ------------------------------------------------
-                # STEP 5: PROMPT CONSTRUCTION
+                # STEP 6: PROMPT CONSTRUCTION
                 # ------------------------------------------------
                 prompt = self.prompt_manager.generate_prompt(
                     query=query,
                     chunks=assembled_chunks,
                     task=decision.task,
+                    capability=capability,
                 )
 
                 # ------------------------------------------------
-                # STEP 6: LLM GENERATION (FAIL-SOFT)
+                # STEP 7: LLM GENERATION (GUARDED)
                 # ------------------------------------------------
-                try:
-                    from llm.ragent_client import chat_completion_remote
+                if capability != AnswerCapability.INSUFFICIENT:
+                    try:
+                        from llm.ragent_client import chat_completion_remote
 
-                    llm_start = time.perf_counter()
-                    response = chat_completion_remote(prompt)
-                    llm_latency_ms = (
-                        time.perf_counter() - llm_start
-                    ) * 1000.0
+                        llm_start = time.perf_counter()
+                        response = chat_completion_remote(prompt)
+                        llm_latency_ms = (
+                            time.perf_counter() - llm_start
+                        ) * 1000.0
 
-                    final_answer = response.strip()
-                    llm_ran = True
+                        final_answer = response.strip()
+                        llm_ran = True
 
-                except Exception as exc:
-                    logger.warning(f"LLM unavailable (fail-soft): {exc}")
+                    except Exception as exc:
+                        logger.warning(
+                            f"LLM unavailable (fail-soft): {exc}"
+                        )
+                        final_answer = (
+                            "I could not generate a response at this time."
+                        )
+                else:
                     final_answer = (
-                        "I could not generate a response at this time."
+                        "I don’t have enough reliable information "
+                        "to answer this request safely."
                     )
 
         except Exception:
@@ -191,7 +212,7 @@ class RageEngine:
             )
 
         # ----------------------------------------------------
-        # KPI Aggregation (per-request)
+        # KPI AGGREGATION
         # ----------------------------------------------------
         engine_latency_ms = (
             time.perf_counter() - engine_start
@@ -205,15 +226,13 @@ class RageEngine:
             else None,
             "quality_status": quality_status,
             "confidence_score": round(confidence_score, 4),
+            "answer_capability": capability.value,
             "retrieved_chunks": len(assembled_chunks),
             "task_success": bool(
-                llm_ran and quality_status != "quality_empty"
+                llm_ran and capability != AnswerCapability.INSUFFICIENT
             ),
         }
 
-        # ----------------------------------------------------
-        # Final Metrics Snapshot
-        # ----------------------------------------------------
         raw_metrics = registry.generate_report()
 
         return ExecutionResult(
@@ -229,21 +248,10 @@ class RageEngine:
     # --------------------------------------------------------
 
     def close(self) -> None:
-        """
-        Explicit teardown of all owned resources.
-
-        MUST be called in:
-        - CLI tools
-        - Streamlit reruns
-        - FastAPI shutdown events
-        - CI / test harnesses
-        """
         if self._closed:
             return
-
         try:
-            if hasattr(self, "orchestrator"):
-                self.orchestrator.close()
+            self.orchestrator.close()
         finally:
             self._closed = True
 
@@ -253,9 +261,6 @@ class RageEngine:
 
     @staticmethod
     def _reset_metrics(registry: MetricsRegistry) -> None:
-        """
-        Hard reset metric state to enforce per-request isolation.
-        """
         registry._counters.clear()
         registry._distributions.clear()
         registry._categoricals.clear()
