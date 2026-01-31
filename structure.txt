@@ -1,5 +1,11 @@
 RAG_ENT/
 ├── agent/
+│   ├── intent/
+│   │   ├── intent_extractor.py
+│   │   ├── intent_signals.py
+│   ├── capability/
+│   │   ├── capability_assessor.py
+│   │   ├── capability_types.py
 │   ├── tools/
 │   │   ├── web_search.py
 │   │   ├── context_assembler.py

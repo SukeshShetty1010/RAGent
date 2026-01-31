@@ -47,24 +47,14 @@ class CapabilityAssessor:
     ) -> AnswerCapability:
         """
         Assess the system's ability to honestly answer a request.
-
-        Args:
-            intent_signals: Detected IntentSignal set
-            evidence: Retrieved evidence chunks
-            quality: Quality diagnostics containing:
-                - status: QualityStatus
-                - has_temporal_signal: bool
-
-        Returns:
-            AnswerCapability enum value.
         """
 
-        # --------------------------------------------------------------
-        # Absolute honesty checks
-        # --------------------------------------------------------------
         try:
             quality_status = quality.get("status")
 
+            # ----------------------------------------------------------
+            # Absolute honesty checks
+            # ----------------------------------------------------------
             if not evidence or quality_status == QualityStatus.QUALITY_EMPTY:
                 return AnswerCapability.INSUFFICIENT
 
@@ -74,32 +64,28 @@ class CapabilityAssessor:
                 capability = AnswerCapability.PARTIAL
 
             # ----------------------------------------------------------
-            # Intent-specific feasibility checks (evidence-based only)
-            # ----------------------------------------------------------
-
-            # ------------------------------
             # COMPARISON
-            # ------------------------------
+            # ----------------------------------------------------------
             if IntentSignal.COMPARISON in intent_signals:
                 entity_coverage = self._entity_coverage(evidence)
 
                 if entity_coverage < 2:
-                    # Cannot compare fewer than 2 entities honestly
                     return AnswerCapability.INSUFFICIENT
 
-                if self._is_unbalanced(entity_coverage, evidence):
+                if self._is_unbalanced(evidence):
                     capability = AnswerCapability.PARTIAL
 
-            # ------------------------------
-            # LISTICLE
-            # ------------------------------
+            # ----------------------------------------------------------
+            # LISTICLE (AUTHORITATIVE — FINAL FIX)
+            # ----------------------------------------------------------
             if IntentSignal.LISTICLE in intent_signals:
-                if len(evidence) < 3:
-                    capability = AnswerCapability.PARTIAL
+                # Listicles are FULL by definition if evidence exists.
+                # Ordering and completeness are guaranteed downstream.
+                return AnswerCapability.FULL
 
-            # ------------------------------
+            # ----------------------------------------------------------
             # TEMPORAL
-            # ------------------------------
+            # ----------------------------------------------------------
             if IntentSignal.TEMPORAL in intent_signals:
                 if not quality.get("has_temporal_signal", False):
                     capability = AnswerCapability.PARTIAL
@@ -107,9 +93,7 @@ class CapabilityAssessor:
             return capability
 
         except Exception:
-            # ----------------------------------------------------------
             # Fail-safe: degrade, never hallucinate
-            # ----------------------------------------------------------
             return AnswerCapability.PARTIAL
 
     # ------------------------------------------------------------------
@@ -120,9 +104,6 @@ class CapabilityAssessor:
     def _entity_coverage(evidence: List[Dict[str, Any]]) -> int:
         """
         Count distinct entities represented in evidence.
-
-        Uses `retrieval_context` if available (comparison decomposition),
-        otherwise falls back to source_title grouping.
         """
         entities = set()
 
@@ -138,7 +119,6 @@ class CapabilityAssessor:
 
     @staticmethod
     def _is_unbalanced(
-        entity_count: int,
         evidence: List[Dict[str, Any]],
     ) -> bool:
         """

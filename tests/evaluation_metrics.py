@@ -29,6 +29,13 @@ class GroundingFidelityResult:
 
 
 @dataclass(frozen=True)
+class HallucinationAvoidanceResult:
+    avoidance_rate: float
+    ungrounded_sentences: int
+    total_sentences: int
+
+
+@dataclass(frozen=True)
 class CompressionRatioResult:
     ratio: float
     initial_count: int
@@ -39,6 +46,13 @@ class CompressionRatioResult:
 class StabilityRateResult:
     stability_rate: float
     passed_runs: int
+    total_runs: int
+
+
+@dataclass(frozen=True)
+class HonestyRateResult:
+    honesty_rate: float
+    honest_runs: int
     total_runs: int
 
 
@@ -137,6 +151,28 @@ def calculate_grounding_fidelity(
 
 
 # ============================================================
+# Metric B2: Hallucination Avoidance Rate
+# ============================================================
+
+def calculate_hallucination_avoidance(
+    grounding: GroundingFidelityResult,
+) -> HallucinationAvoidanceResult:
+
+    total = grounding.total_sentences
+    if total == 0:
+        return HallucinationAvoidanceResult(0.0, 0, 0)
+
+    ungrounded = total - grounding.grounded_sentences
+    avoidance = round(1.0 - (ungrounded / float(total)), 4)
+
+    return HallucinationAvoidanceResult(
+        avoidance_rate=avoidance,
+        ungrounded_sentences=ungrounded,
+        total_sentences=total,
+    )
+
+
+# ============================================================
 # Metric 3: Context Compression Ratio
 # ============================================================
 
@@ -211,7 +247,7 @@ def calculate_stability_rate(
 
 
 # ============================================================
-# Metric 6: Capability Distribution (NEW, IMPORTANT)
+# Metric 6: Capability Distribution
 # ============================================================
 
 def calculate_capability_distribution(
@@ -219,8 +255,6 @@ def calculate_capability_distribution(
 ) -> CapabilityDistributionResult:
     """
     Measures how often the system answers FULL / PARTIAL / INSUFFICIENT.
-
-    This is the core honesty KPI.
     """
 
     total = len(execution_results)
@@ -247,5 +281,33 @@ def calculate_capability_distribution(
         full_rate=round(full / total, 4),
         partial_rate=round(partial / total, 4),
         insufficient_rate=round(insufficient / total, 4),
+        total_runs=total,
+    )
+
+
+# ============================================================
+# Metric B1: Honesty Rate
+# ============================================================
+
+def calculate_honesty_rate(
+    execution_results: List[Dict[str, Any]],
+) -> HonestyRateResult:
+    """
+    Aggregates 'full' and 'partial' capabilities as 'honest'.
+    """
+
+    total = len(execution_results)
+    if total == 0:
+        return HonestyRateResult(0.0, 0, 0)
+
+    honest = 0
+    for r in execution_results:
+        cap = (r.get("kpis", {}) or {}).get("answer_capability")
+        if cap in ("full", "partial"):
+            honest += 1
+
+    return HonestyRateResult(
+        honesty_rate=round(honest / float(total), 4),
+        honest_runs=honest,
         total_runs=total,
     )
