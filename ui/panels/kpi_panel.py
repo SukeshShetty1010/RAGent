@@ -1,22 +1,28 @@
 # ============================================================
 # ui/panels/kpi_panel.py
-# KPI Panel — Execution Scoreboard (Tier 1, Capability-Aware)
+# KPI Panel — Executive Trust Snapshot (FINAL)
 # ============================================================
 
 from __future__ import annotations
 
 import streamlit as st
 
+from ui.utils.formatting import (
+    format_latency_ms,
+    format_confidence_score,
+    format_quality_status,
+    format_answer_confidence,
+)
+
 
 def render_kpi_panel() -> None:
     """
-    Render the KPI scoreboard ribbon.
+    Render Tier-1 Executive KPI cards.
 
-    Architectural guarantees:
-    - Dumb, read-only component
-    - Zero computation or inference
-    - Renders backend values verbatim
-    - Safe on every Streamlit rerun
+    Executive guarantees:
+    - Trust-first metrics (not grading labels)
+    - No error semantics for honest degradation
+    - Backend values rendered verbatim
     """
 
     result = st.session_state.get("last_execution_result")
@@ -26,56 +32,66 @@ def render_kpi_panel() -> None:
     kpis = result.get("kpis", {}) or {}
 
     # --------------------------------------------------
-    # Verbatim backend values
+    # Extract backend KPIs (verbatim)
     # --------------------------------------------------
-    engine_latency_ms = kpis.get("engine_latency_ms")
+    latency_ms = kpis.get("engine_latency_ms")
     quality_status = kpis.get("quality_status")
     confidence_score = kpis.get("confidence_score")
-    task_success = kpis.get("task_success")
     answer_capability = kpis.get("answer_capability")
-
-    latency_display = (
-        f"{engine_latency_ms} ms"
-        if engine_latency_ms is not None
-        else "N/A"
-    )
-
-    confidence_display = (
-        str(confidence_score)
-        if confidence_score is not None
-        else "N/A"
-    )
-
-    success_display = (
-        "Yes" if task_success else "No"
-        if task_success is not None
-        else "N/A"
-    )
-
-    quality_display = quality_status or "N/A"
-    capability_display = (
-        answer_capability.capitalize()
-        if isinstance(answer_capability, str)
-        else "N/A"
-    )
+    task_success = kpis.get("task_success")
 
     # --------------------------------------------------
-    # Horizontal KPI ribbon (Tier 1)
+    # UI Translation
     # --------------------------------------------------
-    with st.container():
-        col1, col2, col3, col4, col5 = st.columns(5)
+    latency_display = format_latency_ms(latency_ms)
+    quality_display = format_quality_status(quality_status)
+    confidence_display = format_confidence_score(confidence_score)
 
-        with col1:
-            st.metric("Latency", latency_display)
+    confidence_meta = format_answer_confidence(answer_capability)
+    answer_confidence_label = confidence_meta["label"]
 
-        with col2:
-            st.metric("Evidence Quality", quality_display)
+    honesty_display = "100%" if answer_capability in ("full", "partial") else "0%"
 
-        with col3:
-            st.metric("Confidence", confidence_display)
+    completion_display = "Yes" if task_success else "No"
 
-        with col4:
-            st.metric("Capability", capability_display)
+    # --------------------------------------------------
+    # Executive Snapshot
+    # --------------------------------------------------
+    st.markdown("#### System Snapshot")
 
-        with col5:
-            st.metric("Completed", success_display)
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        st.metric(
+            label="🛡 Honesty",
+            value=honesty_display,
+            help="System degrades safely instead of hallucinating",
+        )
+
+    with col2:
+        st.metric(
+            label="🎯 Evidence Quality",
+            value=quality_display,
+            help="Retrieval quality gate outcome",
+        )
+
+    with col3:
+        st.metric(
+            label="📊 Answer Confidence",
+            value=answer_confidence_label,
+            help="User-facing confidence based on evidence coverage",
+        )
+
+    with col4:
+        st.metric(
+            label="📉 Confidence Score",
+            value=confidence_display,
+            help="Evidence-derived confidence (normalized)",
+        )
+
+    with col5:
+        st.metric(
+            label="⚡ Latency",
+            value=latency_display,
+            help="End-to-end execution latency",
+        )

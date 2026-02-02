@@ -1,22 +1,19 @@
+# ============================================================
+# ui/app.py
+# Phase 4 UI Orchestrator — RAGent (EXECUTIVE-FIRST LAYOUT)
+# ============================================================
 """
-Phase 4 UI Orchestrator — RAGent
-================================
-
 Role:
 - Declarative layout & composition layer for the Streamlit UI.
-- Enforces the Smart-Container / Dumb-Component contract.
-- Owns execution flow but delegates *all rendering* to panel components.
+- Enforces a clear visual hierarchy:
+    1. Query
+    2. Executive Summary (Trust Signals)
+    3. Details (collapsed)
 
-Phase 4 Guarantees:
-- Clear visual hierarchy (Input → Results → Inspection).
-- Unidirectional data flow: Engine → Session State → Panels.
-- Fail-soft rendering when no execution result exists.
-- Zero business logic or metric inspection in this file.
-
-This file is the ONLY UI surface allowed to:
-- Call RageEngine
-- Transition `is_running`
-- Write `last_execution_result`
+STRICT GUARANTEES:
+- No business logic
+- No metric inspection
+- No backend coupling beyond engine.run()
 """
 
 from __future__ import annotations
@@ -41,7 +38,6 @@ from ui.panels import (
     debug_panel,
 )
 
-
 # ---------------------------------------------------------
 # Engine Singleton (DO NOT MODIFY)
 # ---------------------------------------------------------
@@ -50,7 +46,7 @@ def get_engine() -> RageEngine:
     """
     Cached RageEngine singleton.
 
-    Ensures:
+    Guarantees:
     - One engine per Streamlit session
     - No repeated initialization on reruns
     """
@@ -62,14 +58,20 @@ def get_engine() -> RageEngine:
 # ---------------------------------------------------------
 def run_app() -> None:
     """
-    Main UI entrypoint (Phase 4).
+    Main UI entrypoint.
 
-    Execution Order:
-    1. Initialize session state
-    2. Render global layout
-    3. Observe intent (`is_running`)
-    4. Execute engine if needed
-    5. Render result & inspection panels
+    Visual Hierarchy:
+    ┌──────────────────────────────┐
+    │ 1. Query                     │
+    ├──────────────────────────────┤
+    │ 2. Executive Summary         │
+    │    - Trust & Safety KPIs     │
+    │    - Answer Confidence       │
+    ├──────────────────────────────┤
+    │ 3. Details (Collapsed)       │
+    │    - Evidence                │
+    │    - Internal Trace (Debug)  │
+    └──────────────────────────────┘
     """
 
     # -----------------------------------------------------
@@ -78,44 +80,58 @@ def run_app() -> None:
     initialize_state()
 
     # -----------------------------------------------------
-    # 2. Sidebar: Debug Controls
+    # 2. Sidebar: Debug / Inspection Controls
     # -----------------------------------------------------
     debug_panel.render_debug_controls()
 
     # -----------------------------------------------------
-    # 3. Global Header
+    # 3. Global Header (Trust Anchor)
     # -----------------------------------------------------
     st.title("RAGent")
+    st.caption(
+        "Evidence-Bound · Deterministic · Honest Degradation · Measurable"
+    )
+
+    # =====================================================
+    # ZONE 1 — QUERY (Primary Interaction)
+    # =====================================================
+    with st.container():
+        query_panel.render_panel()
 
     # -----------------------------------------------------
-    # 4. Input Layer
-    # -----------------------------------------------------
-    query_panel.render_panel()
-
-    # -----------------------------------------------------
-    # 5. Execution Controller (Fail-Soft)
+    # Execution Controller (Fail-Soft)
     # -----------------------------------------------------
     if st.session_state.is_running:
         with st.status("Running analysis…", expanded=False):
             engine = get_engine()
-
             try:
                 result = engine.run(st.session_state.current_query)
                 st.session_state.last_execution_result = result
             finally:
                 st.session_state.is_running = False
 
-    # -----------------------------------------------------
-    # 6. Results Layer (Stable even if result is None)
-    # -----------------------------------------------------
-    kpi_panel.render_kpi_panel()
-    answer_panel.render_answer_panel()
-    evidence_panel.render_evidence_panel()
+    # =====================================================
+    # ZONE 2 — EXECUTIVE SUMMARY (ALWAYS VISIBLE)
+    # =====================================================
+    with st.container():
+        st.subheader("Executive Summary")
 
-    # -----------------------------------------------------
-    # 7. Inspection Layer (Debug / Trace)
-    # -----------------------------------------------------
-    trace_panel.render_trace_panel()
+        # Trust & Safety KPIs (Tier 1)
+        kpi_panel.render_kpi_panel()
+
+        # Answer rendered with confidence framing
+        answer_panel.render_answer_panel()
+
+    # =====================================================
+    # ZONE 3 — DETAILS (COLLAPSED BY DEFAULT)
+    # =====================================================
+    with st.expander("Show details & system evidence", expanded=False):
+
+        # Evidence (trust-building, non-essential upfront)
+        evidence_panel.render_evidence_panel()
+
+        # Internal diagnostics (engineering only)
+        trace_panel.render_trace_panel()
 
 
 # ---------------------------------------------------------

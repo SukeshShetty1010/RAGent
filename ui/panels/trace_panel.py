@@ -1,39 +1,7 @@
-"""
-Trace Panel — Execution Trace Inspector (Tier 2 / Debug Layer)
-
-Responsibility:
-- Provide deep, read-only visibility into the internal execution state
-  of the RAGent pipeline.
-- Expose backend reasoning artifacts strictly for inspection and debugging.
-- Serve as the system’s “Inspection Layer” without affecting UX flow.
-
-Architectural Role (Phase 4):
-- Tier 2 (Debug / Inspector) component.
-- Opt-in only: rendered exclusively when debug mode is enabled.
-- Strictly passive:
-  - No state mutation
-  - No backend calls
-  - No execution control
-
-Contract Consumption:
-- Reads from `st.session_state.last_execution_result`:
-  - `agent_decisions`
-  - `raw_metrics`
-
-State Interactions:
-- Reads only:
-  - `debug_enabled`
-  - `last_execution_result`
-
-Visibility Rules:
-- If `debug_enabled` is False → render nothing.
-- If no execution result exists → render nothing.
-
-Forbidden Actions:
-- Must never modify `st.session_state`.
-- Must never compute, infer, or transform backend data.
-- Must never influence execution flow or UI state.
-"""
+# ============================================================
+# ui/panels/trace_panel.py
+# Trace Panel — Engineering Inspection Layer (FINAL)
+# ============================================================
 
 from __future__ import annotations
 
@@ -42,14 +10,25 @@ import streamlit as st
 
 def render_trace_panel() -> None:
     """
-    Render the execution trace inspection panel.
+    Render the internal execution trace for engineering inspection.
 
-    This function is fail-soft, read-only, and safe to call
-    on every Streamlit rerun.
+    Visibility rules:
+    - Render ONLY if debug / inspection mode is enabled
+    - Render ONLY if an execution result exists
+
+    Guarantees:
+    - Read-only
+    - No state mutation
+    - No backend calls
+    - No computation or inference
+
+    IMPORTANT:
+    - This panel exposes INTERNAL diagnostics
+    - Not intended for end-user interpretation
     """
 
     # --------------------------------------------------
-    # Gate 1: Debug mode must be explicitly enabled
+    # Gate 1: Debug / inspection mode
     # --------------------------------------------------
     if not st.session_state.get("debug_enabled", False):
         return
@@ -65,15 +44,21 @@ def render_trace_panel() -> None:
     raw_metrics = result.get("raw_metrics", {}) or {}
 
     with st.container():
-        st.markdown("### Execution Trace")
+        st.subheader("Internal System Trace")
+        st.caption(
+            "Engineering inspection view. "
+            "Displays internal routing, quality signals, and raw observability. "
+            "These signals are not user-facing guarantees."
+        )
 
         # --------------------------------------------------
-        # Routing & Strategy
+        # Routing & Retrieval Decisions
         # --------------------------------------------------
-        with st.expander("Routing & Strategy", expanded=False):
+        with st.expander("Routing & Retrieval Decisions", expanded=False):
             st.json(
                 {
                     "task": agent_decisions.get("task"),
+                    "intent_signals": agent_decisions.get("intent_signals"),
                     "routing_reason": agent_decisions.get("routing_reason"),
                     "retrieval_strategy": agent_decisions.get(
                         "retrieval_strategy"
@@ -83,13 +68,23 @@ def render_trace_panel() -> None:
             )
 
         # --------------------------------------------------
-        # Quality Assessment
+        # Quality & Capability (INTERNAL DIAGNOSTICS)
         # --------------------------------------------------
-        with st.expander("Quality Assessment", expanded=False):
-            st.json(agent_decisions.get("quality", {}))
+        with st.expander(
+            "Quality & Capability Diagnostics (Internal)",
+            expanded=False,
+        ):
+            st.json(
+                {
+                    "quality_gate": agent_decisions.get("quality"),
+                    "answer_capability": agent_decisions.get(
+                        "answer_capability"
+                    ),
+                }
+            )
 
         # --------------------------------------------------
-        # Raw Metrics (Deep Inspection)
+        # Raw Observability Metrics (Deep Debug)
         # --------------------------------------------------
-        with st.expander("Raw Metrics", expanded=False):
+        with st.expander("Raw Observability Metrics", expanded=False):
             st.json(raw_metrics)

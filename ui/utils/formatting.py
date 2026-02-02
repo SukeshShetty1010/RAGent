@@ -1,98 +1,120 @@
+# ============================================================
 # ui/utils/formatting.py
-"""
-Formatting Utilities — Presentation Layer
+# Formatting Utilities — Presentation Layer (FINAL)
+# ============================================================
 
-Responsibility:
-- Provides pure, deterministic formatting helpers for UI display.
-- Transforms raw primitive values into human-readable strings.
-- Contains no business logic, no state, and no side effects.
-
-Architectural Role:
-- Cosmetic layer only.
-- Fully isolated from backend and UI frameworks.
-- Safe to reuse across panels.
-
-Contract Consumption:
-- Accepts only primitive values (int, float, str, bool).
-- Does NOT accept or inspect ExecutionResult dictionaries.
-
-Forbidden Actions:
-- Must never compute metrics or make judgments.
-- Must never access global or shared state.
-- Must never import UI or backend modules.
-"""
-
-from typing import Optional
+from typing import Optional, Dict
 
 
+# ------------------------------------------------------------
+# Latency
+# ------------------------------------------------------------
 def format_latency_ms(val: Optional[float]) -> str:
-    """
-    Format a latency value in milliseconds.
-
-    Args:
-        val: Latency in milliseconds.
-
-    Returns:
-        A string formatted as "<int> ms" or "N/A" if unavailable.
-    """
     if val is None:
-        return "N/A"
-
+        return "—"
     try:
         return f"{int(round(val))} ms"
     except Exception:
-        return "N/A"
+        return "—"
 
 
+# ------------------------------------------------------------
+# Confidence / Percentages
+# ------------------------------------------------------------
 def format_confidence_score(val: Optional[float]) -> str:
     """
-    Format a confidence score as a percentage.
-
-    Args:
-        val: Confidence score between 0.0 and 1.0.
-
-    Returns:
-        A string formatted as "<int>%" or "N/A" if unavailable.
+    Backend confidence score: 0.0–1.0
+    UI display: percentage
     """
     if val is None:
-        return "N/A"
-
+        return "—"
     try:
         return f"{int(round(val * 100))}%"
     except Exception:
-        return "N/A"
+        return "—"
 
 
-def format_quality_status(val: Optional[str]) -> str:
+def format_ratio(val: Optional[float]) -> str:
+    if val is None:
+        return "—"
+    try:
+        return f"{round(val * 100, 1)}%"
+    except Exception:
+        return "—"
+
+
+# ------------------------------------------------------------
+# ✅ Answer Confidence (UI Translation Layer)
+# ------------------------------------------------------------
+CAPABILITY_UI_MAP: Dict[str, Dict[str, str]] = {
+    "full": {
+        "label": "Verified Answer",
+        "description": "This response is fully supported by retrieved evidence.",
+        "tone": "success",
+    },
+    "partial": {
+        "label": "Evidence-Bound Answer",
+        "description": (
+            "Only claims supported by available evidence are included. "
+            "Unverifiable aspects were intentionally omitted."
+        ),
+        "tone": "info",
+    },
+    "insufficient": {
+        "label": "Insufficient Evidence",
+        "description": (
+            "No reliable sources were found to answer this safely. "
+            "The system avoided speculation or hallucination."
+        ),
+        "tone": "neutral",
+    },
+}
+
+
+def format_answer_confidence(val: Optional[str]) -> Dict[str, str]:
     """
-    Prettify a quality status string.
-
-    Args:
-        val: Quality status (e.g., "QUALITY_OK").
+    Translate internal answer_capability → user-facing confidence language.
 
     Returns:
-        A human-readable string (e.g., "Quality Ok") or "N/A".
+        {
+            label: str,
+            description: str,
+            tone: str
+        }
     """
     if not val:
-        return "N/A"
+        return {
+            "label": "Unknown",
+            "description": "Answer confidence could not be determined.",
+            "tone": "neutral",
+        }
 
+    return CAPABILITY_UI_MAP.get(
+        val.lower(),
+        {
+            "label": val.upper(),
+            "description": "Unrecognized answer confidence state.",
+            "tone": "neutral",
+        },
+    )
+
+
+# ------------------------------------------------------------
+# Quality Status
+# ------------------------------------------------------------
+def format_quality_status(val: Optional[str]) -> str:
+    if not val:
+        return "—"
     try:
         return val.replace("_", " ").title()
     except Exception:
-        return "N/A"
+        return "—"
 
 
+# ------------------------------------------------------------
+# Boolean Outcomes
+# ------------------------------------------------------------
 def format_bool_success(val: Optional[bool]) -> str:
-    """
-    Format a boolean success indicator.
-
-    Args:
-        val: Success flag.
-
-    Returns:
-        "Pass", "Fail", or "N/A".
-    """
     if val is None:
-        return "N/A"
-
-    return "Pass" if val is True else "Fail"
+        return "—"
+    return "Yes" if val is True else "No"

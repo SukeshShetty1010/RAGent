@@ -1,40 +1,15 @@
+# ui/panels/query_panel.py
 """
-Query Panel — Request Initiator
+Query Panel — Command Bar Style
 
 Responsibility:
-- Collects user intent (the query text).
-- Signals *when* an execution should start.
-- Does NOT execute backend logic.
-- Does NOT render results.
+- Collects user intent (query text).
+- Signals *when* execution should start.
+- UX-only polish: no backend logic, no result rendering.
 
-Architectural Role:
-- Dumb component in a Smart-Container / Dumb-Component model.
-- Purely state-driven and intent-focused.
-
-Contract Consumption:
-- None.
-- This panel does NOT read `ExecutionResult` or any backend data.
-
-State Interactions:
-- Reads:
-  - `current_query`
-  - `is_running`
-- Writes:
-  - `current_query`
-  - `is_running`
-
-Interaction Flow:
-1. User types a query into the input field.
-2. User clicks "Run Analysis".
-3. If the query is non-empty and no execution is in progress:
-   - Update `current_query`.
-   - Set `is_running = True`.
-
-Forbidden Actions:
-- Must never import or call `RageEngine`.
-- Must never import backend schemas or results.
-- Must never modify `last_execution_result`.
-- Must never render answers, evidence, KPIs, or traces.
+Design Intent:
+- Feel like a command bar, not a form.
+- Guide users toward supported query types.
 """
 
 from __future__ import annotations
@@ -42,40 +17,74 @@ from __future__ import annotations
 import streamlit as st
 
 
+# --------------------------------------------------
+# Example Queries (Click-to-Fill)
+# --------------------------------------------------
+EXAMPLE_QUERIES = {
+    "Comparison": "Compare the storyline of Far Cry 5 and Assassin’s Creed Valhalla",
+    "Factual": "What is the release date of Far Cry 5?",
+    "Listicle": "Top 5 things to do in Far Cry 5",
+    "Temporal": "Latest update for Assassin’s Creed Valhalla",
+}
+
+
 def render_panel() -> None:
     """
     Render the query input panel.
 
-    This function only mutates intent-related session state.
-    Execution is handled by the application controller (`ui/app.py`).
+    This panel:
+    - Reads/writes intent-related session state only
+    - Never executes backend logic
     """
 
     # --------------------------------------------------
-    # Fail-safe state access (critical for first render)
+    # Fail-safe state access
     # --------------------------------------------------
     current_query = st.session_state.get("current_query", "")
     is_running = st.session_state.get("is_running", False)
 
     # --------------------------------------------------
-    # Input field (always renders)
+    # Command Bar Input
     # --------------------------------------------------
+    st.markdown("### Ask a question")
+
     query_value = st.text_input(
-        "Enter your query",
+        label="",
         value=current_query or "",
         disabled=is_running,
-        placeholder="Ask a question to begin…",
+        placeholder="Type a comparison, factual question, list, or update query…",
     )
 
     # --------------------------------------------------
-    # Run trigger
+    # Supported Query Types (Guidance)
+    # --------------------------------------------------
+    st.caption(
+        "Supported query types: "
+        "**Comparison · Factual · Listicle · Temporal**"
+    )
+
+    # --------------------------------------------------
+    # Example Queries (Click-to-Fill)
+    # --------------------------------------------------
+    with st.container():
+        cols = st.columns(len(EXAMPLE_QUERIES))
+        for col, (label, example) in zip(cols, EXAMPLE_QUERIES.items()):
+            if col.button(label, disabled=is_running):
+                st.session_state.current_query = example
+                st.session_state.is_running = True
+                return
+
+    # --------------------------------------------------
+    # Run Trigger
     # --------------------------------------------------
     run_clicked = st.button(
-        "Run Analysis",
+        "Run ▶",
         disabled=is_running,
+        type="primary",
     )
 
     # --------------------------------------------------
-    # Intent signaling (no execution here)
+    # Intent Signaling (NO execution here)
     # --------------------------------------------------
     if run_clicked:
         st.session_state.current_query = query_value
