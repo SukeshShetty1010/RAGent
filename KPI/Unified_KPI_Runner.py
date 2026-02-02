@@ -6,6 +6,20 @@
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
+
+# ------------------------------------------------------------
+# Ensure project root is on PYTHONPATH
+# ------------------------------------------------------------
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# ------------------------------------------------------------
+# KPI Imports
+# ------------------------------------------------------------
 
 from KPI.Context_Engineering_KPI import ContextEngineeringKPI
 from KPI.Faith_Fair_KPI import FaithFairKPI
@@ -19,6 +33,7 @@ from KPI.Intent_Agent_Control import ResumeKPIDashboard
 
 BOLD = "\033[1m"
 CYAN = "\033[96m"
+RED = "\033[91m"
 RESET = "\033[0m"
 
 
@@ -30,18 +45,16 @@ class UnifiedDashboard:
     """
     Master orchestration layer for all resume-grade KPIs.
 
-    Runs:
-    - Context Engineering KPIs
-    - Faithfulness, Honesty & Safety KPIs
-    - Retrieval Quality KPIs
-    - System Performance KPIs
-    - Intent, Routing & Stability KPIs
-
-    Output:
-    - Single continuous executive dashboard stream
+    Executive ordering principle:
+    1. Context efficiency & cost control
+    2. Honesty, faithfulness & safety
+    3. Retrieval effectiveness
+    4. System performance & latency
+    5. Intent routing & determinism
     """
 
     def run(self) -> None:
+        # Silence noisy logs globally
         logging.getLogger().setLevel(logging.WARNING)
 
         print(
@@ -51,31 +64,49 @@ class UnifiedDashboard:
         )
 
         # =====================================================
-        # Context Engineering
+        # 1. Context Engineering (COST + RELIABILITY FIRST)
         # =====================================================
         print(f"{BOLD}{'=' * 70}{RESET}")
         ContextEngineeringKPI().run()
 
         # =====================================================
-        # Faithfulness, Honesty & Safety
+        # 2. Faithfulness, Honesty & Safety
         # =====================================================
         print(f"{BOLD}{'=' * 70}{RESET}")
-        FaithFairKPI().run()
+        try:
+            FaithFairKPI().run()
+        except Exception as e:
+            print(
+                f"{RED}Faith/Fair KPI failed safely: "
+                f"{type(e).__name__}: {e}{RESET}\n"
+            )
 
         # =====================================================
-        # Retrieval Quality
+        # 3. Retrieval Quality
         # =====================================================
         print(f"{BOLD}{'=' * 70}{RESET}")
-        RetrievalQualityKPI(k=5).run()
+        try:
+            RetrievalQualityKPI().run()
+        except Exception as e:
+            print(
+                f"{RED}Retrieval Quality KPI failed safely: "
+                f"{type(e).__name__}: {e}{RESET}\n"
+            )
 
         # =====================================================
-        # System Performance
+        # 4. System Performance & Latency
         # =====================================================
         print(f"{BOLD}{'=' * 70}{RESET}")
-        SystemPerformanceKPI().run()
+        try:
+            SystemPerformanceKPI().run()
+        except Exception as e:
+            print(
+                f"{RED}System Performance KPI failed safely: "
+                f"{type(e).__name__}: {e}{RESET}\n"
+            )
 
         # =====================================================
-        # Intent, Routing & Stability (Special Handling)
+        # 5. Intent Routing, Determinism & Stability
         # =====================================================
         print(f"{BOLD}{'=' * 70}{RESET}")
         intent_dashboard = ResumeKPIDashboard()

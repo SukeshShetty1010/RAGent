@@ -46,7 +46,7 @@ RAG_ENT/
 │   └── strategy_selector.py
 ├── tests/
 │   ├── caching.py
-│   ├── e2e_run.py
+│   ├── evaluation_contracts.py
 │   ├── evaluation_metrics.py
 │   ├── evaluation_runner.py
 │   ├── KPI_run.py

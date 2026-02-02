@@ -1,82 +1,68 @@
 # ============================================================
 # tests/evaluation_metrics.py
 # Deterministic Scoring Engine for RAG Evaluation (CAPABILITY-AWARE)
+#
+# FINAL CANONICAL VERSION (BACKWARD-COMPATIBLE)
 # ============================================================
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 
-
-# ============================================================
-# Metric Result Contracts
-# ============================================================
-
-@dataclass(frozen=True)
-class PrecisionAtKResult:
-    precision: float
-    hits: int
-    k: int
-
-
-@dataclass(frozen=True)
-class GroundingFidelityResult:
-    fidelity: float
-    grounded_sentences: int
-    total_sentences: int
-
-
-@dataclass(frozen=True)
-class HallucinationAvoidanceResult:
-    avoidance_rate: float
-    ungrounded_sentences: int
-    total_sentences: int
-
-
-@dataclass(frozen=True)
-class CompressionRatioResult:
-    ratio: float
-    initial_count: int
-    final_count: int
-
-
-@dataclass(frozen=True)
-class StabilityRateResult:
-    stability_rate: float
-    passed_runs: int
-    total_runs: int
-
-
-@dataclass(frozen=True)
-class HonestyRateResult:
-    honesty_rate: float
-    honest_runs: int
-    total_runs: int
-
-
-@dataclass(frozen=True)
-class CapabilityDistributionResult:
-    full_rate: float
-    partial_rate: float
-    insufficient_rate: float
-    total_runs: int
-
+from tests.evaluation_contracts import (
+    PrecisionAtKResult,
+    EvidenceHitRateResult,
+    EntityCoverageResult,
+    GroundingFidelityResult,
+    HallucinationAvoidanceResult,
+    CompressionRatioResult,
+    StabilityRateResult,
+    HonestyRateResult,
+    CapabilityDistributionResult,
+)
 
 # ============================================================
 # Internal Utilities
 # ============================================================
 
-def _normalize_title(title: str) -> str:
-    """
-    Deterministic normalization for source titles.
-    """
-    return title.lower().strip()
+def _normalize(text: str) -> str:
+    return text.lower().strip()
 
+
+def _resolve_entity(chunk: Dict[str, Any]) -> str | None:
+    for key in (
+        "game_name",
+        "canonical_game",
+        "retrieval_context",
+        "source_title",
+    ):
+        value = chunk.get(key)
+        if isinstance(value, str) and value.strip():
+            return _normalize(value)
+    return None
+
+
+def _extract_retrieved_entities(
+    retrieved_chunks: List[Dict[str, Any]],
+) -> Set[str]:
+    entities: Set[str] = set()
+    for c in retrieved_chunks:
+        entity = _resolve_entity(c)
+        if entity:
+            entities.add(entity)
+    return entities
+
+
+def _entity_match(retrieved: str, expected: str) -> bool:
+    return (
+        retrieved == expected
+        or expected in retrieved
+        or retrieved in expected
+    )
 
 # ============================================================
-# Metric 1: Retrieval Precision @ K
+# Diagnostic Metric — Precision @ K
 # ============================================================
 
 def calculate_precision_at_k(
@@ -85,27 +71,82 @@ def calculate_precision_at_k(
     k: int,
 ) -> PrecisionAtKResult:
 
-    if k <= 0:
+    if k <= 0 or not retrieved_chunks or not expected_source_titles:
         return PrecisionAtKResult(0.0, 0, k)
 
-    if not retrieved_chunks or not expected_source_titles:
-        return PrecisionAtKResult(0.0, 0, k)
+    expected = {_normalize(t) for t in expected_source_titles}
+    hits = 0
 
-    top_k = retrieved_chunks[:k]
-    expected = {_normalize_title(t) for t in expected_source_titles}
+    for c in retrieved_chunks[:k]:
+        title = _normalize(c.get("source_title", ""))
+        if title in expected:
+            hits += 1
 
-    hits = sum(
-        1
-        for c in top_k
-        if _normalize_title(c.get("source_title", "")) in expected
-    )
-
-    precision = round(hits / float(k), 4)
-    return PrecisionAtKResult(precision, hits, k)
-
+    return PrecisionAtKResult(round(hits / float(k), 4), hits, k)
 
 # ============================================================
-# Metric 2: Grounding Fidelity
+# Evidence Hit Rate
+# ============================================================
+
+def calculate_evidence_hit_rate(
+    retrieved_chunks: List[Dict[str, Any]],
+    expected_entities: List[str],
+) -> EvidenceHitRateResult:
+
+    total = 1
+    if not retrieved_chunks or not expected_entities:
+        return EvidenceHitRateResult(0.0, 0, total)
+
+    retrieved_entities = _extract_retrieved_entities(retrieved_chunks)
+    expected = [_normalize(e) for e in expected_entities]
+
+    hit = 0
+    for r in retrieved_entities:
+        for e in expected:
+            if _entity_match(r, e):
+                hit = 1
+                break
+        if hit:
+            break
+
+    return EvidenceHitRateResult(
+        round(hit / total, 4),
+        hit,
+        total,
+    )
+
+# ============================================================
+# Entity Coverage
+# ============================================================
+
+def calculate_entity_coverage(
+    retrieved_chunks: List[Dict[str, Any]],
+    expected_entities: List[str],
+) -> EntityCoverageResult:
+
+    if not expected_entities:
+        return EntityCoverageResult(0.0, 0, 0)
+
+    retrieved_entities = _extract_retrieved_entities(retrieved_chunks)
+    expected = [_normalize(e) for e in expected_entities]
+
+    covered = 0
+    for e in expected:
+        for r in retrieved_entities:
+            if _entity_match(r, e):
+                covered += 1
+                break
+
+    total = len(expected)
+
+    return EntityCoverageResult(
+        round(covered / float(total), 4),
+        covered,
+        total,
+    )
+
+# ============================================================
+# Grounding & Hallucination
 # ============================================================
 
 def calculate_grounding_fidelity(
@@ -126,7 +167,7 @@ def calculate_grounding_fidelity(
         return GroundingFidelityResult(0.0, 0, 0)
 
     context_titles = {
-        _normalize_title(c.get("source_title", ""))
+        _normalize(c.get("source_title", ""))
         for c in context_chunks
         if c.get("source_title")
     }
@@ -137,22 +178,16 @@ def calculate_grounding_fidelity(
     for sentence in sentences:
         match = citation_pattern.search(sentence)
         if match:
-            cited = _normalize_title(match.group(1))
+            cited = _normalize(match.group(1))
             if cited in context_titles:
                 grounded += 1
 
-    fidelity = round(grounded / float(len(sentences)), 4)
-
     return GroundingFidelityResult(
-        fidelity=fidelity,
-        grounded_sentences=grounded,
-        total_sentences=len(sentences),
+        round(grounded / float(len(sentences)), 4),
+        grounded,
+        len(sentences),
     )
 
-
-# ============================================================
-# Metric B2: Hallucination Avoidance Rate
-# ============================================================
 
 def calculate_hallucination_avoidance(
     grounding: GroundingFidelityResult,
@@ -163,45 +198,40 @@ def calculate_hallucination_avoidance(
         return HallucinationAvoidanceResult(0.0, 0, 0)
 
     ungrounded = total - grounding.grounded_sentences
-    avoidance = round(1.0 - (ungrounded / float(total)), 4)
 
     return HallucinationAvoidanceResult(
-        avoidance_rate=avoidance,
-        ungrounded_sentences=ungrounded,
-        total_sentences=total,
+        round(1.0 - (ungrounded / float(total)), 4),
+        ungrounded,
+        total,
     )
 
-
 # ============================================================
-# Metric 3: Context Compression Ratio
+# ✅ FIX — Context Compression as Noise Reduction
 # ============================================================
 
 def calculate_compression_ratio(
-    initial_retrieved_count: int,
-    final_assembled_count: int,
+    input_chunks: int,
+    final_chunks: int,
 ) -> CompressionRatioResult:
+    """
+    Resume-grade interpretation:
+    ratio = % of context eliminated (noise removed)
+    """
 
-    if initial_retrieved_count <= 0:
-        return CompressionRatioResult(
-            0.0,
-            initial_retrieved_count,
-            final_assembled_count,
-        )
+    if input_chunks <= 0:
+        return CompressionRatioResult(0.0, input_chunks, final_chunks)
 
-    ratio = round(
-        final_assembled_count / float(initial_retrieved_count),
-        4,
-    )
+    removed = input_chunks - final_chunks
+    ratio = max(0.0, removed / float(input_chunks))
 
     return CompressionRatioResult(
-        ratio=ratio,
-        initial_count=initial_retrieved_count,
-        final_count=final_assembled_count,
+        round(ratio, 4),
+        input_chunks,
+        final_chunks,
     )
 
-
 # ============================================================
-# Metric 4: Latency Breakdown
+# Latency Analysis
 # ============================================================
 
 def analyze_latency_profile(
@@ -218,15 +248,12 @@ def analyze_latency_profile(
             name.startswith("latency::")
             and isinstance(payload.get("avg"), (int, float))
         ):
-            latency_metrics[name] = round(
-                float(payload["avg"]), 4
-            )
+            latency_metrics[name] = round(float(payload["avg"]), 4)
 
     return latency_metrics
 
-
 # ============================================================
-# Metric 5: Regression Stability Rate
+# Stability, Honesty & Capability Metrics
 # ============================================================
 
 def calculate_stability_rate(
@@ -237,39 +264,25 @@ def calculate_stability_rate(
     if total_runs <= 0:
         return StabilityRateResult(0.0, passed_runs, total_runs)
 
-    rate = round(passed_runs / float(total_runs), 4)
-
     return StabilityRateResult(
-        stability_rate=rate,
-        passed_runs=passed_runs,
-        total_runs=total_runs,
+        round(passed_runs / float(total_runs), 4),
+        passed_runs,
+        total_runs,
     )
 
-
-# ============================================================
-# Metric 6: Capability Distribution
-# ============================================================
 
 def calculate_capability_distribution(
     execution_results: List[Dict[str, Any]],
 ) -> CapabilityDistributionResult:
-    """
-    Measures how often the system answers FULL / PARTIAL / INSUFFICIENT.
-    """
 
     total = len(execution_results)
     if total == 0:
         return CapabilityDistributionResult(0.0, 0.0, 0.0, 0)
 
-    full = 0
-    partial = 0
-    insufficient = 0
+    full = partial = insufficient = 0
 
     for r in execution_results:
-        cap = (
-            r.get("kpis", {}) or {}
-        ).get("answer_capability")
-
+        cap = (r.get("kpis", {}) or {}).get("answer_capability")
         if cap == "full":
             full += 1
         elif cap == "partial":
@@ -278,36 +291,37 @@ def calculate_capability_distribution(
             insufficient += 1
 
     return CapabilityDistributionResult(
-        full_rate=round(full / total, 4),
-        partial_rate=round(partial / total, 4),
-        insufficient_rate=round(insufficient / total, 4),
-        total_runs=total,
+        round(full / total, 4),
+        round(partial / total, 4),
+        round(insufficient / total, 4),
+        total,
     )
 
-
 # ============================================================
-# Metric B1: Honesty Rate
+# ✅ HONESTY RATE (KEY RESUME KPI)
 # ============================================================
 
 def calculate_honesty_rate(
     execution_results: List[Dict[str, Any]],
 ) -> HonestyRateResult:
     """
-    Aggregates 'full' and 'partial' capabilities as 'honest'.
+    Honest answers = FULL + PARTIAL
+    Dishonest answers = hallucination / unsafe output
     """
 
     total = len(execution_results)
     if total == 0:
         return HonestyRateResult(0.0, 0, 0)
 
-    honest = 0
-    for r in execution_results:
-        cap = (r.get("kpis", {}) or {}).get("answer_capability")
-        if cap in ("full", "partial"):
-            honest += 1
+    honest = sum(
+        1
+        for r in execution_results
+        if (r.get("kpis", {}) or {}).get("answer_capability")
+        in ("full", "partial")
+    )
 
     return HonestyRateResult(
-        honesty_rate=round(honest / float(total), 4),
-        honest_runs=honest,
-        total_runs=total,
+        round(honest / float(total), 4),
+        honest,
+        total,
     )
