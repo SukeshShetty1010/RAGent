@@ -51,7 +51,8 @@ class ContextEngineeringKPI:
     - Prompt Budget Compliance Rate
 
     Purpose:
-    - Prove token-budget discipline
+    - Prove context discipline
+    - Demonstrate redundancy filtering
     - Demonstrate guardrail enforcement for resumes / exec review
     """
 
@@ -99,12 +100,20 @@ class ContextEngineeringKPI:
             final_assembled_count=final_chunks,
         )
 
-        # ---- Redundancy Rejection ----
-        redundant_rejections = self.registry._counters.get(
-            "context_redundant_rejections", 0
+        # ---- Redundancy Rejection Rate ----
+        # Percentage of deduplicated candidate chunks
+        # rejected by Jaccard-based redundancy filtering
+
+        redundant_rejections_metric = self.registry._counters.get(
+            "context_redundant_rejections"
         )
 
-        deduped_candidates = sum(
+        redundant_rejections = (
+            redundant_rejections_metric.value
+            if redundant_rejections_metric else 0
+        )
+
+        redundancy_candidates = sum(
             self.registry._distributions
             .get("context_deduped_chunks", {})
             .values
@@ -112,19 +121,24 @@ class ContextEngineeringKPI:
 
         redundancy_rate = (
             round(
-                (redundant_rejections / deduped_candidates) * 100,
+                (redundant_rejections / redundancy_candidates) * 100,
                 2,
             )
-            if deduped_candidates else 0.0
+            if redundancy_candidates else 0.0
         )
 
-        # ---- Prompt Budget Compliance ----
-        prompt_budget_metric = self.registry._categoricals.get("prompt_budget_mode")
+        # =====================================================
+        # Prompt Budget Compliance
+        # =====================================================
+
+        prompt_budget_metric = self.registry._categoricals.get(
+            "prompt_budget_mode"
+        )
         prompt_mode_metric = self.registry._categoricals.get(
             "prompt_mode"
         )
 
-        budget_compliant = (
+        budget_mode_count = (
             sum(prompt_budget_metric.values.values())
             if prompt_budget_metric else 0
         )
@@ -134,9 +148,7 @@ class ContextEngineeringKPI:
             if prompt_mode_metric else 0
         )
 
-        compliant_prompts = budget_compliant + insufficient_count
-
-
+        compliant_prompts = budget_mode_count + insufficient_count
         total_runs = len(TRAFFIC)
 
         prompt_budget_compliance_rate = (
@@ -151,7 +163,7 @@ class ContextEngineeringKPI:
         print(f"\n{BOLD}{CYAN}RESUME-GRADE KPI: CONTEXT ENGINEERING{RESET}\n")
 
         header = (
-            f"{BOLD}| Metric Name                "
+            f"{BOLD}| Metric Name                     "
             f"| Value    | Target   |{RESET}"
         )
         divider = "-" * len(header)
@@ -161,17 +173,17 @@ class ContextEngineeringKPI:
         print(divider)
 
         print(
-            f"| Context Compression Ratio  "
+            f"| Context Compression Ratio       "
             f"| {compression.ratio:<6.2f}x "
             f"| < 0.4x   |"
         )
         print(
-            f"| Redundancy Rejection Rate  "
+            f"| Redundancy Rejection Rate       "
             f"| {redundancy_rate:>6.2f}% "
             f"| > 10%    |"
         )
         print(
-            f"| Prompt Budget Compliance Rate "
+            f"| Prompt Budget Compliance Rate   "
             f"| {prompt_budget_compliance_rate:>6.2f}% "
             f"| = 100%   |"
         )

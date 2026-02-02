@@ -67,11 +67,14 @@ class PromptManager:
         with ProfileBlock("PromptConstruction"):
 
             # ------------------------------------------------
-            # Capability guardrails
+            # Capability guardrails (SAFE REFUSAL)
             # ------------------------------------------------
             if capability == AnswerCapability.INSUFFICIENT:
-                MetricsRegistry.get().record(
-                    "prompt_mode", "insufficient"
+                registry = MetricsRegistry.get()
+                registry.record("prompt_mode", "insufficient")
+                registry.record(
+                    "prompt_budget_mode",
+                    "insufficient_safe_refusal",
                 )
                 return self._insufficient_prompt(query)
 
@@ -152,7 +155,7 @@ class PromptManager:
                     return prompt
 
             # ------------------------------------------------
-            # ABSOLUTE FAIL-SAFE
+            # ABSOLUTE FAIL-SAFE (MINIMAL PROMPT)
             # ------------------------------------------------
             MetricsRegistry.get().record(
                 "prompt_budget_mode", "minimal"

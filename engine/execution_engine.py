@@ -79,7 +79,6 @@ class RageEngine:
             raise RuntimeError("Engine already closed")
 
         registry = MetricsRegistry.get()
-        self._reset_metrics(registry)
 
         engine_start = time.perf_counter()
 

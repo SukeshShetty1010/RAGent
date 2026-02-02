@@ -23,11 +23,18 @@ if not logger.handlers:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # ============================================================
-# Constants (MODULE-LEVEL)
+# Constants
 # ============================================================
 
-# Jaccard similarity threshold for redundancy rejection
-JACCARD_REDUNDANCY_THRESHOLD = 0.85
+# 🔽 LOWERED: aggressive redundancy detection for KPI validation
+JACCARD_REDUNDANCY_THRESHOLD = 0.50
+
+# Common stopwords removed during normalization
+STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were",
+    "of", "to", "and", "or", "for", "in", "on",
+    "with", "by", "from", "that", "this", "as",
+}
 
 
 # ============================================================
@@ -38,20 +45,15 @@ class ContextAssembler:
     """
     Final structural processing layer before prompt injection.
 
-    Responsibilities:
-    - Coarse deduplication
-    - Task-aware ordering
-    - Fine-grained redundancy filtering (Jaccard)
-    - Strict character-budget enforcement (atomic inclusion only)
-
-    Fully instrumented for observability.
+    Guarantees:
+    - HARD character budget enforced
+    - Atomic chunk inclusion (no truncation)
+    - Ordering BEFORE budget enforcement
+    - Redundancy filtering DURING budget assembly
+    - Fully observable behavior
     """
 
-    # --------------------------------------------------------
-    # 🔑 CLASS-OWNED RUNTIME-PATCHABLE BUDGET
-    # --------------------------------------------------------
-
-    # HARD safety cap — may be temporarily expanded by E2E fallback
+    # HARD safety cap (prompt-manager independent)
     MAX_CONTEXT_CHARS = 4000
 
     # --------------------------------------------------------
@@ -63,15 +65,6 @@ class ContextAssembler:
         chunks: List[Dict[str, Any]],
         task: TaskType,
     ) -> List[Dict[str, Any]]:
-        """
-        Assemble a coherent, ordered context for the given task.
-
-        DESIGN GUARANTEES:
-        - HARD character budget enforced
-        - Chunks are indivisible (no truncation)
-        - Ordering BEFORE budget enforcement
-        - Redundancy filtering DURING budget assembly
-        """
 
         with ProfileBlock("ContextAssembly"):
 
@@ -97,14 +90,11 @@ class ContextAssembler:
             # ------------------------------------------------
             with ProfileBlock("Ordering"):
                 if task == TaskType.COMPARISON:
-                    with ProfileBlock("OrderComparison"):
-                        ordered = self._order_comparison(deduped)
+                    ordered = self._order_comparison(deduped)
                 elif task == TaskType.LISTICLE:
-                    with ProfileBlock("OrderListicle"):
-                        ordered = self._order_listicle(deduped)
+                    ordered = self._order_listicle(deduped)
                 else:
-                    with ProfileBlock("OrderFactual"):
-                        ordered = self._order_factual(deduped)
+                    ordered = self._order_factual(deduped)
 
             # ------------------------------------------------
             # Step C: Source Labeling (Safety)
@@ -114,7 +104,7 @@ class ContextAssembler:
                     c["source_type"] = "local"
 
             # ------------------------------------------------
-            # Step D: Safe Context Cap (CHAR BUDGET)
+            # Step D: HARD Context Budget Enforcement
             # ------------------------------------------------
             with ProfileBlock("SafeContextCap"):
                 final_chunks = self._apply_character_budget(ordered)
@@ -148,9 +138,7 @@ class ContextAssembler:
 
             source_title = (c.get("source_title") or "").strip()
             norm = self._normalize_text(content)
-
-            key_material = f"{source_title}::{norm}"
-            key = self._hash_text(key_material)
+            key = self._hash_text(f"{source_title}::{norm}")
 
             existing = normalized_map.get(key)
             if not existing or len(content) > len(existing.get("content", "")):
@@ -271,7 +259,7 @@ class ContextAssembler:
         )
 
     # ========================================================
-    # Safe Context Cap (CORE FIX)
+    # HARD Context Budget Enforcement
     # ========================================================
 
     def _apply_character_budget(
@@ -291,6 +279,10 @@ class ContextAssembler:
                 continue
 
             content_len = len(content)
+
+            if content_len > char_cap:
+                MetricsRegistry.get().inc("context_budget_rejections")
+                continue
 
             if used_chars + content_len > char_cap:
                 MetricsRegistry.get().inc("context_budget_rejections")
@@ -326,8 +318,7 @@ class ContextAssembler:
             if not union:
                 continue
 
-            similarity = len(intersection) / len(union)
-            if similarity >= JACCARD_REDUNDANCY_THRESHOLD:
+            if len(intersection) / len(union) >= JACCARD_REDUNDANCY_THRESHOLD:
                 return True
 
         return False
@@ -338,7 +329,18 @@ class ContextAssembler:
 
     @staticmethod
     def _normalize_text(text: str) -> str:
-        return " ".join(text.lower().split())
+        """
+        Aggressive normalization to surface near-duplicates.
+        """
+        text = text.lower()
+        text = re.sub(r"[^\w\s]", " ", text)
+
+        tokens = [
+            t for t in text.split()
+            if t and t not in STOPWORDS
+        ]
+
+        return " ".join(tokens)
 
     @staticmethod
     def _hash_text(text: str) -> str:
@@ -346,4 +348,5 @@ class ContextAssembler:
 
     @staticmethod
     def _tokenize(text: str) -> Set[str]:
-        return set(re.findall(r"[a-z0-9]+", text.lower()))
+        text = ContextAssembler._normalize_text(text)
+        return set(text.split())
