@@ -8,13 +8,15 @@ RAG_ENT/
 │   │   ├── capability_types.py
 │   ├── tools/
 │   │   ├── web_search.py
-│   │   ├── context_assembler.py
-│   │   ├── prompt_manager.py
-│   │   └── task_router.py
-│   ├── chunking/
+│   ├── context_assembler.py
+│   ├── context_algorithms.py
+│   ├── prompt_templates.py
+│   ├── prompt_manager.py
+│   └── task_router.py
+├── chunking/
 │   │   ├── chunk_contract.md
 │   │   └── editorial_chunker.py
-│   └── data/
+├── data/
 │       ├── gamespot_data.py
 │       ├── igdb_data.py
 │       └── rawg_data.py
