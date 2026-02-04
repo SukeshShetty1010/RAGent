@@ -1,7 +1,31 @@
+"""
+Modal-hosted LLM service for RAGent
+
+Model:
+- Qwen/Qwen2.5-1.5B-Instruct
+
+Design:
+- SINGLE endpoint only
+- Runs on L40S GPU
+- No secrets
+- No class branches
+- ragent_client.py unchanged
+"""
+
+from __future__ import annotations
+
 import modal
 import torch
 
+# ------------------------------------------------------------------------------
+# Modal App (MUST match ragent_client.py)
+# ------------------------------------------------------------------------------
+
 app = modal.App("rag-llama3-3b")
+
+# ------------------------------------------------------------------------------
+# Image
+# ------------------------------------------------------------------------------
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -14,11 +38,48 @@ image = (
     )
 )
 
+# ------------------------------------------------------------------------------
+# HF Cache Volume (optional but recommended)
+# ------------------------------------------------------------------------------
+
+model_volume = modal.Volume.from_name(
+    "hf-qwen-llm",
+    create_if_missing=True,
+)
+
+# ------------------------------------------------------------------------------
+# Global LLM (loaded once per container)
+# ------------------------------------------------------------------------------
+
+_llm = None
+
+def _get_llm():
+    global _llm
+    if _llm is None:
+        from vllm import LLM
+
+        _llm = LLM(
+            model="Qwen/Qwen2.5-1.5B-Instruct",
+            dtype=torch.bfloat16,
+            tensor_parallel_size=1,
+            max_model_len=8192,
+            gpu_memory_utilization=0.80,
+            trust_remote_code=True,
+            enforce_eager=True,
+            seed=42,
+            download_dir="/models",
+        )
+    return _llm
+
+# ------------------------------------------------------------------------------
+# SINGLE GPU FUNCTION (THIS IS THE ONLY ENDPOINT)
+# ------------------------------------------------------------------------------
+
 @app.function(
-    gpu="L40S",  # ← Upgraded to Ada Lovelace (48GB VRAM)
-    timeout=300,
+    gpu="L40S",
     image=image,
-    secrets=[modal.Secret.from_name("rag-secrets")],
+    timeout=300,
+    volumes={"/models": model_volume},
     max_containers=5,
 )
 def chat_completion_remote(
@@ -26,25 +87,35 @@ def chat_completion_remote(
     max_tokens: int = 512,
     temperature: float = 0.1,
 ) -> str:
-    from vllm import LLM, SamplingParams
+    """
+    Single GPU-backed text generation endpoint.
+    """
 
-    llm = LLM(
-        model="meta-llama/Llama-3.2-3B-Instruct",
-        dtype=torch.bfloat16,  # ← L40S supports BF16; this matches Llama 3 training and improves numerical stability
-        tensor_parallel_size=1,  # Single L40S is sufficient for a 3B model
-        max_model_len=8192,
-        gpu_memory_utilization=0.85,  # Conservative headroom; well within 48GB
-        trust_remote_code=True,
-        enforce_eager=True,
-        seed=42,
-    )
+    from vllm import SamplingParams
+
+    if not prompt:
+        return ""
+
+    llm = _get_llm()
 
     sampling = SamplingParams(
         temperature=temperature,
         max_tokens=max_tokens,
-        stop=["<|eot_id|>", "<|end_of_text|>"],
         top_p=0.9,
+        repetition_penalty=1.05,
     )
 
     outputs = llm.generate([prompt], sampling)
+
+    if not outputs or not outputs[0].outputs:
+        return ""
+
     return outputs[0].outputs[0].text.strip()
+
+# ------------------------------------------------------------------------------
+# Entrypoint
+# ------------------------------------------------------------------------------
+
+@app.local_entrypoint()
+def main():
+    print("🚀 Qwen2.5 LLM service ready (single GPU endpoint).")
