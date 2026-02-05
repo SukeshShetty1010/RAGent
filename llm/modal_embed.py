@@ -7,7 +7,11 @@ Model:
 GPU:
 - NVIDIA T4
 
-This file RUNS ON MODAL.
+Design guarantees:
+- Runs on Modal
+- Uses env-based Modal auth (implicit)
+- Model loaded once per container
+- Modal 1.0 compliant (no deprecated APIs)
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ model_volume = modal.Volume.from_name(
 )
 
 # ------------------------------------------------------------------------------
-# Stateful Embedder (CORRECT LIFECYCLE)
+# Stateful Embedder (Modal 1.0 compliant)
 # ------------------------------------------------------------------------------
 
 @app.cls(
@@ -53,7 +57,9 @@ model_volume = modal.Volume.from_name(
     gpu="T4",
     timeout=60 * 5,
     volumes={"/models": model_volume},
+    scaledown_window=300,  # Modal 1.0 replacement for container_idle_timeout
 )
+@modal.concurrent(max_inputs=8)  # Modal 1.0 replacement for allow_concurrent_inputs
 class E5Embedder:
     @modal.enter()
     def load_model(self):
@@ -124,9 +130,9 @@ class E5Embedder:
 
 
 # ------------------------------------------------------------------------------
-# Entrypoint
+# Entrypoint (smoke test only)
 # ------------------------------------------------------------------------------
 
 @app.local_entrypoint()
 def main():
-    print("🚀 E5 embedding service ready.")
+    print("🚀 E5 embedding service ready (Modal 1.0).")

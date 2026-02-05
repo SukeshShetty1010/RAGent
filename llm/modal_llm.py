@@ -2,14 +2,14 @@
 Modal-hosted LLM service for RAGent
 
 Model:
-- Qwen/Qwen2.5-1.5B-Instruct
+- HuggingFaceTB/SmolLM3-3B
 
-Design:
+Design guarantees:
 - SINGLE endpoint only
 - Runs on L40S GPU
-- No secrets
+- No secrets or auth logic
 - No class branches
-- ragent_client.py unchanged
+- Backend calls via ragent_client.py
 """
 
 from __future__ import annotations
@@ -18,61 +18,66 @@ import modal
 import torch
 
 # ------------------------------------------------------------------------------
-# Modal App (MUST match ragent_client.py)
+# Modal App (DEPLOYMENT IDENTITY)
 # ------------------------------------------------------------------------------
 
-app = modal.App("rag-llama3-3b")
+app = modal.App("rag-smollm3-3b")
 
 # ------------------------------------------------------------------------------
-# Image
+# Image (CUDA-ready, minimal)
 # ------------------------------------------------------------------------------
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
     .pip_install(
-        "vllm==0.6.3.post1",
         "torch==2.4.0",
         "transformers>=4.45.0",
+        "accelerate>=0.33.0",
         "huggingface-hub>=0.25.0",
     )
 )
 
 # ------------------------------------------------------------------------------
-# HF Cache Volume (optional but recommended)
+# Persistent HF Cache Volume
 # ------------------------------------------------------------------------------
 
 model_volume = modal.Volume.from_name(
-    "hf-qwen-llm",
+    "hf-smollm3-llm",
     create_if_missing=True,
 )
 
 # ------------------------------------------------------------------------------
-# Global LLM (loaded once per container)
+# Global Model (loaded once per container)
 # ------------------------------------------------------------------------------
 
-_llm = None
+_model = None
+_tokenizer = None
 
-def _get_llm():
-    global _llm
-    if _llm is None:
-        from vllm import LLM
 
-        _llm = LLM(
-            model="Qwen/Qwen2.5-1.5B-Instruct",
-            dtype=torch.bfloat16,
-            tensor_parallel_size=1,
-            max_model_len=8192,
-            gpu_memory_utilization=0.80,
+def _get_model():
+    global _model, _tokenizer
+
+    if _model is None:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        _tokenizer = AutoTokenizer.from_pretrained(
+            "HuggingFaceTB/SmolLM3-3B",
             trust_remote_code=True,
-            enforce_eager=True,
-            seed=42,
-            download_dir="/models",
         )
-    return _llm
+
+        _model = AutoModelForCausalLM.from_pretrained(
+            "HuggingFaceTB/SmolLM3-3B",
+            torch_dtype=torch.bfloat16,
+            device_map="cuda",
+            trust_remote_code=True,
+        ).eval()
+
+    return _model, _tokenizer
+
 
 # ------------------------------------------------------------------------------
-# SINGLE GPU FUNCTION (THIS IS THE ONLY ENDPOINT)
+# SINGLE GPU FUNCTION (ONLY REMOTE ENDPOINT)
 # ------------------------------------------------------------------------------
 
 @app.function(
@@ -81,41 +86,51 @@ def _get_llm():
     timeout=300,
     volumes={"/models": model_volume},
     max_containers=5,
+    scaledown_window=300,  # Modal 1.0 replacement for container_idle_timeout
 )
+@modal.concurrent(max_inputs=4)  # Modal 1.0 replacement for allow_concurrent_inputs
 def chat_completion_remote(
     prompt: str,
     max_tokens: int = 512,
     temperature: float = 0.1,
 ) -> str:
     """
-    Single GPU-backed text generation endpoint.
+    GPU-backed text generation endpoint.
     """
-
-    from vllm import SamplingParams
 
     if not prompt:
         return ""
 
-    llm = _get_llm()
+    model, tokenizer = _get_model()
 
-    sampling = SamplingParams(
-        temperature=temperature,
-        max_tokens=max_tokens,
-        top_p=0.9,
-        repetition_penalty=1.05,
-    )
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=32768,
+    ).to("cuda")
 
-    outputs = llm.generate([prompt], sampling)
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            temperature=temperature,
+            top_p=0.9,
+            repetition_penalty=1.05,
+            do_sample=temperature > 0,
+        )
 
-    if not outputs or not outputs[0].outputs:
-        return ""
+    generated = output_ids[0][inputs["input_ids"].shape[-1]:]
+    return tokenizer.decode(
+        generated,
+        skip_special_tokens=True,
+    ).strip()
 
-    return outputs[0].outputs[0].text.strip()
 
 # ------------------------------------------------------------------------------
-# Entrypoint
+# Local Entrypoint (smoke test only)
 # ------------------------------------------------------------------------------
 
 @app.local_entrypoint()
 def main():
-    print("🚀 Qwen2.5 LLM service ready (single GPU endpoint).")
+    print("🚀 SmolLM3-3B service ready (L40S · transformers backend)")
