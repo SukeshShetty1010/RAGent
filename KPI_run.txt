@@ -1,0 +1,273 @@
+(RAG_env) PS D:\Sukesh\Anti-Gravity\RAG_ent> python -m KPI.Unified_KPI_Runner
+python-dotenv could not parse statement starting at line 19
+
+=== RAG SYSTEM EXECUTIVE DASHBOARD ===
+
+======================================================================
+📉 Prompt overflow — switching to concise mode
+
+RESUME-GRADE KPI: CONTEXT ENGINEERING
+
+------------------------------------------------------------------------
+| Metric Name                     | Value                |
+------------------------------------------------------------------------
+| Context Noise Reduction         |  47.37%               |
+| Context Chunks Used             | 38 → 20      |
+| Redundancy Rejection Rate       |   0.00%               |
+| Prompt Budget Compliance Rate   | 100.00%               |
+------------------------------------------------------------------------
+✅ Impact: Reduced prompt context size while maintaining strict prompt-budget guarantees.
+
+D:\Sukesh\Anti-Gravity\RAG_ent\RAG_env\Lib\site-packages\weaviate\warnings.py:302: ResourceWarning: Con004: The connection to Weaviate was not closed properly. This can lead to memory leaks.
+            Please make sure to close the connection using `client.close()`.
+  warnings.warn(
+D:\Sukesh\Anti-Gravity\RAG_ent\KPI\Unified_KPI_Runner.py:70: ResourceWarning: unclosed <socket.socket fd=1368, family=23, type=1, proto=0, laddr=('::1', 52420, 0, 0), raddr=('::1', 8080, 0, 0)>
+  ContextEngineeringKPI().run()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+======================================================================
+
+RESUME-GRADE KPI: ANSWER INTEGRITY & SAFETY
+
+--------------------------------------------------------------------------
+| Query Type        | Answer Behavior           | Safety Outcome |
+--------------------------------------------------------------------------
+| COMPARISON      | Graceful degradation      | Safe |
+📉 Prompt overflow — switching to concise mode
+| LISTICLE        | Graceful degradation      | Safe |
+| FACTUAL         | Graceful degradation      | Safe |
+| OPEN            | Graceful degradation      | Safe |
+📉 Prompt overflow — switching to concise mode
+📉 Prompt still too large — truncating context tail
+| OPEN            | Graceful degradation      | Safe |
+| FACTUAL         | Graceful degradation      | Safe |
+--------------------------------------------------------------------------
+
+EXECUTIVE SAFETY METRICS
+
+--------------------------------------------------------------------
+| Metric                          | Value                  |
+--------------------------------------------------------------------
+| Queries Evaluated               | 6                      |
+| Honest Answer Rate              | 100.00% (guaranteed)   |
+| Hallucinated Claims Emitted     | 0                      |
+| Graceful Degradation Coverage   | 100.00%               |
+| Unsafe Outputs Produced         | 0                      |
+--------------------------------------------------------------------
+
+CAPABILITY-AWARE ANSWER PROFILE
+
+-------------------------------------------------------------------
+| Capability Level | Count | Interpretation               |
+-------------------------------------------------------------------
+| FULL             | 0     | Fully evidence-backed answers     |
+| PARTIAL          | 6     | Transparent, non-hallucinating   |
+| INSUFFICIENT     | 0     | Safe refusal                     |
+-------------------------------------------------------------------
+
+======================================================================
+
+RESUME-GRADE KPI: SEARCH RELEVANCE
+
+-----------------------------------------------------------------------------------
+| Query Snippet                          | Evidence Hit | Entity Coverage |
+-----------------------------------------------------------------------------------
+| Compare Far Cry 5 vs Assassin’…     | YES |     100.00%     |
+📉 Prompt overflow — switching to concise mode
+| Top 5 things to do in Far Cry …     | YES |     100.00%     |
+| What is the release date of Fa…     | YES |     100.00%     |
+| Latest patch notes for Assassi…     | NO  |       0.00%     |
+-----------------------------------------------------------------------------------
+
+AGGREGATE PERFORMANCE METRICS
+
+-------------------------------------------------------
+| Metric Name                    | Value      |
+-------------------------------------------------------
+| Evidence Hit Rate              |   75.00% |
+| Avg Entity Coverage            |   75.00% |
+| Avg Retrieval Confidence       | 0.6299     |
+| Web Fallback Trigger Rate      |   25.00% |
+-------------------------------------------------------
+
+D:\Sukesh\Anti-Gravity\RAG_ent\KPI\Unified_KPI_Runner.py:89: ResourceWarning: unclosed <socket.socket fd=1328, family=23, type=1, proto=0, laddr=('::1', 62466, 0, 0), raddr=('::1', 8080, 0, 0)>
+  RetrievalQualityKPI().run()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+======================================================================
+📉 Prompt overflow — switching to concise mode
+📉 Prompt still too large — truncating context tail
+
+--- LATENCY PROFILE ---
+ {
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1231.5965,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 12.4661,    
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0044,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1244.255,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch": 1244.2827,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition": 2488.6006,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QualityGate": 0.6547,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 ChunkMerge": 0.0009,
+  "latency::REQUEST_TOTAL \u2192 Retrieval": 2489.2728,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 Deduplication": 0.4908,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 Ordering": 0.0127,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 SafeContextCap": 0.5706,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly": 1.1012,
+  "latency::REQUEST_TOTAL \u2192 PromptConstruction \u2192 ContextFormatting": 0.0079,
+  "latency::REQUEST_TOTAL \u2192 PromptConstruction": 0.0182,
+  "latency::REQUEST_TOTAL \u2192 LLMGeneration": 7662.7871,
+  "latency::REQUEST_TOTAL": 10153.3747,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 TaskRouting": 0.0723,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1244.867,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 12.0886,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0048,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1257.1737,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch": 1257.2062,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition": 3771.6692,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QualityGate": 1.4572,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 ChunkMerge": 0.001,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval": 3773.1494,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 Deduplication": 0.8146,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 Ordering": 0.0151,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 SafeContextCap": 0.5712,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly": 1.4377,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 PromptConstruction \u2192 ContextFormatting": 0.0124,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 PromptConstruction": 0.6691,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 LLMGeneration": 7665.6991,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL": 11441.5452
+}
+📉 Prompt overflow — switching to concise mode
+
+--- LATENCY PROFILE ---
+ {
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1231.5965,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 12.4661,    
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0044,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1244.255,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch": 1244.2827,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition": 2488.6006,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QualityGate": 0.6547,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 ChunkMerge": 0.0009,
+  "latency::REQUEST_TOTAL \u2192 Retrieval": 2489.2728,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 Deduplication": 0.4908,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 Ordering": 0.0127,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 SafeContextCap": 0.5706,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly": 1.1012,
+  "latency::REQUEST_TOTAL \u2192 PromptConstruction \u2192 ContextFormatting": 0.0079,
+  "latency::REQUEST_TOTAL \u2192 PromptConstruction": 0.0182,
+  "latency::REQUEST_TOTAL \u2192 LLMGeneration": 7662.7871,
+  "latency::REQUEST_TOTAL": 10797.5036,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 TaskRouting": 0.0723,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1244.867,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 12.0886,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0048,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1257.1737,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch": 1257.2062,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition": 3771.6692,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QualityGate": 1.2257,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 ChunkMerge": 0.001,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval": 2517.501,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 Deduplication": 0.7321,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 Ordering": 0.013,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 SafeContextCap": 0.6218,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly": 1.4142,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 PromptConstruction \u2192 ContextFormatting": 0.011,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 PromptConstruction": 0.4589,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 LLMGeneration": 5760.1789,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL": 8279.9662,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1253.209,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 7.3908,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0068,     
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1260.7948,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch": 1260.8356
+}
+
+--- LATENCY PROFILE ---
+ {
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1231.5965,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 12.4661,    
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0044,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1244.255,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch": 1244.2827,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition": 2488.6006,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 QualityGate": 0.6547,
+  "latency::REQUEST_TOTAL \u2192 Retrieval \u2192 ChunkMerge": 0.0009,
+  "latency::REQUEST_TOTAL \u2192 Retrieval": 2489.2728,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 Deduplication": 0.4908,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 Ordering": 0.0127,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly \u2192 SafeContextCap": 0.5706,
+  "latency::REQUEST_TOTAL \u2192 ContextAssembly": 1.1012,
+  "latency::REQUEST_TOTAL \u2192 PromptConstruction \u2192 ContextFormatting": 0.0079,
+  "latency::REQUEST_TOTAL \u2192 PromptConstruction": 0.0182,
+  "latency::REQUEST_TOTAL \u2192 LLMGeneration": 7662.7871,
+  "latency::REQUEST_TOTAL": 8904.4937,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 TaskRouting": 0.0723,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1244.867,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 12.0886,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0048,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1257.1737,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition \u2192 LocalVectorSearch": 1257.2062,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QueryDecomposition": 3771.6692,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 QualityGate": 0.9041,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 ChunkMerge": 0.0011,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval": 3596.984,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 Deduplication": 0.704,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 Ordering": 0.0108,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly \u2192 SafeContextCap": 0.5968,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 ContextAssembly": 1.3529,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 PromptConstruction \u2192 ContextFormatting": 0.0091,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 PromptConstruction": 0.3115,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 LLMGeneration": 4632.8948,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL": 8232.0158,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 EmbeddingGeneration": 1261.9349,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 VectorQuery": 13.4869,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch \u2192 ResultFormatting": 0.0058,     
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch \u2192 LocalVectorSearch": 1275.6099,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 LocalVectorSearch": 1275.651,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 WebSearch \u2192 WebSearch \u2192 TavilyAPICall": 4465.0626,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 WebSearch \u2192 WebSearch \u2192 WebResultNormalization": 0.0043,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 WebSearch \u2192 WebSearch": 4465.0913,
+  "latency::REQUEST_TOTAL \u2192 REQUEST_TOTAL \u2192 Retrieval \u2192 WebSearch": 4465.1888
+}
+
+RESUME-GRADE KPI: SYSTEM PERFORMANCE
+
+C — Regression Guard Coverage
+  • Permanent regressions enforced: 2/3
+
+D — Latency Attribution (% of total time)
+  • LLMGeneration: 75.47%
+  • Retrieval: 24.52%
+  • ContextAssembly: 0.01%
+  • PromptConstruction: 0.00%
+
+E — Context Efficiency
+  • Context noise reduction ratio: 57.14%
+  • Input chunks: 42, Final chunks used: 18
+
+D:\Sukesh\Anti-Gravity\RAG_ent\KPI\Unified_KPI_Runner.py:101: ResourceWarning: unclosed <socket.socket fd=1768, family=23, type=1, proto=0, laddr=('::1', 63582, 0, 0), raddr=('::1', 8080, 0, 0)>
+  SystemPerformanceKPI().run()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+======================================================================
+📉 Prompt overflow — switching to concise mode
+📉 Prompt overflow — switching to concise mode
+📉 Prompt overflow — switching to concise mode
+📉 Prompt still too large — truncating context tail
+
+RESUME-GRADE KPI REPORT
+
+----------------------------------------------------------------------------------
+| Metric Category | Metric Name             | Value        | N (Samples) |
+----------------------------------------------------------------------------------
+| Routing & Intent | Intent Signal Accuracy  | 100.00% | 5           |
+| Routing & Intent | Task Routing Accuracy   | 100.00% | 5           |
+| System Stability | Routing Determinism Rate | 100.00% | 5           |
+----------------------------------------------------------------------------------
+
+======================================================================
+
+D:\Sukesh\Anti-Gravity\RAG_ent\KPI\Unified_KPI_Runner.py:124: ResourceWarning: unclosed <socket.socket fd=1816, family=23, type=1, proto=0, laddr=('::1', 63595, 0, 0), raddr=('::1', 8080, 0, 0)>
+  UnifiedDashboard().run()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\sukes\anaconda3\Lib\asyncio\selector_events.py:879: ResourceWarning: unclosed transport <_SelectorSocketTransport fd=896>
+  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+(RAG_env) PS D:\Sukesh\Anti-Gravity\RAG_ent>
