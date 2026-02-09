@@ -31,6 +31,13 @@ RAG_ENT/
 │   ├── platformspec_ingest.py
 │   ├── rawg_identity_ingest.py
 │   └── rawg_identity_validator.py
+├── KPI/
+│   ├── Context_Engineering_KPI.py
+│   ├── Faith_Fair_KPI.py
+│   ├── Intent_Agent_Control.py
+│   ├── Retrieval_Quality_KPI.py
+│   ├── System_Performance_KPI.py
+│   └── Unified_KPI_Runner.py
 ├── llm/
 │   ├── modal_embed.py
 │   ├── modal_llm.py
