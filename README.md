@@ -60,7 +60,7 @@ flowchart TB
     
     subgraph Generation["Step 6-7: Prompt & LLM"]
         PM[PromptManager]
-        LLM[Modal LLM]
+        LLM[SmolLM3-3B via Modal]
         CTX --> PM
         PM -->|FULL/PARTIAL| LLM
         PM -->|INSUFFICIENT| REF[Safe Refusal]
@@ -95,7 +95,7 @@ flowchart LR
     
     subgraph Chunking["Chunking & Embedding"]
         CH[editorial_chunker.py]
-        EM[Modal E5 Embedder]
+        EM[E5-base-v2 Embedder]
     end
     
     subgraph Vector["Vector Storage"]
@@ -187,7 +187,7 @@ The retrieval layer implements **hybrid search** combining BM25 keyword matching
 | Vector DB Schema Design | `vector/schemas/` | 8 JSON schemas: Game, PlatformSpec, IGDB_Game, EditorialChunk |
 | Hybrid Search (BM25 + Vector) | `retriever/rag_retriever.py` | `RAGRetriever.retrieve()` with `alpha=0.5` |
 | Word-Based Chunking | `chunking/editorial_chunker.py` | `EditorialChunker` (500 tokens, 50 overlap) |
-| GPU Embedding Service | `llm/modal_embed.py` | `E5Embedder` on T4 GPU (intfloat/e5-base-v2) |
+| GPU Embedding Service | `llm/modal_embed.py` | `E5Embedder` on T4 GPU (`intfloat/e5-base-v2`) |
 
 
 ### Agentic Logic & Control Flow
@@ -211,13 +211,13 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 
 ### LLM Infrastructure
 
-LLM serving is fully **serverless via Modal**, with GPU-accelerated inference on L40S (generation) and T4 (embeddings). The lazy binding pattern ensures environment variables are loaded before Modal client initialization, enabling seamless CI/Docker deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
+LLM serving is fully **serverless via Modal**, with GPU-accelerated inference using **HuggingFaceTB/SmolLM3-3B** on L40S (generation) and **intfloat/e5-base-v2** on T4 (embeddings). The lazy binding pattern ensures environment variables are loaded before Modal client initialization, enabling seamless CI/Docker deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Serverless GPU Deployment | `llm/modal_llm.py` | `chat_completion_remote()` on L40S GPU |
+| Serverless GPU Deployment | `llm/modal_llm.py` | `chat_completion_remote()` with `HuggingFaceTB/SmolLM3-3B` on L40S GPU |
 | Lazy Modal Client Binding | `llm/ragent_client.py` | `_get_remote_llm()` for CI/Docker compatibility |
-| GPU Embedding Infrastructure | `llm/modal_embed.py` | `E5Embedder` with `@modal.enter()` lifecycle |
+| GPU Embedding Infrastructure | `llm/modal_embed.py` | `E5Embedder` with `intfloat/e5-base-v2` on T4 GPU |
 
 
 ### Observability & Evaluation
@@ -315,7 +315,7 @@ python -m KPI.Unified_KPI_Runner
 | 6 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
 | 7 | `ContextAssembler` | Deduplicates, orders by entity balance |
 | 8 | `PromptManager` | Applies `comparison_verbose` template |
-| 9 | `RageEngine` | Generates via Modal LLM (SmolLM3-3B) |
+| 9 | `RageEngine` | Generates via Modal LLM (`HuggingFaceTB/SmolLM3-3B`) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.
 
