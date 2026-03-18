@@ -6,3 +6,5 @@ RAG/lib/
 __pycache__/
 *.pyc
 RAG-main (1).zip
+RAG_env/
+.semantic_cache/
