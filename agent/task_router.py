@@ -109,7 +109,7 @@ class TaskRouter:
                 decision.task.value,
             )
 
-            return decision
+            return decision  
 
     # --------------------------------------------------------
     # Routing Policy
