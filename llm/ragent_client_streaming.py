@@ -5,13 +5,26 @@
 """
 Streaming-capable LLM client for conversational UI.
 
-This module provides both blocking and streaming interfaces
-to the Modal-hosted LLM service.
+Targets the Modal-hosted Mistral 7B Instruct vLLM deployment:
+  - App:      mistral-7b-instruct-vllm          (modal_llm.py)
+  - Class:    MistralVLLM
+  - Method:   generate  (L40S GPU, Modal generator)
+
+The remote ``generate`` method is a Modal generator function decorated
+with ``@modal.method()`` on a ``@app.cls``-decorated class.  The correct
+way to call a method on a Modal Cls from another process is:
+
+    MistralVLLM = modal.Cls.from_name(APP_NAME, CLASS_TAG)
+    instance    = MistralVLLM()
+    for chunk in instance.generate.remote_gen(prompt, ...):
+        ...
+
+This module provides both blocking and streaming interfaces.
 
 Usage:
     # Blocking mode
     response = chat_completion_remote(prompt)
-    
+
     # Streaming mode (generator)
     for chunk in chat_completion_streaming(prompt):
         print(chunk, end="", flush=True)
@@ -26,29 +39,56 @@ from tests.observability import ProfileBlock, MetricsRegistry
 
 
 # ------------------------------------------------------------
-# Lazy Modal Function Binding
+# Deployment constants
 # ------------------------------------------------------------
 
-_raw_chat_completion = None
+# The Modal App name as declared in modal_llm.py:
+#   app = modal.App("mistral-7b-instruct-vllm")
+_MODAL_APP_NAME = "mistral-7b-instruct-vllm"
+
+# The @app.cls class name hosting the generate method.
+_MODAL_CLASS_TAG = "MistralVLLM"
+
+# The @modal.method name on MistralVLLM that streams tokens.
+_MODAL_METHOD_TAG = "generate"
 
 
-def _get_remote_llm():
+# ------------------------------------------------------------
+# Lazy Modal Cls Binding
+# ------------------------------------------------------------
+
+_remote_cls: Optional[Any] = None          # modal.Cls proxy
+_remote_instance: Optional[Any] = None    # bound instance of MistralVLLM
+
+
+def _get_remote_instance() -> Any:
     """
-    Lazily resolve the Modal remote function.
-    """
-    global _raw_chat_completion
+    Lazily resolve and cache a bound instance of MistralVLLM from the
+    mistral-7b-instruct-vllm deployment.
 
-    if _raw_chat_completion is None:
-        _raw_chat_completion = modal.Function.from_name(
-            "rag-smollm3-3b",
-            "chat_completion_remote",
+    modal.Cls.from_name is lazy: it defers hydration until the first
+    actual call, so no network round-trip occurs here.
+
+    Returns a bound Cls instance whose methods (e.g. .generate) expose
+    .remote(), .remote_gen(), and .spawn() just like modal.Function does
+    for standalone functions.
+    """
+    global _remote_cls, _remote_instance
+
+    if _remote_instance is None:
+        _remote_cls = modal.Cls.from_name(
+            _MODAL_APP_NAME,
+            _MODAL_CLASS_TAG,
         )
+        # Calling the Cls proxy returns a bound instance.
+        # This does NOT spin up a container; it is a purely local object.
+        _remote_instance = _remote_cls()
 
-    return _raw_chat_completion
+    return _remote_instance
 
 
 # ------------------------------------------------------------
-# Blocking API (Original)
+# Blocking API (Original interface — preserved)
 # ------------------------------------------------------------
 
 def chat_completion_remote(
@@ -58,8 +98,12 @@ def chat_completion_remote(
     **kwargs: Any,
 ) -> str:
     """
-    Blocking wrapper around Modal LLM invocation.
-    
+    Blocking wrapper around Modal MistralVLLM.generate invocation.
+
+    Because ``generate`` is a generator method on the remote side,
+    we consume it via remote_gen and join all chunks into a single
+    string, preserving the blocking contract of the original API.
+
     Returns the full generated response as a string.
     """
     if not prompt:
@@ -70,21 +114,36 @@ def chat_completion_remote(
         len(prompt),
     )
 
-    llm = _get_remote_llm()
+    instance = _get_remote_instance()
+    accumulated: list[str] = []
 
     with ProfileBlock("LLMGeneration"):
-        response = llm.remote(
-            prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            **kwargs,
-        )
+        try:
+            # generate is a Modal generator method; use remote_gen to
+            # consume all yielded chunks and accumulate them.
+            for chunk in instance.generate.remote_gen(
+                prompt,
+                max_new_tokens=max_tokens,
+                temperature=temperature,
+                **kwargs,
+            ):
+                text = (
+                    chunk.decode()
+                    if isinstance(chunk, (bytes, bytearray))
+                    else str(chunk)
+                )
+                accumulated.append(text)
+        except Exception:
+            # Propagate — callers handle LLM errors via their own
+            # try/except (e.g. execution_engine_streaming.py).
+            raise
 
-    if isinstance(response, str):
-        MetricsRegistry.get().observe(
-            "llm_output_chars",
-            len(response),
-        )
+    response = "".join(accumulated)
+
+    MetricsRegistry.get().observe(
+        "llm_output_chars",
+        len(response),
+    )
 
     return response
 
@@ -101,17 +160,20 @@ def chat_completion_streaming(
     **kwargs: Any,
 ) -> Generator[str, None, str]:
     """
-    Streaming generator for Modal LLM invocation.
-    
-    Attempts to use Modal's streaming capabilities if available,
-    otherwise falls back to simulated streaming from the full response.
-    
+    Streaming generator for Modal MistralVLLM.generate invocation.
+
+    Uses Modal's remote_gen to stream token chunks from the
+    Mistral 7B Instruct vLLM deployment in real time.
+
+    Falls back to simulated streaming (word-by-word from a blocking
+    call) if remote_gen is unavailable on the resolved method object.
+
     Yields:
         String chunks as they are generated
-    
+
     Returns:
         The complete accumulated response
-    
+
     Example:
         accumulated = ""
         for chunk in chat_completion_streaming(prompt):
@@ -126,80 +188,120 @@ def chat_completion_streaming(
         len(prompt),
     )
 
-    llm = _get_remote_llm()
-    accumulated = []
+    instance = _get_remote_instance()
+    accumulated: list[str] = []
 
     with ProfileBlock("LLMGenerationStreaming"):
-        # Attempt to use streaming if available
-        remote_gen = getattr(llm, "remote_gen", None)
-        
+        # Resolve the bound method from the Cls instance.
+        generate_method = instance.generate
+        remote_gen = getattr(generate_method, "remote_gen", None)
+
         if callable(remote_gen):
             try:
-                gen = remote_gen(prompt, max_tokens=max_tokens, temperature=temperature, **kwargs)
-                
-                # Handle async generator
+                gen = remote_gen(
+                    prompt,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    **kwargs,
+                )
+
+                # remote_gen returns a synchronous iterator over
+                # the remote generator's yielded values.
                 if hasattr(gen, "__aiter__"):
+                    # Async generator path (unusual for modal.Cls method
+                    # remote_gen, but handle defensively).
                     import asyncio
-                    
-                    async def consume_async():
-                        nonlocal accumulated
+
+                    async def _consume_async():
                         async for chunk in gen:
-                            text = chunk.decode() if isinstance(chunk, (bytes, bytearray)) else str(chunk)
+                            text = (
+                                chunk.decode()
+                                if isinstance(chunk, (bytes, bytearray))
+                                else str(chunk)
+                            )
                             accumulated.append(text)
                             if on_chunk:
                                 on_chunk(text)
                             yield text
-                    
-                    # Run in event loop
+
                     loop = asyncio.new_event_loop()
                     try:
-                        async_gen = consume_async()
+                        async_gen = _consume_async()
                         while True:
                             try:
-                                chunk = loop.run_until_complete(async_gen.__anext__())
+                                chunk = loop.run_until_complete(
+                                    async_gen.__anext__()
+                                )
                                 yield chunk
                             except StopAsyncIteration:
                                 break
                     finally:
                         loop.close()
+
                 else:
-                    # Synchronous generator
+                    # Primary path: synchronous iterator from remote_gen.
                     for chunk in gen:
-                        text = chunk.decode() if isinstance(chunk, (bytes, bytearray)) else str(chunk)
+                        text = (
+                            chunk.decode()
+                            if isinstance(chunk, (bytes, bytearray))
+                            else str(chunk)
+                        )
                         accumulated.append(text)
                         if on_chunk:
                             on_chunk(text)
                         yield text
-                
+
                 full_response = "".join(accumulated)
-                MetricsRegistry.get().observe("llm_output_chars", len(full_response))
+                MetricsRegistry.get().observe(
+                    "llm_output_chars", len(full_response)
+                )
                 return full_response
-                
+
             except Exception:
-                # Fall through to simulated streaming
-                pass
-        
-        # Fallback: blocking call with simulated streaming
-        response = llm.remote(
+                # Fall through to simulated-streaming fallback below.
+                # Reset accumulator so fallback starts clean.
+                accumulated.clear()
+
+        # ----------------------------------------------------------
+        # Fallback: blocking call + word-by-word simulated streaming.
+        # This path is taken only when remote_gen is unavailable or
+        # raised an unexpected error.
+        # ----------------------------------------------------------
+        response = generate_method.remote(
             prompt,
-            max_tokens=max_tokens,
+            max_new_tokens=max_tokens,
             temperature=temperature,
             **kwargs,
         )
-        
+
+        # generate is a generator; if .remote() was called on it
+        # Modal may return an iterable — drain it defensively.
+        if hasattr(response, "__iter__") and not isinstance(response, str):
+            parts: list[str] = []
+            for item in response:
+                text = (
+                    item.decode()
+                    if isinstance(item, (bytes, bytearray))
+                    else str(item)
+                )
+                parts.append(text)
+            response = "".join(parts)
+
         if isinstance(response, str):
-            MetricsRegistry.get().observe("llm_output_chars", len(response))
-            
-            # Simulate streaming by yielding words
+            MetricsRegistry.get().observe(
+                "llm_output_chars", len(response)
+            )
+
+            # Simulate streaming by yielding words.
             words = response.split()
             for i, word in enumerate(words):
                 chunk = word + (" " if i < len(words) - 1 else "")
                 if on_chunk:
                     on_chunk(chunk)
                 yield chunk
-            
+
             return response
-        
+
         return ""
 
 
@@ -213,25 +315,25 @@ def simulate_streaming(
 ) -> Generator[str, None, None]:
     """
     Simulate streaming by yielding words in small chunks.
-    
+
     This is useful for UI effects when true streaming
     is not available from the LLM backend.
-    
+
     Args:
         text: The full text to stream
         words_per_chunk: Number of words to yield at a time
-    
+
     Yields:
         String chunks of the specified size
     """
     words = text.split()
-    
+
     for i in range(0, len(words), words_per_chunk):
-        chunk_words = words[i:i + words_per_chunk]
+        chunk_words = words[i : i + words_per_chunk]
         chunk = " ".join(chunk_words)
-        
+
         # Add trailing space unless end of text
         if i + words_per_chunk < len(words):
             chunk += " "
-        
+
         yield chunk
