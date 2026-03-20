@@ -1,10 +1,10 @@
 """
 Modal-hosted LLM service for RAGent
 ====================================
-Model  : mistralai/Mistral-7B-Instruct-v0.3
+Model  : Qwen/Qwen2.5-7B-Instruct
 Engine : vLLM (AsyncLLMEngine — PagedAttention + continuous batching)
 GPU    : L40S  (48 GB GDDR6, Ada Lovelace, single card is sufficient)
-App    : mistral-7b-instruct-vllm
+App    : qwen2-5-7b-instruct-vllm
 
 Design guarantees
 -----------------
@@ -16,7 +16,7 @@ Design guarantees
 - Model weights and vLLM compilation artefacts are persisted on
   Modal Volumes to eliminate repeated downloads on cold starts.
 - No quantisation, no LoRA, no weight modifications — pure bf16
-  inference on the base v0.3 checkpoint.
+  inference on the base Qwen2.5 instruct checkpoint.
 - FAST_BOOT=True skips CUDA-graph capture and Torch-compile JIT so
   containers start in ~20 s instead of ~90 s.  Flip to False for
   maximum sustained throughput when replicas stay warm.
@@ -34,7 +34,7 @@ import modal
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
+MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
 
 # Cache directories inside the container — backed by Modal Volumes.
 HF_CACHE_DIR   = "/root/.cache/huggingface"
@@ -80,14 +80,14 @@ vllm_image = (
 # Persistent Volumes  (survive container teardown and restarts)
 # ---------------------------------------------------------------------------
 
-hf_cache_vol   = modal.Volume.from_name("hf-mistral-7b-v0.3",  create_if_missing=True)
-vllm_cache_vol = modal.Volume.from_name("vllm-mistral-7b-cache", create_if_missing=True)
+hf_cache_vol = modal.Volume.from_name("hf-qwen2-5-7b-instruct", create_if_missing=True)
+vllm_cache_vol = modal.Volume.from_name("vllm-qwen2-5-7b-cache", create_if_missing=True)
 
 # ---------------------------------------------------------------------------
 # Modal App
 # ---------------------------------------------------------------------------
 
-app = modal.App("mistral-7b-instruct-vllm")
+app = modal.App("qwen2-5-7b-instruct-vllm")
 
 # ---------------------------------------------------------------------------
 # Inference class
@@ -105,9 +105,9 @@ app = modal.App("mistral-7b-instruct-vllm")
     },
 )
 @modal.concurrent(max_inputs=8)       # vLLM handles concurrency internally
-class MistralVLLM:
+class Qwen25VLLM:
     """
-    Container-persistent vLLM inference engine for Mistral-7B-Instruct-v0.3.
+    Container-persistent vLLM inference engine for Qwen/Qwen2.5-7B-Instruct.
 
     Lifecycle
     ---------
@@ -138,8 +138,9 @@ class MistralVLLM:
             Leave ~8 % for CUDA driver/framework overhead; the rest
             is allocated to KV cache, maximising concurrency.
         max_model_len=32768
-            Full Mistral v0.3 context window.  Reduce if you need
-            to serve many concurrent long-context requests.
+            Safe Qwen2.5 default on a single L40S. The model card
+            advertises 128K support, but the current config defaults
+            to 32K and recommends YaRN only when inputs exceed that.
         enable_prefix_caching=True
             Shares KV-cache blocks across requests with the same
             prompt prefix — valuable for RAG where a system prompt
@@ -204,7 +205,7 @@ class MistralVLLM:
         repetition_penalty: float = 1.05,
     ) -> Iterator[str]:
         """
-        Stream token chunks from Mistral-7B-Instruct-v0.3 via vLLM.
+        Stream token chunks from Qwen/Qwen2.5-7B-Instruct via vLLM.
 
         This is a Modal generator method.  Each ``yield`` sends one
         decoded text chunk back to the caller over the Modal network
@@ -213,9 +214,9 @@ class MistralVLLM:
         Parameters
         ----------
         prompt : str
-            Pre-formatted prompt string.  The caller is responsible for
-            applying the Mistral [INST]...[/INST] chat template if
-            conversational formatting is required.
+            Pre-formatted prompt string. The caller is responsible for
+            applying Qwen-compatible chat formatting upstream if
+            conversational templating is required.
         max_new_tokens : int
             Maximum number of tokens to generate.
         temperature : float
@@ -309,9 +310,9 @@ def main() -> None:
     Quick smoke test.  Run with:
         modal run modal_llm.py
     """
-    model = MistralVLLM()
+    model = Qwen25VLLM()
 
-    test_prompt = "[INST] Briefly explain PagedAttention in vLLM. [/INST]"
+    test_prompt = "Briefly explain PagedAttention in vLLM."
     print(f"Prompt: {test_prompt}\n")
     print("Response: ", end="", flush=True)
 
