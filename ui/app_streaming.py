@@ -370,7 +370,7 @@ def render_message_metrics(metadata: Dict[str, Any], index: int) -> None:
                             else None,
                         }
                     )
-                st.dataframe(stage_rows, use_container_width=True)
+                st.dataframe(stage_rows, width="stretch")
             else:
                 st.caption(f"No stage data for message #{index}.")
         with kpi_json_tab:
@@ -534,7 +534,7 @@ def run_streaming_app() -> None:
             value=st.session_state.show_debug,
         )
 
-        if st.button("Clear chat", use_container_width=True):
+        if st.button("Clear chat", width="stretch"):
             clear_chat_state()
             st.rerun()
 
@@ -547,7 +547,7 @@ def run_streaming_app() -> None:
             "Recent updates": "Latest update for Assassin's Creed Valhalla",
         }
         for label, prompt in samples.items():
-            if st.button(label, use_container_width=True):
+            if st.button(label, width="stretch"):
                 st.session_state.pending_query = prompt
                 st.rerun()
 

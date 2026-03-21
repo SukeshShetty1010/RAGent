@@ -21,17 +21,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Render uses PORT env var; Streamlit binds to it
-ENV PORT=8501
-
-EXPOSE ${PORT}
+# Render uses PORT env var; fall back to Render's default web port locally
+EXPOSE 10000
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/_stcore/health || exit 1
 
 # Streamlit config: headless mode, no file watcher, CORS disabled
 CMD ["sh", "-c", "streamlit run ui/app_streaming.py \
-    --server.port=${PORT} \
+    --server.port=${PORT:-10000} \
     --server.headless=true \
     --server.fileWatcherType=none \
     --server.enableCORS=false \

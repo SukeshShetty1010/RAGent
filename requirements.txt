@@ -17,6 +17,9 @@ modal                           # GPU-offloaded inference (Qwen2.5-7B + E5)
 # ---------- UI ----------
 streamlit>=1.30.0
 
+# ---------- Caching ----------
+diskcache
+
 # ---------- HTTP / API ----------
 requests
 python-dotenv
