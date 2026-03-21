@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Canonical Game Anchor Upsert (Weaviate v4 Compatible)
+Canonical Game Anchor Upsert (Qdrant Compatible)
 
-- Uses REAL Weaviate v4 client
-- Enforces Canonical Game contract (NOT Weaviate schema validation)
+- Uses Qdrant client
+- Enforces Canonical Game contract (NOT schema validation)
 - Enforces deterministic UUIDs
 - Idempotent (no duplicate writes)
 - Fails fast on all invalid states
 """
 
 import argparse
+import os
 import sys
-from uuid import UUID
+from uuid import UUID, uuid5
 
-from weaviate import WeaviateClient
-from weaviate.connect import ConnectionParams
-from weaviate.util import generate_uuid5
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
 
 from ingest.rawg_identity_ingest import fetch_and_prepare_identity
 
@@ -29,6 +29,14 @@ GAME_CLASS_NAME = "Game"
 
 
 # -------------------------------------------------------------------
+# UUID HELPER (replaces weaviate.util.generate_uuid5)
+# -------------------------------------------------------------------
+
+def _generate_uuid5(namespace: UUID, seed: str) -> str:
+    return str(uuid5(namespace, seed))
+
+
+# -------------------------------------------------------------------
 # CONTRACT VALIDATION (AUTHORITATIVE)
 # -------------------------------------------------------------------
 
@@ -37,7 +45,7 @@ def validate_game_contract(game: dict) -> None:
     Enforces the Canonical Game contract.
 
     This validates *data integrity*, not storage schema.
-    Weaviate enforces schema correctness at persistence time.
+    Qdrant enforces payload correctness at query time.
     """
 
     if not isinstance(game, dict):
@@ -66,28 +74,20 @@ def validate_game_contract(game: dict) -> None:
 
 
 # -------------------------------------------------------------------
-# WEAVIATE CLIENT
+# QDRANT CLIENT HELPER
 # -------------------------------------------------------------------
 
-def get_weaviate_client() -> WeaviateClient:
-    try:
-        client = WeaviateClient(
-            connection_params=ConnectionParams.from_url(
-                "http://localhost:8080",
-                grpc_port=50051,
-            )
-        )
-        client.connect()
-        return client
-    except Exception as exc:
-        raise RuntimeError(f"Failed to connect to Weaviate: {exc}") from exc
+def get_qdrant_client() -> QdrantClient:
+    url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    api_key = os.environ.get("QDRANT_API_KEY", "")
+    return QdrantClient(url=url, api_key=api_key or None)
 
 
 # -------------------------------------------------------------------
 # CORE UPSERT LOGIC
 # -------------------------------------------------------------------
 
-def upsert_game_anchor(client: WeaviateClient, game_name: str) -> str:
+def upsert_game_anchor(client: QdrantClient, game_name: str) -> str:
     """
     Fetch → Contract Validate → Deterministic UUID → Idempotent Upsert
     """
@@ -106,26 +106,35 @@ def upsert_game_anchor(client: WeaviateClient, game_name: str) -> str:
     # 3. Deterministic UUID (RAWG ID is the identity root)
     # ------------------------------------------------------------
     rawg_id = game_obj["game_id"]
-    game_uuid = generate_uuid5(GAME_NAMESPACE_UUID, str(rawg_id))
+    game_uuid = _generate_uuid5(GAME_NAMESPACE_UUID, str(rawg_id))
 
     # ------------------------------------------------------------
     # 4. Idempotency check
     # ------------------------------------------------------------
-    collection = client.collections.get(GAME_CLASS_NAME)
+    existing = client.retrieve(
+        collection_name=GAME_CLASS_NAME,
+        ids=[game_uuid],
+    )
 
-    if collection.data.exists(uuid=game_uuid):
+    if existing:
         print(f"⚠️  Game already exists. UUID={game_uuid}")
-        return str(game_uuid)
+        return game_uuid
 
     # ------------------------------------------------------------
     # 5. Insert canonical Game anchor
     # ------------------------------------------------------------
-    collection.data.insert(
-        uuid=game_uuid,
-        properties=game_obj,
+    client.upsert(
+        collection_name=GAME_CLASS_NAME,
+        points=[
+            PointStruct(
+                id=game_uuid,
+                vector=[0.0],  # metadata-only collection (1-dim dummy)
+                payload=game_obj,
+            )
+        ],
     )
 
-    return str(game_uuid)
+    return game_uuid
 
 
 # -------------------------------------------------------------------
@@ -134,7 +143,7 @@ def upsert_game_anchor(client: WeaviateClient, game_name: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Upsert Canonical Game Anchor (Weaviate v4)"
+        description="Upsert Canonical Game Anchor (Qdrant)"
     )
     parser.add_argument(
         "--game",
@@ -144,10 +153,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    client: WeaviateClient | None = None
+    client: QdrantClient | None = None
 
     try:
-        client = get_weaviate_client()
+        client = get_qdrant_client()
         game_uuid = upsert_game_anchor(client, args.game)
         print(f"✅ Canonical Game Anchor ready → UUID: {game_uuid}")
 

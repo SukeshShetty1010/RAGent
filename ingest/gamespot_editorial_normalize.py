@@ -12,7 +12,7 @@ No chunking. No embeddings. No vector logic.
 import argparse
 from typing import Any, Dict, Optional
 
-from weaviate.util import generate_uuid5
+from uuid import UUID, uuid5
 
 from data.gamespot_data import fetch_gamespot_data
 from pre_process.cleaner import GameSpotCleaner
@@ -134,7 +134,8 @@ def fetch_and_prepare_gamespot(
     # Seed: gamespot_<gamespot_id>
     # --------------------------------------------------
     uuid_seed = f"gamespot_{gamespot_id}"
-    gamespot_uuid = generate_uuid5(uuid_seed)
+    _NS = UUID("12345678-1234-5678-1234-567812345678")
+    gamespot_uuid = str(uuid5(_NS, uuid_seed))
 
     # --------------------------------------------------
     # 5. Inject Canonical Game Reference
@@ -144,9 +145,7 @@ def fetch_and_prepare_gamespot(
         "class": "GameSpot_Game",
         "properties": {
             **gamespot_obj,
-            "game": {
-                "beacon": f"weaviate://localhost/Game/{canonical_game_uuid}"
-            },
+            "game_uuid": canonical_game_uuid,
         },
     }
 

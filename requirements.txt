@@ -1,0 +1,30 @@
+# ============================================================
+# RAGent — Production Dependencies
+# ============================================================
+# Core: Python 3.11+
+# Vector DB: Qdrant Cloud (replaces Weaviate)
+# LLM / Embeddings: Modal (Qwen2.5-7B + E5-base-v2)
+# UI: Streamlit
+# ============================================================
+
+# ---------- Vector Database ----------
+qdrant-client>=1.17.0
+fastembed                       # BM25 sparse vector generation (CPU)
+
+# ---------- LLM / Compute ----------
+modal                           # GPU-offloaded inference (Qwen2.5-7B + E5)
+
+# ---------- UI ----------
+streamlit>=1.30.0
+
+# ---------- HTTP / API ----------
+requests
+python-dotenv
+
+# ---------- NLP / Text Processing ----------
+transformers                    # Tokenizers for chunking
+sentence-transformers           # E5 model alignment
+torch --index-url https://download.pytorch.org/whl/cpu  # CPU-only torch
+
+# ---------- Search / Agent Tools ----------
+tavily-python                   # Tavily web search API

@@ -2,7 +2,7 @@
 IGDB Relational Metadata Ingestion (Zero Embeddings)
 
 Fetches, cleans, and transforms IGDB relational data (main game, expansions,
-editions, bundles, DLCs) and prepares Weaviate-ready payloads that are
+editions, bundles, DLCs) and prepares Qdrant-ready payloads that are
 STRICTLY linked to a Canonical Game entity.
 
 This module:
@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, Dict, List
 
-from weaviate.util import generate_uuid5
+from uuid import UUID, uuid5
 
 from data.igdb_data import fetch_igdb_game_data
 from pre_process.cleaner import IGDBCleaner
@@ -102,7 +102,8 @@ def fetch_and_prepare_igdb(
             # Seed: igdb_<igdb_id>_<entity_category>
             # --------------------------------------------------
             uuid_seed = f"igdb_{igdb_id}_{entity_category}"
-            igdb_uuid = generate_uuid5(uuid_seed)
+            _NS = UUID("12345678-1234-5678-1234-567812345678")
+            igdb_uuid = str(uuid5(_NS, uuid_seed))
 
             payload = {
                 "uuid": igdb_uuid,
@@ -158,9 +159,7 @@ def fetch_and_prepare_igdb(
                     # -------------------------------
                     # Mandatory Canonical Game link
                     # -------------------------------
-                    "game": {
-                        "beacon": f"weaviate://localhost/Game/{canonical_game_uuid}"
-                    },
+                    "game_uuid": canonical_game_uuid,
                 },
             }
 

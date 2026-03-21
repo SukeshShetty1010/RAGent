@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from typing import Optional
 
-import weaviate
-from weaviate import WeaviateClient
-from weaviate.exceptions import WeaviateBaseError
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
 
 from ingest.ingest_gamespot import ingest_gamespot
 
@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
-# Core Upsert Function — Stage 4 Container
+# Core Upsert Function — Stage 4 Container (Qdrant)
 # ------------------------------------------------------------------
 def upsert_gamespot_container(
-    client: WeaviateClient,
+    client: QdrantClient,
     game_name: str,
     game_uuid: str,
 ) -> Optional[str]:
@@ -63,32 +63,36 @@ def upsert_gamespot_container(
         raise RuntimeError("Invalid GameSpot payload structure")
 
     # --------------------------------------------------
-    # 3. Remove V3-style reference (CRITICAL)
+    # 3. Remove beacon reference and store as payload field
     # --------------------------------------------------
-    # Payload includes:
-    #   "game": {"beacon": "..."}
-    # This MUST be removed and passed via `references`
     properties.pop("game", None)
+    properties["game_uuid"] = game_uuid
 
     # --------------------------------------------------
-    # 4. Upsert into Weaviate (v4)
+    # 4. Upsert into Qdrant
     # --------------------------------------------------
-    collection = client.collections.get("GameSpot_Game")
-
     try:
-        if collection.data.exists(uuid=obj_uuid):
+        existing = client.retrieve(
+            collection_name="GameSpot_Game",
+            ids=[obj_uuid],
+        )
+
+        if existing:
             logger.info(
                 "GameSpot_Game already exists for '%s'. Skipping.",
                 game_name,
             )
             return obj_uuid
 
-        collection.data.insert(
-            uuid=obj_uuid,
-            properties=properties,
-            references={
-                "game": game_uuid,
-            },
+        client.upsert(
+            collection_name="GameSpot_Game",
+            points=[
+                PointStruct(
+                    id=obj_uuid,
+                    vector=[0.0],  # metadata-only collection (1-dim dummy)
+                    payload=properties,
+                )
+            ],
         )
 
         logger.info(
@@ -97,7 +101,7 @@ def upsert_gamespot_container(
         )
         return obj_uuid
 
-    except WeaviateBaseError as exc:
+    except Exception as exc:
         logger.error(
             "Failed to upsert GameSpot_Game for '%s': %s",
             game_name,
@@ -111,7 +115,7 @@ def upsert_gamespot_container(
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Stage 4: Upsert GameSpot editorial container"
+        description="Stage 4: Upsert GameSpot editorial container (Qdrant)"
     )
     parser.add_argument(
         "--game",
@@ -126,7 +130,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    client = weaviate.connect_to_local()
+    url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    api_key = os.environ.get("QDRANT_API_KEY", "")
+    client = QdrantClient(url=url, api_key=api_key or None)
 
     try:
         result = upsert_gamespot_container(

@@ -1,83 +1,120 @@
-import json
+#!/usr/bin/env python3
+"""
+Qdrant Collection Schema Creator
+
+Creates all required collections in Qdrant:
+- EditorialChunk: dual vectors (dense E5-768 + BM25 sparse with IDF)
+- Game, PlatformSpec, IGDB_Game, GameSpot_Game: metadata-only (1-dim dummy)
+"""
+
+from __future__ import annotations
+
+import os
 import sys
-from pathlib import Path
 
-import weaviate
-from weaviate import WeaviateClient
-from weaviate.exceptions import WeaviateBaseError
+from qdrant_client import QdrantClient, models
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 
-# ------------------------------------------------------------------
+# -------------------------------------------------------------------
 # CONFIG
-# ------------------------------------------------------------------
+# -------------------------------------------------------------------
 
-SCHEMA_DIR = Path("vector/schemas")
+QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 
-# Ordered by dependency (DO NOT CHANGE ORDER)
-SCHEMA_FILES = [
-    "rawg_game_schema.json",          # Game (anchor)
-    "PlatformSpec_Schema.json",       # PlatformSpec → Game
-    "IGDB_Schema.json",               # IGDB_Game → Game
-    "GameSpot_Schema.JSON",           # GameSpot_Game → Game
-    "editorial_chunk_schema.json",    # EditorialChunk → Game + GameSpot_Game
-]
+# Dense vector size (must match E5-base-v2 embedding service)
+E5_VECTOR_SIZE = 768
 
 
-# ------------------------------------------------------------------
-# HELPERS
-# ------------------------------------------------------------------
+# -------------------------------------------------------------------
+# SCHEMA DEFINITIONS
+# -------------------------------------------------------------------
 
-def load_schema(path: Path) -> dict:
-    if not path.exists():
-        raise FileNotFoundError(f"Schema file not found: {path}")
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+def create_all_collections(client: QdrantClient) -> None:
+    """
+    Create or recreate all Qdrant collections for RAGent.
+
+    EditorialChunk:
+        - "dense": E5-base-v2 (768-dim, cosine)
+        - "bm25":  BM25 sparse with server-side IDF scoring
+
+    Game, PlatformSpec, IGDB_Game, GameSpot_Game:
+        - Metadata-only collections (1-dim dummy vector)
+        - Used for payload storage and filtering only
+    """
+
+    existing = {c.name for c in client.get_collections().collections}
+
+    # --------------------------------------------------
+    # EditorialChunk — hybrid search (dense + BM25)
+    # --------------------------------------------------
+    if "EditorialChunk" not in existing:
+        client.create_collection(
+            collection_name="EditorialChunk",
+            vectors_config={
+                "dense": models.VectorParams(
+                    size=E5_VECTOR_SIZE,
+                    distance=models.Distance.COSINE,
+                ),
+            },
+            sparse_vectors_config={
+                "bm25": models.SparseVectorParams(
+                    modifier=models.Modifier.IDF,
+                ),
+            },
+        )
+        print("✅ Created collection: EditorialChunk (dense + BM25 sparse)")
+    else:
+        print("⚠️  Collection already exists: EditorialChunk")
+
+    # --------------------------------------------------
+    # Metadata-only collections
+    # --------------------------------------------------
+    metadata_collections = ["Game", "PlatformSpec", "IGDB_Game", "GameSpot_Game"]
+
+    for name in metadata_collections:
+        if name not in existing:
+            client.create_collection(
+                collection_name=name,
+                vectors_config=models.VectorParams(
+                    size=1,
+                    distance=models.Distance.COSINE,
+                ),
+            )
+            print(f"✅ Created collection: {name} (metadata-only)")
+        else:
+            print(f"⚠️  Collection already exists: {name}")
 
 
-def create_schema_if_missing(client: WeaviateClient, schema: dict) -> None:
-    class_name = schema.get("class")
-    if not class_name:
-        raise ValueError("Schema JSON missing 'class' field")
-
-    existing = client.collections.list_all()
-
-    if class_name in existing:
-        print(f"✅ Schema already exists: {class_name}")
-        return
-
-    print(f"🛠️  Creating schema: {class_name}")
-    client.collections.create_from_dict(schema)
-    print(f"✅ Created schema: {class_name}")
-
-
-# ------------------------------------------------------------------
-# MAIN
-# ------------------------------------------------------------------
+# -------------------------------------------------------------------
+# CLI
+# -------------------------------------------------------------------
 
 def main() -> None:
-    print("🔗 Connecting to Weaviate...")
-    client: WeaviateClient = weaviate.connect_to_local()
+    print(f"Connecting to Qdrant at {QDRANT_URL}...")
 
     try:
-        for filename in SCHEMA_FILES:
-            schema_path = SCHEMA_DIR / filename
-            schema = load_schema(schema_path)
-            create_schema_if_missing(client, schema)
-
-        print("\n🎉 All schemas are present and ready.")
-
-    except (WeaviateBaseError, Exception) as exc:
-        print(f"\n❌ Schema creation failed: {exc}", file=sys.stderr)
+        client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY or None,
+        )
+    except Exception as exc:
+        print(f"❌ Failed to connect to Qdrant: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    try:
+        create_all_collections(client)
+        print("\n✅ All collections ready.")
+    except Exception as exc:
+        print(f"❌ Schema creation failed: {exc}", file=sys.stderr)
+        sys.exit(1)
     finally:
         client.close()
-        print("🔒 Weaviate connection closed.")
 
-
-# ------------------------------------------------------------------
-# ENTRYPOINT
-# ------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()

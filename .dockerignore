@@ -1,0 +1,54 @@
+# ============================================================
+# RAGent — Docker Ignore
+# ============================================================
+
+# Version control
+.git
+.gitignore
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+RAG_env/
+RAG/lib/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment files (secrets — set via Render dashboard)
+.env
+.env.*
+
+# Generated data artifacts
+*_gamespot_full_textual.json
+*_editorial_chunks.json
+*_editorial_chunk_payloads.json
+rawg_data_*.json
+igdb_data_*.json
+data/gamespot/
+
+# Render/Docker config (don't nest)
+render.yaml
+
+# Weaviate schemas (no longer used)
+vector/schemas/
+
+# Tests and KPI runners (not needed in production)
+tests/
+KPI/
+
+# Misc
+*.log
+*.zip
+Thumbs.db
+.DS_Store
+.semantic_cache/

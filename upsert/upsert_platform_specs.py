@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from typing import Dict, Optional
 
-import weaviate
-from weaviate.exceptions import WeaviateBaseError
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
 
 from data.rawg_data import fetch_rawg_game_data
 from pre_process.cleaner import RAWGCleaner
@@ -23,32 +24,16 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-def _uuid_from_beacon(beacon: Optional[str]) -> Optional[str]:
-    """
-    Extract UUID from a Weaviate beacon:
-      weaviate://localhost/Game/<uuid> → <uuid>
-    """
-    if not beacon or not isinstance(beacon, str):
-        return None
-    try:
-        return beacon.rstrip("/").split("/")[-1]
-    except Exception:
-        return None
-
-
-# ------------------------------------------------------------------
-# Core Upsert Function (Weaviate v4)
+# Core Upsert Function (Qdrant)
 # ------------------------------------------------------------------
 def upsert_platform_specs(
-    client: weaviate.WeaviateClient,
+    client: QdrantClient,
     game_name: str,
     game_uuid: str,
 ) -> int:
     """
     Fetch RAWG data, extract platform specs, and upsert PlatformSpec
-    objects into Weaviate (v4).
+    objects into Qdrant.
 
     Design:
     - Deterministic UUIDs
@@ -104,10 +89,8 @@ def upsert_platform_specs(
         return 0
 
     # --------------------------------------------------
-    # 4. Upsert (v4 collections, idempotent)
+    # 4. Upsert (Qdrant, idempotent)
     # --------------------------------------------------
-    collection = client.collections.get("PlatformSpec")
-
     success_count = 0
 
     for obj in payloads:
@@ -115,7 +98,12 @@ def upsert_platform_specs(
 
         try:
             # ---- Idempotency gate ----
-            if collection.data.exists(uuid=obj["uuid"]):
+            existing = client.retrieve(
+                collection_name="PlatformSpec",
+                ids=[obj["uuid"]],
+            )
+
+            if existing:
                 logger.info(
                     "PlatformSpec already exists for '%s' (%s). Skipping.",
                     game_name,
@@ -123,37 +111,30 @@ def upsert_platform_specs(
                 )
                 continue
 
-            # ---- Separate properties and references (v4 rule) ----
+            # ---- Prepare payload (strip beacon refs) ----
             properties: Dict = dict(obj["properties"])
             game_ref = properties.pop("game", None)
 
-            references: Dict[str, str] = {}
-
-            if isinstance(game_ref, dict):
-                game_uuid_ref = _uuid_from_beacon(game_ref.get("beacon"))
-                if game_uuid_ref:
-                    references["game"] = game_uuid_ref
+            # Store game_uuid as a payload field instead of a beacon reference
+            properties["game_uuid"] = game_uuid
 
             # ---- Insert ----
-            collection.data.insert(
-                uuid=obj["uuid"],
-                properties=properties,
-                references=references,
+            client.upsert(
+                collection_name="PlatformSpec",
+                points=[
+                    PointStruct(
+                        id=obj["uuid"],
+                        vector=[0.0],  # metadata-only collection (1-dim dummy)
+                        payload=properties,
+                    )
+                ],
             )
 
             success_count += 1
 
-        except WeaviateBaseError as exc:
-            logger.warning(
-                "Failed to upsert PlatformSpec for '%s' (%s): %s",
-                game_name,
-                platform_name,
-                exc,
-            )
-
         except Exception as exc:
             logger.warning(
-                "Unexpected error for PlatformSpec '%s' (%s): %s",
+                "Failed to upsert PlatformSpec for '%s' (%s): %s",
                 game_name,
                 platform_name,
                 exc,
@@ -163,11 +144,11 @@ def upsert_platform_specs(
 
 
 # ------------------------------------------------------------------
-# CLI Entrypoint (Weaviate v4)
+# CLI Entrypoint (Qdrant)
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Upsert PlatformSpec objects (Weaviate v4, filter-only)"
+        description="Upsert PlatformSpec objects (Qdrant, filter-only)"
     )
     parser.add_argument(
         "--game",
@@ -182,10 +163,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    try:
-        client = weaviate.connect_to_local()
-    except Exception as exc:
-        raise SystemExit(f"❌ Failed to connect to Weaviate: {exc}")
+    url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    api_key = os.environ.get("QDRANT_API_KEY", "")
+    client = QdrantClient(url=url, api_key=api_key or None)
 
     try:
         count = upsert_platform_specs(

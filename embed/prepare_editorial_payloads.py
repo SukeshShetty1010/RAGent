@@ -138,12 +138,8 @@ def generate_chunk_payloads(game_name: str, canonical_uuid: str) -> List[Dict]:
                     "source": chunk["source"],
                     "content_type": chunk["content_type"],
                     "chunk_index": chunk["chunk_index"],
-                    "game": {
-                        "beacon": f"weaviate://localhost/Game/{canonical_uuid}"
-                    },
-                    "parent_editorial": {
-                        "beacon": f"weaviate://localhost/GameSpot_Game/{gamespot_uuid}"
-                    },
+                    "game_uuid": canonical_uuid,
+                    "parent_editorial_uuid": gamespot_uuid,
                 },
             }
         )
@@ -168,10 +164,5 @@ if __name__ == "__main__":
 
     payloads = generate_chunk_payloads(args.game, args.uuid)
 
-    os.makedirs("data", exist_ok=True)
-    fname = f"data/{_safe_name(args.game)}_editorial_chunk_payloads.json"
-
-    with open(fname, "w", encoding="utf-8") as f:
-        json.dump(payloads, f, indent=2, ensure_ascii=False)
-
-    logger.info("Saved %d payloads to %s", len(payloads), fname)
+    # Print summary only — no JSON file I/O
+    logger.info("Generated %d editorial chunk payloads for '%s'", len(payloads), args.game)

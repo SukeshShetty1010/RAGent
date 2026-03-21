@@ -7,7 +7,7 @@ Stages:
 2. Platform Specs
 3. IGDB Metadata
 4. GameSpot Editorial Container
-5. Editorial Chunking + Embedding + Insert
+5. Editorial Chunking + Embedding + Insert (IN-MEMORY — no JSON file I/O)
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ import json
 import logging
 import argparse
 
-import weaviate
-from weaviate import WeaviateClient
+from qdrant_client import QdrantClient
 
 from tests.observability import ProfileBlock, MetricsRegistry
 
@@ -59,13 +58,20 @@ def _safe_name(name: str) -> str:
     return name.strip("_")
 
 
+def _get_qdrant_client() -> QdrantClient:
+    """Get a Qdrant client from environment variables."""
+    url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    api_key = os.environ.get("QDRANT_API_KEY", "")
+    return QdrantClient(url=url, api_key=api_key or None)
+
+
 # -------------------------------------------------------------------
 # MAIN ORCHESTRATOR
 # -------------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the Weaviate ingestion pipeline (Stages 1–5)."
+        description="Run the Qdrant ingestion pipeline (Stages 1–5)."
     )
     parser.add_argument(
         "--game",
@@ -74,15 +80,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    client: WeaviateClient | None = None
+    client: QdrantClient | None = None
 
     with ProfileBlock("INGEST_TOTAL"):
         try:
             # ------------------------------------------------------------
             # Client lifecycle
             # ------------------------------------------------------------
-            logger.info("Connecting to Weaviate...")
-            client = weaviate.connect_to_local()
+            logger.info("Connecting to Qdrant...")
+            client = _get_qdrant_client()
 
             # ------------------------------------------------------------
             # Stage 1: Canonical Game Anchor
@@ -163,6 +169,7 @@ def main() -> None:
 
             # ------------------------------------------------------------
             # Stage 5: Editorial Chunking + Embedding + Insert
+            #           (IN-MEMORY — no JSON file I/O)
             # ------------------------------------------------------------
             logger.info("Starting Stage 5: Editorial Chunking & Embedding...")
 
@@ -179,21 +186,12 @@ def main() -> None:
                         "editorial_chunks_generated", len(chunks)
                     )
 
-                    safe = _safe_name(args.game)
-                    os.makedirs("data", exist_ok=True)
-                    file_path = os.path.join(
-                        "data", f"{safe}_editorial_chunks.json"
-                    )
-
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        json.dump(chunks, f, ensure_ascii=False, indent=2)
-
                     logger.info(
-                        f"Saved {len(chunks)} editorial chunks to {file_path}"
+                        f"Generated {len(chunks)} editorial chunks (in-memory)"
                     )
 
                     with ProfileBlock("Stage5_VectorInsert"):
-                        upsert_chunk_batch(file_path)
+                        upsert_chunk_batch(chunks)
 
                     logger.info("✅ Stage 5 Complete.")
 
@@ -211,7 +209,7 @@ def main() -> None:
 
         finally:
             if client is not None:
-                logger.info("Closing Weaviate connection...")
+                logger.info("Closing Qdrant connection...")
                 client.close()
 
             # ------------------------------------------------------------

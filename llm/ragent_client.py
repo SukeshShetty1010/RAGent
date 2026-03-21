@@ -12,15 +12,20 @@ from tests.observability import ProfileBlock, MetricsRegistry
 
 
 # ------------------------------------------------------------
-# Lazy Modal Function Binding (CRITICAL FIX)
+# Lazy Modal Cls Binding
 # ------------------------------------------------------------
 
-_raw_chat_completion = None
+# The Modal App name as declared in modal_llm.py:
+#   app = modal.App("qwen2-5-7b-instruct-vllm")
+_MODAL_APP_NAME = "qwen2-5-7b-instruct-vllm"
+_MODAL_CLASS_TAG = "Qwen25VLLM"
+
+_remote_instance = None
 
 
 def _get_remote_llm():
     """
-    Lazily resolve the Modal remote function.
+    Lazily resolve and cache a bound instance of Qwen25VLLM.
 
     WHY THIS EXISTS:
     - Ensures MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
@@ -28,15 +33,16 @@ def _get_remote_llm():
     - Prevents import-time auth failures
     - Works in Docker / fresh machines / CI
     """
-    global _raw_chat_completion
+    global _remote_instance
 
-    if _raw_chat_completion is None:
-        _raw_chat_completion = modal.Function.from_name(
-            "rag-smollm3-3b",
-            "chat_completion_remote",
+    if _remote_instance is None:
+        cls = modal.Cls.from_name(
+            _MODAL_APP_NAME,
+            _MODAL_CLASS_TAG,
         )
+        _remote_instance = cls()
 
-    return _raw_chat_completion
+    return _remote_instance
 
 
 # ------------------------------------------------------------
@@ -73,12 +79,21 @@ def chat_completion_remote(
     llm = _get_remote_llm()
 
     with ProfileBlock("LLMGeneration"):
-        response = llm.remote(
+        accumulated = []
+        for chunk in llm.generate.remote_gen(
             prompt,
-            max_tokens=max_tokens,
+            max_new_tokens=max_tokens,
             temperature=temperature,
             **kwargs,
-        )
+        ):
+            text = (
+                chunk.decode()
+                if isinstance(chunk, (bytes, bytearray))
+                else str(chunk)
+            )
+            accumulated.append(text)
+
+    response = "".join(accumulated)
 
     # --------------------------------------------------------
     # Post-call metrics (best-effort)

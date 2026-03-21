@@ -8,3 +8,29 @@ __pycache__/
 RAG-main (1).zip
 RAG_env/
 .semantic_cache/
+
+# ---------- Environment ----------
+.env
+.env.*
+venv/
+.venv/
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Data artifacts (generated at runtime) ----------
+*_gamespot_full_textual.json
+*_editorial_chunks.json
+*_editorial_chunk_payloads.json
+rawg_data_*.json
+igdb_data_*.json
+data/gamespot/
+
+# ---------- Docker / Deployment ----------
+*.log

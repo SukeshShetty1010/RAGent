@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from typing import Dict, Optional, List
 
 import modal
-import weaviate
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct, SparseVector
+from fastembed import SparseTextEmbedding
 
 # ------------------------------------------------------------------------------
 # Logging
@@ -18,21 +21,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------------------
-# Modal class lookup (CORRECT + FUTURE-PROOF)
+# Modal class lookup
 # ------------------------------------------------------------------------------
 E5Embedder = modal.Cls.from_name(
     "editorial-embedding-service",
     "E5Embedder",
 )
 
+# BM25 sparse encoder (lightweight, CPU-only)
+bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
+
 # ------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------
 
-def uuid_from_beacon(beacon: Optional[str]) -> Optional[str]:
-    if not beacon or not isinstance(beacon, str):
-        return None
-    return beacon.rstrip("/").split("/")[-1]
+def _get_qdrant_client() -> QdrantClient:
+    """Get a Qdrant client from environment variables."""
+    url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    api_key = os.environ.get("QDRANT_API_KEY", "")
+    return QdrantClient(url=url, api_key=api_key or None)
 
 
 # ------------------------------------------------------------------------------
@@ -44,9 +51,12 @@ def validate_chunk(chunk_uuid: str, properties: Dict) -> bool:
     if not isinstance(content, str) or not content.strip():
         return False
 
-    game_beacon = properties.get("game", {}).get("beacon")
-    if not uuid_from_beacon(game_beacon):
-        return False
+    game_uuid = properties.get("game_uuid")
+    if not game_uuid:
+        # Also check legacy beacon format for backwards compat
+        game_beacon = properties.get("game", {}).get("beacon")
+        if not game_beacon:
+            return False
 
     if properties.get("source") != "gamespot":
         return False
@@ -62,21 +72,18 @@ def validate_chunk(chunk_uuid: str, properties: Dict) -> bool:
 # ------------------------------------------------------------------------------
 
 def upsert_chunk_batch(
-    file_path: str,
+    payloads: List[Dict],
     batch_size: int = 64,
 ) -> None:
     """
     Stage 5:
-    - Embed editorial chunks via Modal (E5 on T4)
-    - Upsert vectors into Weaviate v4
+    - Embed editorial chunks via Modal (E5 on T4) + BM25 sparse
+    - Upsert dual vectors into Qdrant
     """
 
     # --------------------------------------------------
-    # 1. Load payloads
+    # 1. Validate payloads (in-memory — no file I/O)
     # --------------------------------------------------
-    with open(file_path, "r", encoding="utf-8") as f:
-        payloads = json.load(f)
-
     valid_objects: List[Dict] = []
     texts: List[str] = []
 
@@ -95,11 +102,11 @@ def upsert_chunk_batch(
     logger.info("Validated %d editorial chunks", len(valid_objects))
 
     # --------------------------------------------------
-    # 2. Embed via Modal (STATEFUL INSTANCE)
+    # 2. Dense embedding via Modal (E5)
     # --------------------------------------------------
-    embedder = E5Embedder()  # 🔑 THIS triggers __enter__()
+    embedder = E5Embedder()
 
-    vectors: List[List[float]] = []
+    dense_vectors: List[List[float]] = []
     total_batches = (len(texts) - 1) // batch_size + 1
 
     for i in range(0, len(texts), batch_size):
@@ -112,46 +119,77 @@ def upsert_chunk_batch(
         )
 
         batch_vectors = embedder.embed_texts.remote(batch_texts)
-        vectors.extend(batch_vectors)
+        dense_vectors.extend(batch_vectors)
 
-    if len(vectors) != len(valid_objects):
+    if len(dense_vectors) != len(valid_objects):
         raise RuntimeError(
-            f"Embedding mismatch: {len(vectors)} vectors for {len(valid_objects)} chunks"
+            f"Embedding mismatch: {len(dense_vectors)} vectors for {len(valid_objects)} chunks"
         )
 
-    logger.info("Generated embeddings for %d chunks", len(vectors))
+    logger.info("Generated dense embeddings for %d chunks", len(dense_vectors))
 
     # --------------------------------------------------
-    # 3. Upsert into Weaviate
+    # 3. BM25 sparse embedding (local, CPU)
     # --------------------------------------------------
-    client = weaviate.connect_to_local()
-    collection = client.collections.get("EditorialChunk")
+    sparse_embeddings = list(bm25_encoder.passage_embed(texts))
 
-    with collection.batch.dynamic() as batch:
-        for obj, vector in zip(valid_objects, vectors):
-            props = obj["properties"]
+    if len(sparse_embeddings) != len(valid_objects):
+        raise RuntimeError(
+            f"Sparse embedding mismatch: {len(sparse_embeddings)} for {len(valid_objects)} chunks"
+        )
 
-            clean_props = dict(props)
-            clean_props.pop("game", None)
-            clean_props.pop("parent_editorial", None)
+    logger.info("Generated BM25 sparse embeddings for %d chunks", len(sparse_embeddings))
 
-            references: Dict[str, str] = {}
+    # --------------------------------------------------
+    # 4. Upsert into Qdrant (dual vectors)
+    # --------------------------------------------------
+    client = _get_qdrant_client()
 
-            game_uuid = uuid_from_beacon(props["game"]["beacon"])
-            if game_uuid:
-                references["game"] = game_uuid
+    points: List[PointStruct] = []
+    for obj, dense_vec, sparse_emb in zip(valid_objects, dense_vectors, sparse_embeddings):
+        props = obj["properties"]
 
-            parent_beacon = props.get("parent_editorial", {}).get("beacon")
-            parent_uuid = uuid_from_beacon(parent_beacon)
-            if parent_uuid:
-                references["parent_editorial"] = parent_uuid
+        # Extract game_uuid from beacon or direct field
+        game_uuid = props.get("game_uuid")
+        if not game_uuid:
+            game_beacon = props.get("game", {}).get("beacon", "")
+            game_uuid = game_beacon.rstrip("/").split("/")[-1] if game_beacon else None
 
-            batch.add_object(
-                uuid=obj["uuid"],
-                properties=clean_props,
-                references=references,
-                vector=vector,
+        parent_uuid = props.get("parent_editorial_uuid")
+        if not parent_uuid:
+            parent_beacon = props.get("parent_editorial", {}).get("beacon", "")
+            parent_uuid = parent_beacon.rstrip("/").split("/")[-1] if parent_beacon else None
+
+        points.append(
+            PointStruct(
+                id=obj["uuid"],
+                vector={
+                    "dense": dense_vec,
+                    "bm25": SparseVector(
+                        indices=sparse_emb.indices.tolist(),
+                        values=sparse_emb.values.tolist(),
+                    ),
+                },
+                payload={
+                    "content": props["content"],
+                    "content_hash": props.get("content_hash"),
+                    "source_title": props.get("source_title"),
+                    "source": props.get("source"),
+                    "content_type": props.get("content_type"),
+                    "chunk_index": props.get("chunk_index"),
+                    "game_uuid": game_uuid,
+                    "parent_editorial_uuid": parent_uuid,
+                },
             )
+        )
+
+    # Batch upsert
+    for i in range(0, len(points), batch_size):
+        batch = points[i : i + batch_size]
+        client.upsert(
+            collection_name="EditorialChunk",
+            points=batch,
+        )
 
     client.close()
 
@@ -167,12 +205,12 @@ def upsert_chunk_batch(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Stage 5: Embed + Upsert Editorial Chunks (Modal + Weaviate)"
+        description="Stage 5: Embed + Upsert Editorial Chunks (Modal + Qdrant)"
     )
     parser.add_argument(
         "--file",
-        required=True,
-        help="Prepared editorial chunk payload JSON file",
+        required=False,
+        help="Prepared editorial chunk payload JSON file (legacy)",
     )
     parser.add_argument(
         "--batch_size",
@@ -182,7 +220,14 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    upsert_chunk_batch(
-        file_path=args.file,
-        batch_size=args.batch_size,
-    )
+
+    # Legacy file-based path for CLI testing
+    if args.file:
+        with open(args.file, "r", encoding="utf-8") as f:
+            payloads = json.load(f)
+        upsert_chunk_batch(
+            payloads=payloads,
+            batch_size=args.batch_size,
+        )
+    else:
+        print("Usage: provide --file for legacy JSON payloads, or call upsert_chunk_batch() in-memory")

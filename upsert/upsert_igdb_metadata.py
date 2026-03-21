@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from typing import Dict, Optional
 
-import weaviate
-from weaviate.exceptions import WeaviateBaseError
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
 
 from ingest.igdb_metadata_ingest import fetch_and_prepare_igdb
 
@@ -21,34 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-def _uuid_from_beacon(beacon: Optional[str]) -> Optional[str]:
-    """
-    Extract UUID from a Weaviate beacon:
-      weaviate://localhost/Game/<uuid> → <uuid>
-    """
-    if not beacon or not isinstance(beacon, str):
-        return None
-    try:
-        return beacon.rstrip("/").split("/")[-1]
-    except Exception:
-        return None
-
-
-# ------------------------------------------------------------------
-# Core Upsert Function (Weaviate v4)
+# Core Upsert Function (Qdrant)
 # ------------------------------------------------------------------
 def upsert_igdb_context(
-    client: weaviate.WeaviateClient,
+    client: QdrantClient,
     game_title: str,
     game_uuid: str,
 ) -> int:
     """
-    Fetch and upsert IGDB relational metadata using Weaviate v4.
+    Fetch and upsert IGDB relational metadata using Qdrant.
 
     Design:
-    - Zero embeddings
+    - Zero embeddings (metadata-only)
     - Deterministic UUIDs
     - Idempotent inserts
     - Soft-failure per object
@@ -75,55 +60,49 @@ def upsert_igdb_context(
         return 0
 
     # --------------------------------------------------
-    # 2. Get Collection (Weaviate v4)
+    # 2. Idempotent Upsert Loop (Qdrant)
     # --------------------------------------------------
-    collection = client.collections.get("IGDB_Game")
-
     success_count = 0
 
-    # --------------------------------------------------
-    # 3. Idempotent Upsert Loop
-    # --------------------------------------------------
     for obj in payloads:
         try:
             # ---- Idempotency gate ----
-            if collection.data.exists(uuid=obj["uuid"]):
+            existing = client.retrieve(
+                collection_name="IGDB_Game",
+                ids=[obj["uuid"]],
+            )
+
+            if existing:
                 logger.info(
                     "IGDB entity already exists (UUID=%s). Skipping.",
                     obj["uuid"],
                 )
                 continue
 
-            # ---- Separate properties and references (v4 rule) ----
+            # ---- Prepare payload (strip beacon refs) ----
             properties: Dict = dict(obj["properties"])
             game_ref = properties.pop("game", None)
 
-            references: Dict[str, str] = {}
-
-            if isinstance(game_ref, dict):
-                game_uuid_ref = _uuid_from_beacon(game_ref.get("beacon"))
-                if game_uuid_ref:
-                    references["game"] = game_uuid_ref
+            # Store game_uuid as a payload field instead of a beacon reference
+            properties["game_uuid"] = game_uuid
 
             # ---- Insert ----
-            collection.data.insert(
-                uuid=obj["uuid"],
-                properties=properties,
-                references=references,
+            client.upsert(
+                collection_name="IGDB_Game",
+                points=[
+                    PointStruct(
+                        id=obj["uuid"],
+                        vector=[0.0],  # metadata-only collection (1-dim dummy)
+                        payload=properties,
+                    )
+                ],
             )
 
             success_count += 1
 
-        except WeaviateBaseError as exc:
-            logger.warning(
-                "Failed to upsert IGDB entity (UUID=%s): %s",
-                obj.get("uuid"),
-                exc,
-            )
-
         except Exception as exc:
             logger.warning(
-                "Unexpected error for IGDB entity (UUID=%s): %s",
+                "Failed to upsert IGDB entity (UUID=%s): %s",
                 obj.get("uuid"),
                 exc,
             )
@@ -136,7 +115,7 @@ def upsert_igdb_context(
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Upsert IGDB relational metadata (Weaviate v4, zero vectors)"
+        description="Upsert IGDB relational metadata (Qdrant, zero vectors)"
     )
     parser.add_argument(
         "--game",
@@ -151,10 +130,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    try:
-        client = weaviate.connect_to_local()
-    except Exception as exc:
-        raise SystemExit(f"❌ Failed to connect to Weaviate: {exc}")
+    url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    api_key = os.environ.get("QDRANT_API_KEY", "")
+    client = QdrantClient(url=url, api_key=api_key or None)
 
     try:
         count = upsert_igdb_context(

@@ -3,7 +3,7 @@ PlatformSpec Ingestion Module
 
 Extracts platform-specific operational data from cleaned RAWG output
 and prepares deterministic, upsert-ready PlatformSpec payloads
-for Weaviate.
+for Qdrant.
 
 Responsibilities:
 - Isolate operational (non-semantic) platform data
@@ -14,7 +14,7 @@ Responsibilities:
 from typing import Any, Dict, List
 from datetime import datetime
 
-from weaviate.util import generate_uuid5
+from uuid import UUID, uuid5
 
 
 # ------------------------------------------------------------------
@@ -73,7 +73,8 @@ def generate_platform_payloads(
         # Seed: "<game_id>_<platform_name>"
         # ------------------------------------------------------------------
         uuid_seed = f"{game_id}_{platform_name}"
-        platform_uuid = generate_uuid5(uuid_seed)
+        _NS = UUID("12345678-1234-5678-1234-567812345678")
+        platform_uuid = str(uuid5(_NS, uuid_seed))
 
         payload = {
             "uuid": platform_uuid,
@@ -87,9 +88,7 @@ def generate_platform_payloads(
                 # ----------------------------------------------------------
                 # Hard reference to canonical Game
                 # ----------------------------------------------------------
-                "game": {
-                    "beacon": f"weaviate://localhost/Game/{game_uuid}"
-                },
+                "game_uuid": game_uuid,
             },
         }
 

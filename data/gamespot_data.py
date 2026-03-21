@@ -291,7 +291,7 @@ def fetch_gamespot_data(
     rawg_api_key: Optional[str] = None,
     use_rawg: bool = True,
     strip_visual: bool = True,
-    save: bool = True,
+    save: bool = False,
     output_dir: str = ".",
     filename: Optional[str] = None,
 ) -> Dict[str, Any]:
