@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Set
 
-from tests.observability import ProfileBlock, MetricsRegistry
-from tests.caching import cacheable
+from utils.observability import ProfileBlock, MetricsRegistry
+from utils.caching import cacheable
 
 from agent.intent.intent_signals import IntentSignal
 from agent.intent.intent_extractor import IntentSignalExtractor

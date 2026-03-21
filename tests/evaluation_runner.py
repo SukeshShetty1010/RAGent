@@ -15,7 +15,7 @@ from engine.execution_engine import RageEngine
 from agent.task_router import TaskType
 from agent.capability.capability_types import AnswerCapability
 
-from tests.observability import ProfileBlock
+from utils.observability import ProfileBlock
 from tests.evaluation_metrics import (
     calculate_precision_at_k,
     analyze_latency_profile,

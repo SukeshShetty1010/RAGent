@@ -16,7 +16,7 @@ from agent.prompt_templates import (
     get_concise_instruction,
 )
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from utils.observability import ProfileBlock, MetricsRegistry
 
 # ============================================================
 # Logging

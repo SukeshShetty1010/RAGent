@@ -21,7 +21,7 @@ import argparse
 
 from qdrant_client import QdrantClient
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from utils.observability import ProfileBlock, MetricsRegistry
 
 from upsert.upsert_canonical_game import upsert_game_anchor
 from upsert.upsert_platform_specs import upsert_platform_specs

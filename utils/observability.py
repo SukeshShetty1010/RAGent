@@ -17,11 +17,9 @@ from __future__ import annotations
 
 import threading
 import time
-import json
 from dataclasses import dataclass, field
 from typing import Dict, List, Any
 from contextlib import ContextDecorator
-from collections import defaultdict
 
 
 # ============================================================
@@ -160,7 +158,7 @@ class ProfileBlock(ContextDecorator):
         end = time.perf_counter()
         duration_ms = (end - (self.start or end)) * 1000.0
 
-        path = " → ".join(self._thread_local.stack)
+        path = " -> ".join(self._thread_local.stack)
 
         MetricsRegistry.get().observe(
             f"latency::{path}", duration_ms

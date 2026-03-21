@@ -43,7 +43,7 @@ from agent.capability.capability_types import AnswerCapability
 from agent.context_assembler import ContextAssembler
 from agent.prompt_manager import PromptManager
 
-from tests.observability import MetricsRegistry, ProfileBlock
+from utils.observability import MetricsRegistry, ProfileBlock
 
 
 # ============================================================

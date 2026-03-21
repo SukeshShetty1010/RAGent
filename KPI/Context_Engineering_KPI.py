@@ -9,7 +9,7 @@ import logging
 from typing import List, Tuple
 
 from engine.execution_engine import RageEngine
-from tests.observability import MetricsRegistry
+from utils.observability import MetricsRegistry
 from tests.evaluation_metrics import calculate_compression_ratio
 from agent.task_router import TaskType
 

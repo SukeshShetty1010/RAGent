@@ -8,7 +8,7 @@ from __future__ import annotations
 import modal
 from typing import Any
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from utils.observability import ProfileBlock, MetricsRegistry
 
 
 # ------------------------------------------------------------

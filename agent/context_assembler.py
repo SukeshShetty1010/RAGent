@@ -15,7 +15,7 @@ from agent.context_algorithms import (
     apply_character_budget,
 )
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from utils.observability import ProfileBlock, MetricsRegistry
 
 # ============================================================
 # Logging

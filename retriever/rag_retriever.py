@@ -20,7 +20,7 @@ import modal
 from qdrant_client import QdrantClient, models
 from fastembed import SparseTextEmbedding
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from utils.observability import ProfileBlock, MetricsRegistry
 
 
 # ---------------------------------------------------------------------

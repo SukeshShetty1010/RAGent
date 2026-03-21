@@ -9,7 +9,7 @@ import logging
 from typing import Dict
 
 from engine.execution_engine import RageEngine
-from tests.observability import MetricsRegistry
+from utils.observability import MetricsRegistry
 from tests.evaluation_metrics import analyze_latency_profile
 from tests.regression_suite import REGRESSION_VAULT, RegressionRunner
 

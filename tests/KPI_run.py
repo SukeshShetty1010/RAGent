@@ -16,7 +16,7 @@ from engine.execution_engine import RageEngine
 from agent.task_router import TaskType
 from agent.capability.capability_types import AnswerCapability
 
-from tests.observability import MetricsRegistry
+from utils.observability import MetricsRegistry
 from tests.regression_suite import RegressionRunner
 
 from tests.evaluation_metrics import (

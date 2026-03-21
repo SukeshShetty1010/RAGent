@@ -226,8 +226,8 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Thread-safe Metrics Registry | `tests/observability.py` | `MetricsRegistry`, `ProfileBlock` |
-| Deterministic Semantic Cache | `tests/caching.py` | `@cacheable(ttl_seconds)` decorator |
+| Thread-safe Metrics Registry | `utils/observability.py` | `MetricsRegistry`, `ProfileBlock` |
+| Deterministic Semantic Cache | `utils/caching.py` | `@cacheable(ttl_seconds)` decorator |
 | Evaluation Scoring Engine | `tests/evaluation_metrics.py` | `calculate_grounding_fidelity()`, `calculate_honesty_rate()` |
 | Unified KPI Orchestration | `KPI/Unified_KPI_Runner.py` | 5-module executive dashboard |
 

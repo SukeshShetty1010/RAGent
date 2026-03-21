@@ -15,7 +15,7 @@ from retriever.quality_gate import RetrievalQualityGate, QualityStatus
 from agent.tools.web_search import WebSearchTool
 from agent.task_router import TaskType, RouterDecision
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from utils.observability import ProfileBlock, MetricsRegistry
 
 
 # ============================================================

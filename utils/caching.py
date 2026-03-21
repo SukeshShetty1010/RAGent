@@ -1,5 +1,5 @@
 """
-tests/caching.py
+utils/caching.py
 
 Deterministic Semantic Cache (FINAL)
 
@@ -23,7 +23,7 @@ try:
 except ImportError:
     Cache = None  # graceful fallback
 
-from tests.observability import MetricsRegistry
+from utils.observability import MetricsRegistry
 
 
 # ============================================================

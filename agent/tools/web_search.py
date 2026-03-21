@@ -19,7 +19,7 @@ from typing import List, Dict, Any
 from dotenv import load_dotenv
 from tavily import TavilyClient
 
-from tests.observability import ProfileBlock, MetricsRegistry
+from utils.observability import ProfileBlock, MetricsRegistry
 
 load_dotenv()
 
