@@ -3,7 +3,7 @@
 **Intent-Aware Routing · Evidence-Gated Responses · KPI-Proven Performance**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)]()
-[![Weaviate](https://img.shields.io/badge/Vector_DB-Weaviate-green.svg)]()
+[![Qdrant](https://img.shields.io/badge/Vector_DB-Qdrant-green.svg)]()
 [![Modal](https://img.shields.io/badge/LLM_Infra-Modal-orange.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)]()
 
@@ -41,7 +41,7 @@ flowchart TB
     
     subgraph Retrieval["Step 3: Evidence Retrieval"]
         RO[RetrievalOrchestrator]
-        WV[(Weaviate<br/>Hybrid Search)]
+        WV[(Qdrant<br/>Hybrid Search)]
         QG[RetrievalQualityGate]
         WS[WebSearchTool]
         SS --> RO
@@ -60,7 +60,7 @@ flowchart TB
     
     subgraph Generation["Step 6-7: Prompt & LLM"]
         PM[PromptManager]
-        LLM[SmolLM3-3B via Modal]
+        LLM[Qwen 2.5 7B via Modal]
         CTX --> PM
         PM -->|FULL/PARTIAL| LLM
         PM -->|INSUFFICIENT| REF[Safe Refusal]
@@ -100,7 +100,7 @@ flowchart LR
     
     subgraph Vector["Vector Storage"]
         UP[upsert_all.py]
-        WV[(Weaviate)]
+        WV[(Qdrant)]
     end
     
     RAWG --> RI --> CL
@@ -180,12 +180,12 @@ The ingestion layer handles multi-source data acquisition from three gaming APIs
 
 ### RAG Architecture
 
-The retrieval layer implements **hybrid search** combining BM25 keyword matching with dense vector similarity. Editorial content is chunked using a word-based strategy with configurable overlap, then embedded via GPU-accelerated E5 embeddings. Schemas enforce strict typing across 8 Weaviate collections.
+The retrieval layer implements **hybrid search** combining BM25 keyword matching with dense vector similarity. Editorial content is chunked using a word-based strategy with configurable overlap, then embedded via GPU-accelerated E5 embeddings. Schemas enforce strict typing across 5 Qdrant collections.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Vector DB Schema Design | `vector/schemas/` | 8 JSON schemas: Game, PlatformSpec, IGDB_Game, EditorialChunk |
-| Hybrid Search (BM25 + Vector) | `retriever/rag_retriever.py` | `RAGRetriever.retrieve()` with `alpha=0.5` |
+| Vector DB Schema Design | `vector/create_schema.py` | 5 collections: EditorialChunk, Game, PlatformSpec, IGDB_Game, GameSpot_Game |
+| Hybrid Search (BM25 + Vector) | `retriever/rag_retriever.py` | `RAGRetriever.retrieve()` with `dense` + `bm25` sparse |
 | Word-Based Chunking | `chunking/editorial_chunker.py` | `EditorialChunker` (500 tokens, 50 overlap) |
 | GPU Embedding Service | `llm/modal_embed.py` | `E5Embedder` on T4 GPU (`intfloat/e5-base-v2`) |
 
@@ -211,11 +211,11 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 
 ### LLM Infrastructure
 
-LLM serving is fully **serverless via Modal**, with GPU-accelerated inference using **HuggingFaceTB/SmolLM3-3B** on L40S (generation) and **intfloat/e5-base-v2** on T4 (embeddings). The lazy binding pattern ensures environment variables are loaded before Modal client initialization, enabling seamless CI/Docker deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
+LLM serving is fully **serverless via Modal**, with GPU-accelerated inference using **Qwen 2.5 7B** on L40S (generation) and **intfloat/e5-base-v2** on T4 (embeddings). The lazy binding pattern ensures environment variables are loaded before Modal client initialization, enabling seamless CI/Docker deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Serverless GPU Deployment | `llm/modal_llm.py` | `chat_completion_remote()` with `HuggingFaceTB/SmolLM3-3B` on L40S GPU |
+| Serverless GPU Deployment | `llm/modal_llm.py` | `chat_completion_remote()` with `Qwen 2.5 7B` on L40S GPU |
 | Lazy Modal Client Binding | `llm/ragent_client.py` | `_get_remote_llm()` for CI/Docker compatibility |
 | GPU Embedding Infrastructure | `llm/modal_embed.py` | `E5Embedder` with `intfloat/e5-base-v2` on T4 GPU |
 
@@ -241,7 +241,7 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 | **Deterministic IDs** | Idempotent upserts, cache safety | `unified_game_id = slug-year-sha1[:8]` |
 | **Intent Schema Versioning** | Cache invalidation on logic changes | `INTENT_SCHEMA_VERSION = "v2"` |
 | **Evidence-Gated Honesty** | Prevent hallucination on weak evidence | `CapabilityAssessor` → `INSUFFICIENT` bypasses LLM |
-| **Hybrid Retrieval** | Semantic + keyword matching | Weaviate BM25 + Vector with α=0.5 |
+| **Hybrid Retrieval** | Semantic + keyword matching | Qdrant BM25 sparse + Dense Vector (E5) |
 | **Multi-Stage Prompt Fallback** | Guarantee prompt budget compliance | verbose → concise → truncated → minimal |
 | **Quality Gate Signals** | Decouple decision from detection | `QualityReport` with `OK/WEAK/EMPTY` |
 | **Fail-Safe Degradation** | Never crash, always degrade gracefully | `try/except` returning `PARTIAL` |
@@ -253,7 +253,7 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 ### Prerequisites
 
 - Python 3.10+
-- Docker & Docker Compose (for Weaviate)
+- Docker (for Qdrant)
 - Modal account (for LLM hosting)
 - API keys: RAWG, IGDB (Twitch OAuth), GameSpot, Tavily
 
@@ -271,8 +271,8 @@ RAG_env/Scripts/activate  # Windows
 # Install dependencies
 pip install -e .
 
-# Start Weaviate Vector Database
-docker-compose up -d
+# Start Qdrant Vector Database
+docker run -p 6333:6333 qdrant/qdrant
 
 # Configure environment variables
 cp .env.example .env
@@ -290,10 +290,10 @@ python -m upsert.upsert_all --game "Far Cry 5"
 
 ```bash
 # Query the system
-python usage.py
+python -m scripts.bulk_ingest
 
 # Launch the UI
-streamlit run ui/app.py
+streamlit run ui/app_streaming.py
 
 # Run the KPI Dashboard
 python -m KPI.Unified_KPI_Runner
@@ -315,7 +315,7 @@ python -m KPI.Unified_KPI_Runner
 | 6 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
 | 7 | `ContextAssembler` | Deduplicates, orders by entity balance |
 | 8 | `PromptManager` | Applies `comparison_verbose` template |
-| 9 | `RageEngine` | Generates via Modal LLM (`HuggingFaceTB/SmolLM3-3B`) |
+| 9 | `RageEngine` | Generates via Modal LLM (`Qwen 2.5 7B`) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.
 
@@ -361,8 +361,8 @@ RAGent/
 ├── retriever/             # Orchestrator, quality gate, strategy
 ├── tests/                 # Observability, caching, evaluation
 ├── ui/                    # Streamlit interface
-├── upsert/                # Weaviate batch insertion
-└── vector/                # Schema definitions (8 JSON schemas)
+├── upsert/                # Batch insertion orchestrator
+└── vector/                # Qdrant collection management
 ```
 
 ---
