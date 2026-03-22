@@ -9,11 +9,11 @@ from typing import Optional, Dict
 # ------------------------------------------------------------
 # Latency
 # ------------------------------------------------------------
-def format_latency_ms(val: Optional[float]) -> str:
+def format_latency_sec(val: Optional[float]) -> str:
     if val is None:
         return "—"
     try:
-        return f"{int(round(val))} ms"
+        return f"{val / 1000.0:.2f} sec"
     except Exception:
         return "—"
 

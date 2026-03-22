@@ -8,7 +8,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.utils.formatting import (
-    format_latency_ms,
+    format_latency_sec,
     format_confidence_score,
     format_quality_status,
     format_answer_confidence,
@@ -43,7 +43,7 @@ def render_kpi_panel() -> None:
     # --------------------------------------------------
     # UI Translation
     # --------------------------------------------------
-    latency_display = format_latency_ms(latency_ms)
+    latency_display = format_latency_sec(latency_ms)
     quality_display = format_quality_status(quality_status)
     confidence_display = format_confidence_score(confidence_score)
 

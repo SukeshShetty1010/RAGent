@@ -228,6 +228,18 @@ def _prettify_answer(answer: str) -> str:
     if not text:
         return "No answer generated."
 
+    # 1. UI Routing: Split "Unsupported or Missing Parts"
+    import re
+    split_pattern = r"(?i)\n?\s*\**Unsupported\s*(?:or)?\s*Missing\s*Parts?:?\**\s*\n?"
+    parts = re.split(split_pattern, text, maxsplit=1)
+    if len(parts) > 1:
+        text = parts[0].strip()
+
+    # 2. Formatting Sanitization
+    text = re.sub(r'(?i)\*\*unsupported or missing parts\*\*', '', text)
+    text = re.sub(r'(?<!\*)\*\*(?!\*)', '', text)
+    text = re.sub(r'(?<!_)__(?!_)', '', text)
+
     text = _strip_source_noise(text)
 
     # Remove isolated markdown artifacts
@@ -330,8 +342,8 @@ def render_message_metrics(metadata: Dict[str, Any], index: int) -> None:
         capability = str(kpis.get("answer_capability", "unknown"))
         success = bool(kpis.get("task_success"))
 
-        latency_display = f"{float(latency_ms):.0f} ms" if latency_ms is not None else "—"
-        llm_display = f"{float(llm_latency_ms):.0f} ms" if llm_latency_ms is not None else "—"
+        latency_display = f"{float(latency_ms)/1000.0:.2f} sec" if latency_ms is not None else "—"
+        llm_display = f"{float(llm_latency_ms)/1000.0:.2f} sec" if llm_latency_ms is not None else "—"
         confidence_display = (
             f"{float(confidence) * 100:.1f}%" if confidence is not None else "—"
         )
@@ -469,6 +481,11 @@ def process_latest_user_message() -> None:
                 progressive.append(word)
                 _render_assistant_markdown(stream_placeholder, " ".join(progressive), cursor=True)
                 time.sleep(0.025)
+
+        # Ensure we only print the raw output ONCE to the terminal
+        print("\n=== TERMINAL RAW OUTPUT ===")
+        print(result.final_answer)
+        print("===========================\n")
 
         _render_assistant_markdown(stream_placeholder, result.final_answer, cursor=False)
         _render_sources_popover(_extract_urls(result.final_answer))

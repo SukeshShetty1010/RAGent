@@ -64,7 +64,7 @@ def render_inline_metrics_card(kpis: Dict[str, Any]) -> None:
             align-items: center;
         ">
             <span>{cap_emoji} {capability.title() if capability else 'Unknown'}</span>
-            <span>⏱️ {int(latency)}ms</span>
+            <span>⏱️ {latency / 1000.0:.2f}sec</span>
             <span style="color: {qual_color}">📊 {int(confidence * 100)}% confidence</span>
         </div>
         """,
@@ -100,7 +100,7 @@ def render_pipeline_stages_compact(stages: List[Dict[str, Any]]) -> None:
         duration = stage.get("duration_ms")
         
         status_emoji = "✓" if status == "completed" else "⏳" if status == "started" else "❌"
-        duration_str = f"{int(duration)}ms" if duration else "—"
+        duration_str = f"{duration / 1000.0:.2f}sec" if duration else "—"
         
         st.markdown(
             f"""
@@ -141,7 +141,7 @@ def render_sidebar_metrics_report(kpis: Dict[str, Any]) -> None:
     with col1:
         st.metric(
             "🕐 Latency",
-            f"{int(kpis.get('engine_latency_ms', 0))}ms"
+            f"{kpis.get('engine_latency_ms', 0) / 1000.0:.2f}sec"
         )
         st.metric(
             "📊 Confidence",
@@ -156,7 +156,7 @@ def render_sidebar_metrics_report(kpis: Dict[str, Any]) -> None:
         llm_latency = kpis.get('llm_latency_ms')
         st.metric(
             "🤖 LLM Time",
-            f"{int(llm_latency)}ms" if llm_latency else "—"
+            f"{llm_latency / 1000.0:.2f}sec" if llm_latency else "—"
         )
     
     # Quality status

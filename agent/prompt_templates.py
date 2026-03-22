@@ -17,8 +17,13 @@ def construct_final_prompt(
     context_block: str,
     query: str,
 ) -> str:
+    guardrails = (
+        "CRITICAL FORMATTING: You must properly close all Markdown tags (e.g., **, _, `). "
+        "Do not leave dangling formatting characters. Avoid applying bold or italic styling to section headers unless explicitly requested."
+    )
     return (
         f"{instruction}\n\n"
+        f"{guardrails}\n\n"
         f"=== BEGIN CONTEXT ===\n"
         f"{context_block}\n"
         f"=== END CONTEXT ===\n\n"
@@ -104,6 +109,7 @@ def comparison_verbose(capability: AnswerCapability) -> str:
         base += (
             "\nIMPORTANT:\n"
             "Explicitly state what information is missing instead of guessing.\n"
+            "Always append missing parameters under a separate section titled 'Unsupported or Missing Parts:'.\n"
         )
 
     return base
@@ -116,7 +122,7 @@ def comparison_concise(capability: AnswerCapability) -> str:
     )
 
     if capability == AnswerCapability.PARTIAL:
-        base += " Explicitly note missing information."
+        base += " Explicitly note missing information under 'Unsupported or Missing Parts:'."
 
     return base
 
@@ -136,6 +142,7 @@ def listicle_verbose(capability: AnswerCapability) -> str:
         base += (
             "\nIMPORTANT:\n"
             "Clearly state that the list is partial if incomplete.\n"
+            "Always append missing parameters under a separate section titled 'Unsupported or Missing Parts:'.\n"
         )
 
     return base
@@ -145,7 +152,7 @@ def listicle_concise(capability: AnswerCapability) -> str:
     base = "Create an ordered list from context only. Cite sources."
 
     if capability == AnswerCapability.PARTIAL:
-        base += " Note that the list may be incomplete."
+        base += " Note that the list may be incomplete under 'Unsupported or Missing Parts:'."
 
     return base
 
@@ -164,6 +171,7 @@ def factual_verbose(capability: AnswerCapability) -> str:
         base += (
             "\nIMPORTANT:\n"
             "Explicitly state missing information instead of guessing.\n"
+            "Always append missing parameters under a separate section titled 'Unsupported or Missing Parts:'.\n"
         )
 
     return base
@@ -173,7 +181,7 @@ def factual_concise(capability: AnswerCapability) -> str:
     base = "Answer factually from the context. Cite sources."
 
     if capability == AnswerCapability.PARTIAL:
-        base += " Note missing information explicitly."
+        base += " Note missing information explicitly under 'Unsupported or Missing Parts:'."
 
     return base
 
@@ -192,6 +200,7 @@ def open_verbose(capability: AnswerCapability) -> str:
         base += (
             "\nIMPORTANT:\n"
             "Clearly state any unsupported or missing parts.\n"
+            "Always append missing parameters under a separate section titled 'Unsupported or Missing Parts:'.\n"
         )
 
     return base
@@ -201,7 +210,7 @@ def open_concise(capability: AnswerCapability) -> str:
     base = "Answer using the context. Cite sources."
 
     if capability == AnswerCapability.PARTIAL:
-        base += " State any limitations clearly."
+        base += " State any limitations clearly under 'Unsupported or Missing Parts:'."
 
     return base
 
