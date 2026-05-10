@@ -5,17 +5,17 @@
 """
 Streaming-capable LLM client for conversational UI.
 
-Targets the Modal-hosted Qwen2.5-7B Instruct vLLM deployment:
-  - App:      qwen2-5-7b-instruct-vllm          (modal_llm.py)
-  - Class:    Qwen25VLLM
+Targets the Modal-hosted Gemma 3 12B Instruct vLLM deployment:
+  - App:      gemma-3-12b-it-vllm               (modal_llm.py)
+  - Class:    Gemma312BVLLM
   - Method:   generate  (L40S GPU, Modal generator)
 
 The remote ``generate`` method is a Modal generator function decorated
 with ``@modal.method()`` on a ``@app.cls``-decorated class.  The correct
 way to call a method on a Modal Cls from another process is:
 
-    Qwen25VLLM = modal.Cls.from_name(APP_NAME, CLASS_TAG)
-    instance   = Qwen25VLLM()
+    Gemma312BVLLM = modal.Cls.from_name(APP_NAME, CLASS_TAG)
+    instance      = Gemma312BVLLM()
     for chunk in instance.generate.remote_gen(prompt, ...):
         ...
 
@@ -43,13 +43,13 @@ from utils.observability import ProfileBlock, MetricsRegistry
 # ------------------------------------------------------------
 
 # The Modal App name as declared in modal_llm.py:
-#   app = modal.App("qwen2-5-7b-instruct-vllm")
-_MODAL_APP_NAME = "qwen2-5-7b-instruct-vllm"
+#   app = modal.App("gemma-3-12b-it-vllm")
+_MODAL_APP_NAME = "gemma-3-12b-it-vllm"
 
 # The @app.cls class name hosting the generate method.
-_MODAL_CLASS_TAG = "Qwen25VLLM"
+_MODAL_CLASS_TAG = "Gemma312BVLLM"
 
-# The @modal.method name on Qwen25VLLM that streams tokens.
+# The @modal.method name on Gemma312BVLLM that streams tokens.
 _MODAL_METHOD_TAG = "generate"
 
 
@@ -58,13 +58,13 @@ _MODAL_METHOD_TAG = "generate"
 # ------------------------------------------------------------
 
 _remote_cls: Optional[Any] = None          # modal.Cls proxy
-_remote_instance: Optional[Any] = None    # bound instance of Qwen25VLLM
+_remote_instance: Optional[Any] = None    # bound instance of Gemma312BVLLM
 
 
 def _get_remote_instance() -> Any:
     """
-    Lazily resolve and cache a bound instance of Qwen25VLLM from the
-    qwen2-5-7b-instruct-vllm deployment.
+    Lazily resolve and cache a bound instance of Gemma312BVLLM from the
+    gemma-3-12b-it-vllm deployment.
 
     modal.Cls.from_name is lazy: it defers hydration until the first
     actual call, so no network round-trip occurs here.
@@ -98,7 +98,7 @@ def chat_completion_remote(
     **kwargs: Any,
 ) -> str:
     """
-    Blocking wrapper around Modal Qwen25VLLM.generate invocation.
+    Blocking wrapper around Modal Gemma312BVLLM.generate invocation.
 
     Because ``generate`` is a generator method on the remote side,
     we consume it via remote_gen and join all chunks into a single
@@ -160,10 +160,10 @@ def chat_completion_streaming(
     **kwargs: Any,
 ) -> Generator[str, None, str]:
     """
-    Streaming generator for Modal Qwen25VLLM.generate invocation.
+    Streaming generator for Modal Gemma312BVLLM.generate invocation.
 
     Uses Modal's remote_gen to stream token chunks from the
-    Qwen2.5-7B Instruct vLLM deployment in real time.
+    Gemma 3 12B Instruct vLLM deployment in real time.
 
     Falls back to simulated streaming (word-by-word from a blocking
     call) if remote_gen is unavailable on the resolved method object.

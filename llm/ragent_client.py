@@ -15,17 +15,17 @@ from utils.observability import ProfileBlock, MetricsRegistry
 # Lazy Modal Cls Binding
 # ------------------------------------------------------------
 
-# The Modal App name as declared in modal_llm.py:
-#   app = modal.App("qwen2-5-7b-instruct-vllm")
-_MODAL_APP_NAME = "qwen2-5-7b-instruct-vllm"
-_MODAL_CLASS_TAG = "Qwen25VLLM"
+# Modal deployment declared in llm/modal_llm.py:
+#   app = modal.App("gemma-3-12b-it-vllm")
+_MODAL_APP_NAME = "gemma-3-12b-it-vllm"
+_MODAL_CLASS_TAG = "Gemma312BVLLM"
 
 _remote_instance = None
 
 
 def _get_remote_llm():
     """
-    Lazily resolve and cache a bound instance of Qwen25VLLM.
+    Lazily resolve and cache a bound instance of Gemma312BVLLM.
 
     WHY THIS EXISTS:
     - Ensures MODAL_TOKEN_ID / MODAL_TOKEN_SECRET

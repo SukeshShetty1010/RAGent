@@ -1,10 +1,10 @@
 """
 Modal-hosted LLM service for RAGent
 ====================================
-Model  : Qwen/Qwen2.5-7B-Instruct
+Model  : google/gemma-3-12b-it
 Engine : vLLM (AsyncLLMEngine — PagedAttention + continuous batching)
 GPU    : L40S  (48 GB GDDR6, Ada Lovelace, single card is sufficient)
-App    : qwen2-5-7b-instruct-vllm
+App    : gemma-3-12b-it-vllm
 
 Design guarantees
 -----------------
@@ -16,10 +16,13 @@ Design guarantees
 - Model weights and vLLM compilation artefacts are persisted on
   Modal Volumes to eliminate repeated downloads on cold starts.
 - No quantisation, no LoRA, no weight modifications — pure bf16
-  inference on the base Qwen2.5 instruct checkpoint.
+  inference on the Gemma 3 12B instruct checkpoint.
 - FAST_BOOT=True skips CUDA-graph capture and Torch-compile JIT so
-  containers start in ~20 s instead of ~90 s.  Flip to False for
-  maximum sustained throughput when replicas stay warm.
+  containers start faster. Flip to False for maximum sustained
+  throughput when replicas stay warm.
+- Gemma 3 12B is a gated HuggingFace model. The container resolves
+  the HF_TOKEN from the 'huggingface-secret' Modal Secret — never
+  hardcode credentials.
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ import modal
 # Constants
 # ---------------------------------------------------------------------------
 
-MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
+MODEL_ID = "google/gemma-3-12b-it"
 
 # Cache directories inside the container — backed by Modal Volumes.
 HF_CACHE_DIR   = "/root/.cache/huggingface"
@@ -69,8 +72,6 @@ vllm_image = (
             "HF_HUB_CACHE":    HF_CACHE_DIR,
             "VLLM_CACHE_ROOT": VLLM_CACHE_DIR,
             # Select FlashInfer attention kernel at the environment level.
-            # This is the correct mechanism — NOT an AsyncEngineArgs kwarg.
-            # FlashInfer delivers best decode throughput on Ada Lovelace (L40S).
             "VLLM_ATTENTION_BACKEND": "FLASHINFER",
         }
     )
@@ -80,14 +81,14 @@ vllm_image = (
 # Persistent Volumes  (survive container teardown and restarts)
 # ---------------------------------------------------------------------------
 
-hf_cache_vol = modal.Volume.from_name("hf-qwen2-5-7b-instruct", create_if_missing=True)
-vllm_cache_vol = modal.Volume.from_name("vllm-qwen2-5-7b-cache", create_if_missing=True)
+hf_cache_vol   = modal.Volume.from_name("hf-gemma-3-12b-it",      create_if_missing=True)
+vllm_cache_vol = modal.Volume.from_name("vllm-gemma-3-12b-cache", create_if_missing=True)
 
 # ---------------------------------------------------------------------------
 # Modal App
 # ---------------------------------------------------------------------------
 
-app = modal.App("qwen2-5-7b-instruct-vllm")
+app = modal.App("gemma-3-12b-it-vllm")
 
 # ---------------------------------------------------------------------------
 # Inference class
@@ -96,6 +97,7 @@ app = modal.App("qwen2-5-7b-instruct-vllm")
 @app.cls(
     gpu="L40S",
     image=vllm_image,
+    secrets=[modal.Secret.from_name("huggingface-secret")],
     timeout=600,                      # per-request timeout (seconds)
     scaledown_window=300,             # keep warm for 5 min after last request
     max_containers=5,                 # horizontal scale ceiling
@@ -105,9 +107,9 @@ app = modal.App("qwen2-5-7b-instruct-vllm")
     },
 )
 @modal.concurrent(max_inputs=8)       # vLLM handles concurrency internally
-class Qwen25VLLM:
+class Gemma312BVLLM:
     """
-    Container-persistent vLLM inference engine for Qwen/Qwen2.5-7B-Instruct.
+    Container-persistent vLLM inference engine for google/gemma-3-12b-it.
 
     Lifecycle
     ---------
@@ -122,6 +124,12 @@ class Qwen25VLLM:
     @modal.method — `generate` is the sole public endpoint; it is a
                     Python generator that yields decoded string chunks,
                     making it transparently consumable via remote_gen().
+
+    GPU notes
+    ---------
+    Gemma 3 12B in bfloat16 requires ~24 GB for weights plus ~11 GB
+    for a 32 K token KV cache (~35 GB total), well within the L40S's
+    48 GB. gpu_memory_utilization=0.92 leaves ~4 GB for CUDA overhead.
     """
 
     @modal.enter()
@@ -138,9 +146,8 @@ class Qwen25VLLM:
             Leave ~8 % for CUDA driver/framework overhead; the rest
             is allocated to KV cache, maximising concurrency.
         max_model_len=32768
-            Safe Qwen2.5 default on a single L40S. The model card
-            advertises 128K support, but the current config defaults
-            to 32K and recommends YaRN only when inputs exceed that.
+            Safe default on a single L40S. Gemma 3 supports 128K
+            but the full KV cache would exceed available VRAM.
         enable_prefix_caching=True
             Shares KV-cache blocks across requests with the same
             prompt prefix — valuable for RAG where a system prompt
@@ -158,17 +165,11 @@ class Qwen25VLLM:
             max_model_len=32768,
             enable_prefix_caching=True,
             enforce_eager=FAST_BOOT,
-            # Disable verbose request logging in production.
             disable_log_requests=True,
         )
 
         self._engine: AsyncLLMEngine = AsyncLLMEngine.from_engine_args(engine_args)
-
-        # Dedicate a persistent event loop to all async engine calls.
         self._loop = asyncio.new_event_loop()
-
-        # Warmup: run one empty generation so CUDA kernels are compiled
-        # and the first user request is not penalised.
         self._loop.run_until_complete(self._warmup())
 
     async def _warmup(self) -> None:
@@ -205,22 +206,20 @@ class Qwen25VLLM:
         repetition_penalty: float = 1.05,
     ) -> Iterator[str]:
         """
-        Stream token chunks from Qwen/Qwen2.5-7B-Instruct via vLLM.
+        Stream token chunks from google/gemma-3-12b-it via vLLM.
 
-        This is a Modal generator method.  Each ``yield`` sends one
-        decoded text chunk back to the caller over the Modal network
-        boundary.  The client consumes it with ``remote_gen()``.
+        This is a Modal generator method. Each yield sends one decoded
+        text chunk back to the caller over the Modal network boundary.
+        The client consumes it with remote_gen().
 
         Parameters
         ----------
         prompt : str
-            Pre-formatted prompt string. The caller is responsible for
-            applying Qwen-compatible chat formatting upstream if
-            conversational templating is required.
+            Pre-formatted prompt string.
         max_new_tokens : int
             Maximum number of tokens to generate.
         temperature : float
-            Sampling temperature.  Use 0.0 for greedy decoding.
+            Sampling temperature. Use 0.0 for greedy decoding.
         top_p : float
             Nucleus sampling probability threshold.
         repetition_penalty : float
@@ -235,8 +234,6 @@ class Qwen25VLLM:
         if not prompt:
             return
 
-        # Run the async generator to completion on our persistent loop,
-        # bridging the sync Modal generator boundary.
         gen = self._stream_tokens(
             prompt=prompt,
             max_new_tokens=max_new_tokens,
@@ -245,8 +242,6 @@ class Qwen25VLLM:
             repetition_penalty=repetition_penalty,
         )
 
-        # Drive the async generator step-by-step from the sync context
-        # so each chunk can be yielded immediately without buffering.
         while True:
             try:
                 chunk = self._loop.run_until_complete(gen.__anext__())
@@ -265,11 +260,6 @@ class Qwen25VLLM:
         """
         Async generator that drives AsyncLLMEngine and yields decoded
         incremental text deltas (not cumulative outputs).
-
-        vLLM's AsyncLLMEngine.generate() yields RequestOutput objects
-        where each output.outputs[0].text contains the *cumulative*
-        text generated so far.  We compute the delta by tracking the
-        previous length of the decoded string and slicing the new tail.
         """
         from vllm import SamplingParams
 
@@ -288,11 +278,7 @@ class Qwen25VLLM:
             sampling_params=sampling_params,
             request_id=request_id,
         ):
-            # request_output.outputs is a list of CompletionOutput objects;
-            # we always request n=1 so index 0 is the only candidate.
             output_text: str = request_output.outputs[0].text
-
-            # Compute the incremental delta since the last yield.
             delta: str = output_text[prev_text_len:]
             prev_text_len = len(output_text)
 
@@ -307,24 +293,26 @@ class Qwen25VLLM:
 @app.local_entrypoint()
 def main() -> None:
     """
-    Quick smoke test.  Run with:
-        modal run modal_llm.py
+    Quick smoke test. Run with:
+        modal run llm/modal_llm.py
     """
-    model = Qwen25VLLM()
+    model = Gemma312BVLLM()
 
-    test_prompt = "Briefly explain PagedAttention in vLLM."
+    test_prompt = (
+        "You are a gaming expert. In one sentence, describe Far Cry 5."
+    )
     print(f"Prompt: {test_prompt}\n")
     print("Response: ", end="", flush=True)
 
     accumulated: list[str] = []
     for chunk in model.generate.remote_gen(
         test_prompt,
-        max_new_tokens=256,
+        max_new_tokens=128,
         temperature=0.1,
     ):
         print(chunk, end="", flush=True)
         accumulated.append(chunk)
 
-    print()  # newline after streaming output
+    print()
     full_response = "".join(accumulated)
     print(f"\n[Total chars generated: {len(full_response)}]")
