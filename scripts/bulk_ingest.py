@@ -2,7 +2,8 @@
 """
 scripts/bulk_ingest.py — Production-Grade Bulk Ingestion Pipeline
 
-Processes up to 300 games through the RAGent ingestion pipeline (Stages 1-5).
+Processes up to 100 curated top-grossing / most-searched games through
+the RAGent ingestion pipeline (Stages 1-5).
 Features:
   - Rate limiting (2.0s inter-game cooldown)
   - Fault tolerance (per-game try/except, never crashes on single failure)
@@ -65,350 +66,138 @@ logging.basicConfig(
 logger = logging.getLogger("bulk_ingest")
 
 # =====================================================================
-# TOP 300 GAMES DATASET
-# Curated from: IGN Top 100, Metacritic All-Time, Wikipedia Best-Selling,
-# Google Year-in-Search 2024/2025, GameSpot Archives, RAWG database.
-# Grouped by genre for clean data formatting.
+# TOP 100 GAMES DATASET
+# Curated from: Wikipedia Best-Selling Games, Metacritic All-Time Best,
+# Google Year-in-Search 2024/2025, Steam Charts, GameSpot Archives.
+# Selected for commercial success, review coverage, and search volume.
+# Grouped by genre for clean data distribution.
 # =====================================================================
 
-TOP_300_GAMES: List[str] = [
-    # ── Action-Adventure (40) ──────────────────────────────────────
+TOP_100_GAMES: List[str] = [
+
+    # ── Action-Adventure (15) ─────────────────────────────────────────
+    "Grand Theft Auto V",
+    "Red Dead Redemption 2",
     "The Legend of Zelda: Breath of the Wild",
     "The Legend of Zelda: Tears of the Kingdom",
-    "The Legend of Zelda: Ocarina of Time",
-    "Red Dead Redemption 2",
-    "Red Dead Redemption",
-    "Grand Theft Auto V",
-    "Grand Theft Auto IV",
-    "Grand Theft Auto: San Andreas",
-    "Grand Theft Auto: Vice City",
     "The Last of Us",
     "The Last of Us Part II",
     "God of War",
     "God of War Ragnarok",
-    "Uncharted 4: A Thief's End",
-    "Uncharted 2: Among Thieves",
-    "Horizon Zero Dawn",
-    "Horizon Forbidden West",
     "Ghost of Tsushima",
     "Spider-Man",
     "Spider-Man: Miles Morales",
-    "Batman: Arkham City",
-    "Batman: Arkham Knight",
     "Assassin's Creed Valhalla",
     "Assassin's Creed Odyssey",
-    "Assassin's Creed Origins",
-    "Assassin's Creed II",
-    "Assassin's Creed Brotherhood",
-    "Assassin's Creed IV: Black Flag",
     "Far Cry 5",
-    "Far Cry 3",
-    "Far Cry 6",
-    "Tomb Raider (2013)",
-    "Rise of the Tomb Raider",
-    "Shadow of the Tomb Raider",
     "Death Stranding",
-    "Death Stranding 2",
-    "Metal Gear Solid V: The Phantom Pain",
-    "Metal Gear Solid 3: Snake Eater",
-    "Sekiro: Shadows Die Twice",
-    "Star Wars Jedi: Fallen Order",
 
-    # ── RPG / JRPG (45) ───────────────────────────────────────────
+    # ── RPG / JRPG (15) ───────────────────────────────────────────────
     "The Witcher 3: Wild Hunt",
-    "The Elder Scrolls V: Skyrim",
-    "The Elder Scrolls IV: Oblivion",
     "Elden Ring",
-    "Dark Souls III",
-    "Dark Souls",
-    "Dark Souls II",
-    "Bloodborne",
-    "Baldur's Gate 3",
     "Cyberpunk 2077",
-    "Mass Effect 2",
-    "Mass Effect 3",
-    "Mass Effect Legendary Edition",
+    "Baldur's Gate 3",
+    "The Elder Scrolls V: Skyrim",
     "Fallout 4",
     "Fallout: New Vegas",
-    "Fallout 3",
-    "Dragon Age: Inquisition",
-    "Dragon Age: Origins",
-    "Final Fantasy VII",
     "Final Fantasy VII Remake",
-    "Final Fantasy VII Rebirth",
-    "Final Fantasy X",
-    "Final Fantasy XV",
-    "Final Fantasy XVI",
-    "Persona 5",
     "Persona 5 Royal",
-    "Persona 4 Golden",
-    "Persona 3 Reload",
-    "Xenoblade Chronicles 3",
-    "Xenoblade Chronicles 2",
-    "Chrono Trigger",
-    "Kingdom Hearts",
-    "Kingdom Hearts II",
+    "Dark Souls III",
+    "Bloodborne",
     "NieR: Automata",
-    "NieR Replicant",
-    "Divinity: Original Sin 2",
-    "Disco Elysium",
-    "Dragon's Dogma 2",
-    "Diablo IV",
-    "Diablo III",
-    "Diablo II: Resurrected",
-    "Path of Exile 2",
     "Monster Hunter: World",
-    "Monster Hunter Rise",
-    "Monster Hunter Wilds",
+    "Diablo IV",
+    "Dragon's Dogma 2",
 
-    # ── Shooter / FPS (35) ─────────────────────────────────────────
+    # ── Shooter / FPS (15) ────────────────────────────────────────────
     "Call of Duty: Modern Warfare",
-    "Call of Duty: Modern Warfare 2 (2022)",
-    "Call of Duty: Modern Warfare II",
-    "Call of Duty: Black Ops",
     "Call of Duty: Black Ops II",
-    "Call of Duty: Black Ops III",
-    "Call of Duty: Black Ops 6",
     "Call of Duty: Warzone",
-    "Halo Infinite",
     "Halo 3",
-    "Halo: Reach",
-    "Halo: Combat Evolved",
+    "Halo Infinite",
     "Doom Eternal",
-    "Doom (2016)",
-    "DOOM: The Dark Ages",
     "Half-Life 2",
-    "Half-Life: Alyx",
-    "Counter-Strike 2",
     "Counter-Strike: Global Offensive",
+    "Counter-Strike 2",
     "Destiny 2",
-    "Destiny",
     "Titanfall 2",
-    "Borderlands 3",
-    "Borderlands 2",
     "BioShock Infinite",
-    "BioShock",
-    "Far Cry 4",
+    "Borderlands 3",
     "Resident Evil 4 (2023)",
-    "Resident Evil Village",
-    "Resident Evil 2 (2019)",
-    "Left 4 Dead 2",
-    "Overwatch 2",
-    "Overwatch",
-    "Rainbow Six Siege",
     "Helldivers 2",
 
-    # ── Battle Royale / Multiplayer (15) ───────────────────────────
+    # ── Battle Royale / Multiplayer (8) ───────────────────────────────
     "Fortnite",
     "PUBG: Battlegrounds",
     "Apex Legends",
-    "Warzone 2.0",
-    "Fall Guys",
     "Valorant",
     "Palworld",
     "Among Us",
-    "Lethal Company",
-    "Phasmophobia",
-    "Dead by Daylight",
     "Rust",
-    "Escape from Tarkov",
-    "The Finals",
-    "ARC Raiders",
+    "Fall Guys",
 
-    # ── Open World / Sandbox (20) ──────────────────────────────────
+    # ── Open World / Sandbox (8) ──────────────────────────────────────
     "Minecraft",
-    "Terraria",
     "Stardew Valley",
     "Animal Crossing: New Horizons",
     "No Man's Sky",
-    "Starfield",
-    "Subnautica",
-    "Subnautica: Below Zero",
-    "Satisfactory",
+    "Terraria",
     "Valheim",
-    "Ark: Survival Evolved",
-    "Ark: Survival Ascended",
-    "Astroneer",
-    "The Forest",
-    "Sons of the Forest",
-    "Grounded",
-    "Deep Rock Galactic",
-    "Conan Exiles",
-    "Raft",
-    "7 Days to Die",
+    "Subnautica",
+    "Starfield",
 
-    # ── Platformer / Indie (25) ────────────────────────────────────
+    # ── Platformer / Indie (8) ────────────────────────────────────────
     "Hollow Knight",
-    "Hollow Knight: Silksong",
-    "Celeste",
     "Hades",
-    "Hades II",
+    "Celeste",
     "Cuphead",
-    "Ori and the Will of the Wisps",
-    "Ori and the Blind Forest",
     "Super Mario Odyssey",
-    "Super Mario Galaxy",
-    "Super Mario Bros. Wonder",
-    "Donkey Kong Country: Tropical Freeze",
-    "Rayman Legends",
-    "Shovel Knight",
-    "Dead Cells",
     "It Takes Two",
-    "A Way Out",
-    "Sackboy: A Big Adventure",
-    "Little Nightmares II",
-    "Inside",
-    "Limbo",
+    "Ori and the Will of the Wisps",
     "Undertale",
-    "Outer Wilds",
-    "Return of the Obra Dinn",
-    "Braid",
 
-    # ── Strategy / Simulation / City-Builder (25) ──────────────────
+    # ── Strategy / Simulation (7) ─────────────────────────────────────
     "Civilization VI",
-    "Civilization V",
     "Age of Empires IV",
-    "Age of Empires II: Definitive Edition",
-    "Total War: Warhammer III",
-    "Total War: Three Kingdoms",
-    "XCOM 2",
-    "Fire Emblem: Three Houses",
-    "Fire Emblem Engage",
     "Crusader Kings III",
-    "Stellaris",
-    "Europa Universalis IV",
-    "Cities: Skylines",
-    "Cities: Skylines II",
-    "Planet Coaster",
-    "Planet Zoo",
     "Factorio",
     "RimWorld",
-    "Frostpunk",
-    "Frostpunk 2",
-    "Two Point Hospital",
-    "Sims 4",
-    "SimCity (2013)",
-    "Tropico 6",
-    "Dwarf Fortress",
+    "Cities: Skylines",
+    "Stellaris",
 
-    # ── Sports / Racing (20) ───────────────────────────────────────
-    "FIFA 23",
+    # ── Sports / Racing (5) ───────────────────────────────────────────
     "EA Sports FC 24",
-    "EA Sports FC 25",
-    "EA Sports College Football 25",
-    "NBA 2K24",
-    "NBA 2K25",
-    "Madden NFL 24",
-    "Madden NFL 25",
-    "MLB The Show 24",
     "Forza Horizon 5",
-    "Forza Motorsport (2023)",
     "Gran Turismo 7",
-    "Need for Speed: Unbound",
-    "Need for Speed: Heat",
     "Mario Kart 8 Deluxe",
     "Rocket League",
-    "F1 24",
-    "Riders Republic",
-    "Tony Hawk's Pro Skater 1 + 2",
-    "Wii Sports",
 
-    # ── Fighting (10) ──────────────────────────────────────────────
+    # ── Fighting (5) ──────────────────────────────────────────────────
     "Street Fighter 6",
-    "Mortal Kombat 1 (2023)",
     "Mortal Kombat 11",
     "Tekken 8",
     "Super Smash Bros. Ultimate",
     "Dragon Ball FighterZ",
-    "Dragon Ball: Sparking! Zero",
-    "Guilty Gear Strive",
-    "Injustice 2",
-    "MultiVersus",
 
-    # ── Horror / Survival (15) ─────────────────────────────────────
-    "Resident Evil 4",
-    "Silent Hill 2 (2024)",
+    # ── Horror / Survival (5) ─────────────────────────────────────────
+    "Resident Evil Village",
+    "Resident Evil 2 (2019)",
     "Alan Wake 2",
-    "Amnesia: The Dark Descent",
-    "Outlast",
-    "Outlast 2",
-    "The Evil Within 2",
     "Alien: Isolation",
     "Dead Space (2023)",
-    "Days Gone",
-    "Dying Light 2",
-    "Dying Light",
-    "The Callisto Protocol",
-    "Until Dawn",
-    "Blair Witch",
 
-    # ── MMORPG / Live Service (15) ─────────────────────────────────
+    # ── MMORPG / Live Service (5) ─────────────────────────────────────
     "World of Warcraft",
     "Final Fantasy XIV",
-    "Guild Wars 2",
-    "Elder Scrolls Online",
-    "Lost Ark",
-    "New World",
     "Genshin Impact",
     "Honkai: Star Rail",
-    "Wuthering Waves",
-    "Tower of Fantasy",
     "Warframe",
-    "Diablo Immortal",
-    "Black Desert Online",
-    "Phantasy Star Online 2",
-    "Destiny 2: The Final Shape",
 
-    # ── Narrative / Walking Sim / Puzzle (20) ──────────────────────
+    # ── Narrative / Puzzle (4) ────────────────────────────────────────
     "Portal 2",
-    "Portal",
-    "Life is Strange",
-    "Life is Strange: True Colors",
     "Detroit: Become Human",
-    "Heavy Rain",
-    "Firewatch",
-    "What Remains of Edith Finch",
-    "The Stanley Parable: Ultra Deluxe",
-    "Clair Obscur: Expedition 33",
-    "Psychonauts 2",
     "A Plague Tale: Requiem",
-    "A Plague Tale: Innocence",
     "Control",
-    "Deathloop",
-    "Twelve Minutes",
-    "The Witness",
-    "Obra Dinn",
-    "Inscryption",
-    "Split Fiction",
-
-    # ── Mobile / Casual Crossover (10) ─────────────────────────────
-    "Pokémon GO",
-    "Pokémon Legends: Arceus",
-    "Pokémon Legends: Z-A",
-    "Pokémon Scarlet and Violet",
-    "Clash Royale",
-    "Roblox",
-    "Candy Crush Saga",
-    "Genshin Impact",
-    "Black Myth: Wukong",
-    "Infinite Craft",
-
-    # ── Retro / Classic Essentials (15) ────────────────────────────
-    "Tetris",
-    "Pac-Man",
-    "Super Mario Bros.",
-    "Sonic the Hedgehog",
-    "Sonic the Hedgehog 2",
-    "Sonic Frontiers",
-    "Metroid Dread",
-    "Metroid Prime Remastered",
-    "Metroid Prime 4: Beyond",
-    "Mega Man X",
-    "Castlevania: Symphony of the Night",
-    "Street Fighter II",
-    "Doom (1993)",
-    "Super Metroid",
-    "The Legend of Zelda: A Link to the Past",
 ]
 
 # =====================================================================
@@ -510,7 +299,7 @@ def _ingest_single_game(client: QdrantClient, game_name: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Bulk-ingest up to 300 games into RAGent's Qdrant database.",
+        description="Bulk-ingest up to 100 curated games into RAGent's Qdrant database.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -522,8 +311,8 @@ def main() -> None:
     parser.add_argument(
         "--end",
         type=int,
-        default=len(TOP_300_GAMES),
-        help=f"End index (exclusive, default: {len(TOP_300_GAMES)})",
+        default=len(TOP_100_GAMES),
+        help=f"End index (exclusive, default: {len(TOP_100_GAMES)})",
     )
     parser.add_argument(
         "--dry-run",
@@ -544,12 +333,12 @@ def main() -> None:
     args = parser.parse_args()
 
     # ── Validate range ──
-    games_slice = TOP_300_GAMES[args.start : args.end]
+    games_slice = TOP_100_GAMES[args.start : args.end]
     total = len(games_slice)
 
     if not games_slice:
         logger.error("No games in range [%d:%d]. Total available: %d",
-                      args.start, args.end, len(TOP_300_GAMES))
+                      args.start, args.end, len(TOP_100_GAMES))
         sys.exit(1)
 
     # ── Dry run ──
