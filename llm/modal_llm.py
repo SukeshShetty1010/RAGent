@@ -60,7 +60,6 @@ vllm_image = (
     .pip_install(
         "vllm==0.9.1",
         "huggingface_hub[hf_transfer]==0.32.0",
-        "flashinfer-python==0.2.6.post1",
         extra_index_url="https://download.pytorch.org/whl/cu128",
     )
     .env(
@@ -71,8 +70,10 @@ vllm_image = (
             "HF_HOME":         HF_CACHE_DIR,
             "HF_HUB_CACHE":    HF_CACHE_DIR,
             "VLLM_CACHE_ROOT": VLLM_CACHE_DIR,
-            # Select FlashInfer attention kernel at the environment level.
-            "VLLM_ATTENTION_BACKEND": "FLASHINFER",
+            # Gemma 3 uses interleaved attention (full + sliding window),
+            # which FlashInfer does not support in vLLM 0.9.1.
+            # Let vLLM auto-select Flash Attention (bundled with vLLM).
+            "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
         }
     )
 )
