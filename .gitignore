@@ -34,3 +34,15 @@ data/gamespot/
 
 # ---------- Docker / Deployment ----------
 *.log
+
+# ---------- Logs ----------
+logs/
+*.log
+
+# ---------- Local notes / scratch files ----------
+quadrent_data.txt
+structure.md
+
+# ---------- Database files ----------
+*.db
+*.sqlite

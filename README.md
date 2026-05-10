@@ -60,7 +60,7 @@ flowchart TB
     
     subgraph Generation["Step 6-7: Prompt & LLM"]
         PM[PromptManager]
-        LLM[Qwen 2.5 7B via Modal]
+        LLM[Gemma 3 12B via Modal]
         CTX --> PM
         PM -->|FULL/PARTIAL| LLM
         PM -->|INSUFFICIENT| REF[Safe Refusal]
@@ -211,11 +211,11 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 
 ### LLM Infrastructure
 
-LLM serving is fully **serverless via Modal**, with GPU-accelerated inference using **Qwen 2.5 7B** on L40S (generation) and **intfloat/e5-base-v2** on T4 (embeddings). The lazy binding pattern ensures environment variables are loaded before Modal client initialization, enabling seamless CI/Docker deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
+LLM serving is fully **serverless via Modal**, with GPU-accelerated inference using **Gemma 3 12B** (`google/gemma-3-12b-it`) on L40S (generation) and **intfloat/e5-base-v2** on T4 (embeddings). The lazy binding pattern ensures environment variables are loaded before Modal client initialization, enabling seamless CI/Docker deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Serverless GPU Deployment | `llm/modal_llm.py` | `chat_completion_remote()` with `Qwen 2.5 7B` on L40S GPU |
+| Serverless GPU Deployment | `llm/modal_llm.py` | `Gemma312BVLLM.generate()` with `google/gemma-3-12b-it` on L40S GPU via vLLM |
 | Lazy Modal Client Binding | `llm/ragent_client.py` | `_get_remote_llm()` for CI/Docker compatibility |
 | GPU Embedding Infrastructure | `llm/modal_embed.py` | `E5Embedder` with `intfloat/e5-base-v2` on T4 GPU |
 
@@ -253,8 +253,9 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 ### Prerequisites
 
 - Python 3.10+
-- Docker (for Qdrant)
-- Modal account (for LLM hosting)
+- [Modal](https://modal.com) account (serverless GPU for LLM + embeddings)
+- [Qdrant Cloud](https://cloud.qdrant.io) cluster (free tier works)
+- [HuggingFace](https://huggingface.co) account with access to `google/gemma-3-12b-it` (gated model)
 - API keys: RAWG, IGDB (Twitch OAuth), GameSpot, Tavily
 
 ### Installation
@@ -264,19 +265,31 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 git clone https://github.com/YOUR_USERNAME/RAGent.git
 cd RAGent
 
-# Activate virtual environment
-RAG_env/Scripts/activate  # Windows
+# Create and activate virtual environment
+python -m venv RAG_env
+RAG_env\Scripts\activate    # Windows
 # source RAG_env/bin/activate  # Linux/Mac
 
 # Install dependencies
 pip install -e .
 
-# Start Qdrant Vector Database
-docker run -p 6333:6333 qdrant/qdrant
-
 # Configure environment variables
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env with your API keys (see .env.example for all required variables)
+```
+
+### Modal Setup
+
+```bash
+# Authenticate Modal
+modal setup
+
+# Store your HuggingFace token as a Modal secret (required for Gemma 3)
+modal secret create huggingface-secret HF_TOKEN=<your_hf_token>
+
+# Deploy the LLM and embedding services
+modal deploy llm/modal_llm.py
+modal deploy llm/modal_embed.py
 ```
 
 ### Ingest Data
@@ -315,7 +328,7 @@ python -m KPI.Unified_KPI_Runner
 | 6 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
 | 7 | `ContextAssembler` | Deduplicates, orders by entity balance |
 | 8 | `PromptManager` | Applies `comparison_verbose` template |
-| 9 | `RageEngine` | Generates via Modal LLM (`Qwen 2.5 7B`) |
+| 9 | `RageEngine` | Generates via Modal LLM (`Gemma 3 12B`) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.
 
