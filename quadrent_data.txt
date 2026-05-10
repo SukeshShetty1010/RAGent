@@ -1,0 +1,18 @@
+APi key
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6ZjNiZjEyMzItNmZhMy00YzAzLTgxYmItZDg5MDhjYTVjZTNkIn0.3w6hM6wil1F24HDrmCvnxtsBseRhLXhk3mtKbOtl4Os
+
+Cluster Endpoint
+
+https://77a5af69-e960-443b-adcb-b674a8ab8f9f.us-west-2-0.aws.cloud.qdrant.io
+
+python
+
+from qdrant_client import QdrantClient
+
+qdrant_client = QdrantClient(
+    url="https://77a5af69-e960-443b-adcb-b674a8ab8f9f.us-west-2-0.aws.cloud.qdrant.io:6333", 
+    api_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6ZjNiZjEyMzItNmZhMy00YzAzLTgxYmItZDg5MDhjYTVjZTNkIn0.3w6hM6wil1F24HDrmCvnxtsBseRhLXhk3mtKbOtl4Os",
+)
+
+print(qdrant_client.get_collections())
