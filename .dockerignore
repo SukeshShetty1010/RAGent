@@ -52,3 +52,6 @@ KPI/
 Thumbs.db
 .DS_Store
 .semantic_cache/
+
+# Frontend (deployed separately on Vercel)
+frontend/

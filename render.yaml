@@ -16,10 +16,8 @@ services:
         sync: false
       - key: QDRANT_API_KEY
         sync: false
-      # Modal (LLM + Embeddings)
-      - key: MODAL_TOKEN_ID
-        sync: false
-      - key: MODAL_TOKEN_SECRET
+      # Groq LLM
+      - key: GROQ_API_KEY
         sync: false
       # External APIs
       - key: TAVILY_API_KEY

@@ -43,6 +43,10 @@ logs/
 quadrent_data.txt
 structure.md
 
+# ---------- Frontend (deployed separately on Vercel) ----------
+frontend/node_modules/
+frontend/.next/
+
 # ---------- Database files ----------
 *.db
 *.sqlite

@@ -57,44 +57,6 @@ def test_class_name_in_modal_llm():
     )
 
 
-def test_ragent_client_constants_match_modal_llm():
-    """ragent_client.py binding constants must match modal_llm.py app/class."""
-    import pathlib, re
-
-    client_src = pathlib.Path("llm/ragent_client.py").read_text(encoding="utf-8")
-
-    app_match = re.search(r'_MODAL_APP_NAME\s*=\s*"([^"]+)"', client_src)
-    cls_match = re.search(r'_MODAL_CLASS_TAG\s*=\s*"([^"]+)"', client_src)
-
-    assert app_match, "_MODAL_APP_NAME not found in ragent_client.py"
-    assert cls_match, "_MODAL_CLASS_TAG not found in ragent_client.py"
-
-    assert app_match.group(1) == "gemma-3-12b-it-vllm", (
-        f"ragent_client._MODAL_APP_NAME mismatch: {app_match.group(1)!r}"
-    )
-    assert cls_match.group(1) == "Gemma312BVLLM", (
-        f"ragent_client._MODAL_CLASS_TAG mismatch: {cls_match.group(1)!r}"
-    )
-
-
-def test_ragent_client_streaming_constants_match_modal_llm():
-    """ragent_client_streaming.py binding constants must match modal_llm.py."""
-    import pathlib, re
-
-    src = pathlib.Path("llm/ragent_client_streaming.py").read_text(encoding="utf-8")
-
-    app_match = re.search(r'_MODAL_APP_NAME\s*=\s*"([^"]+)"', src)
-    cls_match = re.search(r'_MODAL_CLASS_TAG\s*=\s*"([^"]+)"', src)
-
-    assert app_match, "_MODAL_APP_NAME not found in ragent_client_streaming.py"
-    assert cls_match, "_MODAL_CLASS_TAG not found in ragent_client_streaming.py"
-
-    assert app_match.group(1) == "gemma-3-12b-it-vllm", (
-        f"ragent_client_streaming._MODAL_APP_NAME mismatch: {app_match.group(1)!r}"
-    )
-    assert cls_match.group(1) == "Gemma312BVLLM", (
-        f"ragent_client_streaming._MODAL_CLASS_TAG mismatch: {cls_match.group(1)!r}"
-    )
 
 
 def test_fast_boot_is_bool():

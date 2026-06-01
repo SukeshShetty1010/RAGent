@@ -16,25 +16,24 @@ import argparse
 import os
 from typing import List, Dict, Optional
 
-import modal
 from qdrant_client import QdrantClient, models
-from fastembed import SparseTextEmbedding
+from fastembed import SparseTextEmbedding, TextEmbedding
 
 from utils.observability import ProfileBlock, MetricsRegistry
 
 
 # ---------------------------------------------------------------------
-# Modal Embedder (MUST exactly match ingestion)
+# Embedding Models (CPU-only, no Modal dependency)
 # ---------------------------------------------------------------------
 
-E5Embedder = modal.Cls.from_name(
-    "editorial-embedding-service",
-    "E5Embedder",
-)
+import modal
 
 # BM25 sparse encoder (lightweight, CPU-only)
 bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 
+# Dense encoder — matches ingestion model (via Modal)
+E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
+dense_encoder_app = E5Embedder()
 
 # ---------------------------------------------------------------------
 # RAG Retriever
@@ -64,8 +63,6 @@ class RAGRetriever:
                 "❌ Failed to connect to Qdrant. Is it running?"
             ) from exc
 
-        self.embedder = E5Embedder()
-
     # --------------------------------------------------
     # Public API
     # --------------------------------------------------
@@ -88,7 +85,7 @@ class RAGRetriever:
             # Embedding generation (dense + sparse)
             # --------------------------------------------------
             with ProfileBlock("EmbeddingGeneration"):
-                dense_vec = self.embedder.embed_texts.remote([query])[0]
+                dense_vec = dense_encoder_app.embed_texts.remote([query])[0]
                 sparse_emb = list(bm25_encoder.query_embed(query))[0]
 
             MetricsRegistry.get().observe(

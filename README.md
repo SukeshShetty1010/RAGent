@@ -302,11 +302,16 @@ python -m upsert.upsert_all --game "Far Cry 5"
 ### Run the System
 
 ```bash
-# Query the system
+# Query the system from the terminal
 python -m scripts.bulk_ingest
 
-# Launch the UI
-streamlit run ui/app_streaming.py
+# Launch the FastAPI Backend
+uvicorn api.main:app --port 8000
+
+# In a new terminal, launch the Next.js UI
+cd frontend
+npm install
+npm run dev
 
 # Run the KPI Dashboard
 python -m KPI.Unified_KPI_Runner
@@ -367,13 +372,13 @@ RAGent/
 ├── data/                  # API clients (RAWG, IGDB, GameSpot)
 ├── embed/                 # Embedding payload preparation
 ├── engine/                # RageEngine (7-step execution)
+├── frontend/              # Next.js web application
 ├── ingest/                # Multi-source data ingestion
 ├── KPI/                   # Executive KPI dashboard (5 modules)
 ├── llm/                   # Modal LLM & embedding services
 ├── pre_process/           # Data cleaning & transformation
 ├── retriever/             # Orchestrator, quality gate, strategy
 ├── tests/                 # Observability, caching, evaluation
-├── ui/                    # Streamlit interface
 ├── upsert/                # Batch insertion orchestrator
 └── vector/                # Qdrant collection management
 ```

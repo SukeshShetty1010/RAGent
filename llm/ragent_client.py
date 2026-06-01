@@ -1,53 +1,25 @@
 # ============================================================
 # llm/ragent_client.py
-# LLM Client Wrapper (FULLY OBSERVABLE, PROD-SAFE)
+# LLM Client Wrapper (Groq API Blocking)
 # ============================================================
-
 from __future__ import annotations
-
-import modal
+import os
 from typing import Any
-
+from groq import Groq
 from utils.observability import ProfileBlock, MetricsRegistry
 
+_groq_client = None
 
-# ------------------------------------------------------------
-# Lazy Modal Cls Binding
-# ------------------------------------------------------------
-
-# Modal deployment declared in llm/modal_llm.py:
-#   app = modal.App("gemma-3-12b-it-vllm")
-_MODAL_APP_NAME = "gemma-3-12b-it-vllm"
-_MODAL_CLASS_TAG = "Gemma312BVLLM"
-
-_remote_instance = None
-
-
-def _get_remote_llm():
-    """
-    Lazily resolve and cache a bound instance of Gemma312BVLLM.
-
-    WHY THIS EXISTS:
-    - Ensures MODAL_TOKEN_ID / MODAL_TOKEN_SECRET
-      are loaded BEFORE Modal client initialization
-    - Prevents import-time auth failures
-    - Works in Docker / fresh machines / CI
-    """
-    global _remote_instance
-
-    if _remote_instance is None:
-        cls = modal.Cls.from_name(
-            _MODAL_APP_NAME,
-            _MODAL_CLASS_TAG,
-        )
-        _remote_instance = cls()
-
-    return _remote_instance
-
-
-# ------------------------------------------------------------
-# Observable Wrapper (PUBLIC API)
-# ------------------------------------------------------------
+def _get_groq_client() -> Groq:
+    global _groq_client
+    if _groq_client is None:
+        from dotenv import load_dotenv
+        load_dotenv()
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY environment variable not set")
+        _groq_client = Groq(api_key=api_key)
+    return _groq_client
 
 def chat_completion_remote(
     prompt: str,
@@ -55,54 +27,25 @@ def chat_completion_remote(
     temperature: float = 0.1,
     **kwargs: Any,
 ) -> str:
-    """
-    Observable wrapper around Modal LLM invocation.
-
-    Measures:
-    - LLM generation latency
-    - Prompt size (chars)
-    - Output size (chars)
-
-    NOTE:
-    - Token counts are approximated unless returned by the model
-    - All auth handled via environment (server-side only)
-    """
-
     if not prompt:
         return ""
-
-    MetricsRegistry.get().observe(
-        "llm_prompt_chars",
-        len(prompt),
-    )
-
-    llm = _get_remote_llm()
-
+    MetricsRegistry.get().observe("llm_prompt_chars", len(prompt))
+    client = _get_groq_client()
+    accumulated = []
+    
     with ProfileBlock("LLMGeneration"):
-        accumulated = []
-        for chunk in llm.generate.remote_gen(
-            prompt,
-            max_new_tokens=max_tokens,
+        stream = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
             temperature=temperature,
+            stream=True,
             **kwargs,
-        ):
-            text = (
-                chunk.decode()
-                if isinstance(chunk, (bytes, bytearray))
-                else str(chunk)
-            )
-            accumulated.append(text)
-
-    response = "".join(accumulated)
-
-    # --------------------------------------------------------
-    # Post-call metrics (best-effort)
-    # --------------------------------------------------------
-
-    if isinstance(response, str):
-        MetricsRegistry.get().observe(
-            "llm_output_chars",
-            len(response),
         )
-
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                accumulated.append(chunk.choices[0].delta.content)
+                
+    response = "".join(accumulated)
+    MetricsRegistry.get().observe("llm_output_chars", len(response))
     return response
