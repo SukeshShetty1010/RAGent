@@ -6,6 +6,8 @@ import queue
 import threading
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 
@@ -114,3 +116,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 break
 
     return EventSourceResponse(event_generator())
+
+# Serve static frontend files if they exist (for unified deployment)
+STATIC_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend_build')
+if os.path.exists(STATIC_DIR):
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

@@ -1,10 +1,22 @@
 # ============================================================
 # RAGent — Dockerfile (Render Free Tier)
 # ============================================================
-# Entry point: FastAPI backend (uvicorn)
-# LLM inference via Groq API (no GPU needed)
+# Multi-stage build:
+# 1. Build Next.js static frontend
+# 2. Run FastAPI backend serving static frontend
 # ============================================================
 
+# ---------- Stage 1: Build Frontend ----------
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+# Copy frontend dependencies and code
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ .
+# Build static export (generates /app/frontend/out)
+RUN npm run build
+
+# ---------- Stage 2: Build & Run Backend ----------
 FROM python:3.11-slim
 
 # System deps for building native extensions
@@ -18,8 +30,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy backend application code
 COPY . .
+
+# Copy static frontend build from Stage 1
+COPY --from=frontend-builder /app/frontend/out ./frontend_build
 
 # Render uses PORT env var; fall back to Render's default web port locally
 EXPOSE 10000

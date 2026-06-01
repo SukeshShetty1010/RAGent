@@ -33,3 +33,4 @@ sse-starlette
 groq
 httpx<0.28.0                    # Pin to avoid 'proxies' breaking change
 modal
+aiofiles
