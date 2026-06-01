@@ -53,5 +53,5 @@ Thumbs.db
 .DS_Store
 .semantic_cache/
 
-# Frontend (deployed separately on Vercel)
-frontend/
+# Frontend is now bundled in the Docker image
+# frontend/
