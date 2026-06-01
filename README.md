@@ -60,7 +60,7 @@ flowchart TB
     
     subgraph Generation["Step 6-7: Prompt & LLM"]
         PM[PromptManager]
-        LLM[Gemma 3 12B via Modal]
+        LLM[Llama 3.1 8B via Groq / Gemma 3 via Modal]
         CTX --> PM
         PM -->|FULL/PARTIAL| LLM
         PM -->|INSUFFICIENT| REF[Safe Refusal]
@@ -207,16 +207,18 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 | Prompt Budget Enforcement | `agent/prompt_manager.py` | 3-stage fallback: verbose → concise → truncated |
 | Web Search Fallback | `agent/tools/web_search.py` | `WebSearchTool.search()` via Tavily API |
 | Execution Engine | `engine/execution_engine.py` | `RageEngine.run()` (7-step pipeline) |
+| Streaming Engine | `engine/execution_engine_streaming.py` | `StreamingRageEngine.run_streaming()` (SSE API) |
 
 
 ### LLM Infrastructure
 
-LLM serving is fully **serverless via Modal**, with GPU-accelerated inference using **Gemma 3 12B** (`google/gemma-3-12b-it`) on L40S (generation) and **intfloat/e5-base-v2** on T4 (embeddings). The lazy binding pattern ensures environment variables are loaded before Modal client initialization, enabling seamless CI/Docker deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
+LLM serving uses **Groq** (`llama-3.1-8b-instant`) for ultra-low latency streaming by default, with an optional **serverless via Modal** deployment using **Gemma 3 12B** (`google/gemma-3-12b-it`) on L40S. GPU-accelerated embeddings use **intfloat/e5-base-v2** on T4. The lazy binding pattern ensures environment variables are loaded before client initialization, enabling seamless CI/Docker/Render deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
+| Streaming LLM Client | `llm/ragent_client_streaming.py` | `chat_completion_streaming()` via Groq API |
 | Serverless GPU Deployment | `llm/modal_llm.py` | `Gemma312BVLLM.generate()` with `google/gemma-3-12b-it` on L40S GPU via vLLM |
-| Lazy Modal Client Binding | `llm/ragent_client.py` | `_get_remote_llm()` for CI/Docker compatibility |
+| Lazy Client Binding | `llm/ragent_client.py` | `_get_groq_client()` for CI/Docker compatibility |
 | GPU Embedding Infrastructure | `llm/modal_embed.py` | `E5Embedder` with `intfloat/e5-base-v2` on T4 GPU |
 
 
@@ -253,10 +255,11 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 ### Prerequisites
 
 - Python 3.10+
-- [Modal](https://modal.com) account (serverless GPU for LLM + embeddings)
+- [Groq](https://groq.com) account for default ultra-fast inference
+- [Modal](https://modal.com) account (serverless GPU for embeddings & optional LLM self-hosting)
 - [Qdrant Cloud](https://cloud.qdrant.io) cluster (free tier works)
-- [HuggingFace](https://huggingface.co) account with access to `google/gemma-3-12b-it` (gated model)
-- API keys: RAWG, IGDB (Twitch OAuth), GameSpot, Tavily
+- [HuggingFace](https://huggingface.co) account with access to `google/gemma-3-12b-it` (if using Modal LLM)
+- API keys: RAWG, IGDB (Twitch OAuth), GameSpot, Tavily, Groq
 
 ### Installation
 
@@ -375,12 +378,14 @@ RAGent/
 ├── frontend/              # Next.js web application
 ├── ingest/                # Multi-source data ingestion
 ├── KPI/                   # Executive KPI dashboard (5 modules)
-├── llm/                   # Modal LLM & embedding services
+├── llm/                   # Groq streaming clients & Modal services
+├── modal_lib/             # Modal utilities and configurations
 ├── pre_process/           # Data cleaning & transformation
 ├── retriever/             # Orchestrator, quality gate, strategy
 ├── tests/                 # Observability, caching, evaluation
 ├── upsert/                # Batch insertion orchestrator
-└── vector/                # Qdrant collection management
+├── vector/                # Qdrant collection management
+└── render.yaml            # Render deployment configuration
 ```
 
 ---
