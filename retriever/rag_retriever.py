@@ -46,17 +46,24 @@ bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
 dense_encoder_app = E5Embedder()
 
-# Cross-encoder reranker (lazy-loaded singleton — CPU, small model)
-_cross_encoder = None
+# Cross-encoder reranker (eager-loaded at boot, like bm25_encoder above —
+# loading it lazily on first request hides a slow/stuck HF model download
+# behind tqdm output that never reaches the logger, making the first live
+# request look hung with no visible cause).
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+logger.info(f"Loading cross-encoder reranker: {CROSS_ENCODER_MODEL}")
+try:
+    from sentence_transformers import CrossEncoder
+    _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+    logger.info("Cross-encoder reranker loaded")
+except Exception as exc:
+    logger.warning(f"Cross-encoder failed to load at boot (fail-soft): {exc}")
+    _cross_encoder = None
 
 
 def _get_cross_encoder():
-    """Lazily load and cache the cross-encoder reranker."""
-    global _cross_encoder
-    if _cross_encoder is None:
-        from sentence_transformers import CrossEncoder
-        _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+    """Return the pre-loaded cross-encoder reranker (None if boot load failed)."""
     return _cross_encoder
 
 # ---------------------------------------------------------------------
@@ -209,8 +216,11 @@ class RAGRetriever:
         if not candidates:
             return candidates
 
+        encoder = _get_cross_encoder()
+        if encoder is None:
+            return candidates[:limit]
+
         try:
-            encoder = _get_cross_encoder()
             pairs = [(query, c.get("content") or "") for c in candidates]
             rerank_scores = encoder.predict(pairs)
 
