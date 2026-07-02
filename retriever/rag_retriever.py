@@ -46,25 +46,11 @@ bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
 dense_encoder_app = E5Embedder()
 
-# Cross-encoder reranker (eager-loaded at boot, like bm25_encoder above —
-# loading it lazily on first request hides a slow/stuck HF model download
-# behind tqdm output that never reaches the logger, making the first live
-# request look hung with no visible cause).
-CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-
-logger.info(f"Loading cross-encoder reranker: {CROSS_ENCODER_MODEL}")
-try:
-    from sentence_transformers import CrossEncoder
-    _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
-    logger.info("Cross-encoder reranker loaded")
-except Exception as exc:
-    logger.warning(f"Cross-encoder failed to load at boot (fail-soft): {exc}")
-    _cross_encoder = None
-
-
-def _get_cross_encoder():
-    """Return the pre-loaded cross-encoder reranker (None if boot load failed)."""
-    return _cross_encoder
+# Cross-encoder reranker — hosted on Modal, not loaded locally. Loading
+# torch/sentence-transformers in this process (alongside fastembed's BM25
+# encoder) exceeded Render's 512MB free-tier RAM limit.
+CrossEncoderReranker = modal.Cls.from_name("cross-encoder-rerank-service", "CrossEncoderReranker")
+reranker_app = CrossEncoderReranker()
 
 # ---------------------------------------------------------------------
 # RAG Retriever
@@ -216,13 +202,9 @@ class RAGRetriever:
         if not candidates:
             return candidates
 
-        encoder = _get_cross_encoder()
-        if encoder is None:
-            return candidates[:limit]
-
         try:
-            pairs = [(query, c.get("content") or "") for c in candidates]
-            rerank_scores = encoder.predict(pairs)
+            contents = [c.get("content") or "" for c in candidates]
+            rerank_scores = reranker_app.rerank.remote(query, contents)
 
             for c, s in zip(candidates, rerank_scores):
                 c["rerank_score"] = float(s)
