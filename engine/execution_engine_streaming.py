@@ -42,6 +42,7 @@ from agent.capability.capability_assessor import CapabilityAssessor
 from agent.capability.capability_types import AnswerCapability
 from agent.context_assembler import ContextAssembler
 from agent.prompt_manager import PromptManager
+from agent.output_validator import validate_answer
 
 from utils.observability import MetricsRegistry, ProfileBlock
 
@@ -129,6 +130,7 @@ class StreamingRageEngine:
             raise RuntimeError("Engine already closed")
 
         registry = MetricsRegistry.get()
+        self._reset_metrics(registry)
         engine_start = time.perf_counter()
 
         final_answer = ""
@@ -204,13 +206,15 @@ class StreamingRageEngine:
                 emit_stage("retrieval", "started")
                 step_start = time.perf_counter()
                 
-                raw_chunks, merge_state, quality = self.orchestrator.run(
+                raw_chunks, merge_state, quality, web_decision = self.orchestrator.run(
                     query=query,
                     decision=decision,
                     config=config,
                 )
 
                 agent_decisions["merge_state"] = merge_state
+                if web_decision is not None:
+                    agent_decisions["web_search_decision"] = web_decision.model_dump()
                 quality_status = quality.status.value
                 confidence_score = quality.confidence_score
 
@@ -321,10 +325,28 @@ class StreamingRageEngine:
                         )
 
                     llm_latency_ms = (time.perf_counter() - step_start) * 1000.0
-                    emit_stage("generation", "completed", {
+
+                    stage_data = {
                         "tokens_generated": len(final_answer.split()),
-                        "llm_latency_ms": llm_latency_ms
-                    }, llm_latency_ms)
+                        "llm_latency_ms": llm_latency_ms,
+                    }
+
+                    if llm_ran:
+                        validation = validate_answer(final_answer, capability)
+                        agent_decisions["output_validation"] = (
+                            validation.model_dump()
+                        )
+                        MetricsRegistry.get().record(
+                            "output_validation",
+                            "valid" if validation.is_valid else "invalid",
+                        )
+                        stage_data["output_validation"] = (
+                            validation.model_dump()
+                        )
+
+                    emit_stage(
+                        "generation", "completed", stage_data, llm_latency_ms
+                    )
                 else:
                     final_answer = (
                         "I don't have enough reliable information "
@@ -405,3 +427,13 @@ class StreamingRageEngine:
             self.orchestrator.close()
         finally:
             self._closed = True
+
+    # --------------------------------------------------------
+    # Helpers
+    # --------------------------------------------------------
+
+    @staticmethod
+    def _reset_metrics(registry: MetricsRegistry) -> None:
+        registry._counters.clear()
+        registry._distributions.clear()
+        registry._categoricals.clear()

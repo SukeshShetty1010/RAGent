@@ -2,24 +2,35 @@
 RAG Retriever (FULLY OBSERVABLE)
 
 Hybrid Search (BM25 Sparse + Dense Vector) via Qdrant
-with Reciprocal Rank Fusion (RRF).
+with Reciprocal Rank Fusion (RRF), followed by a cross-encoder
+reranking pass over the fused candidates.
 
 Instrumentation added for:
 - Embedding generation
 - Vector query
+- Cross-encoder reranking
 - Result formatting
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import sys
 from typing import List, Dict, Optional
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from qdrant_client import QdrantClient, models
 from fastembed import SparseTextEmbedding, TextEmbedding
 
 from utils.observability import ProfileBlock, MetricsRegistry
+
+logger = logging.getLogger("RAG_RETRIEVER")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 # ---------------------------------------------------------------------
@@ -34,6 +45,19 @@ bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 # Dense encoder — matches ingestion model (via Modal)
 E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
 dense_encoder_app = E5Embedder()
+
+# Cross-encoder reranker (lazy-loaded singleton — CPU, small model)
+_cross_encoder = None
+CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+
+def _get_cross_encoder():
+    """Lazily load and cache the cross-encoder reranker."""
+    global _cross_encoder
+    if _cross_encoder is None:
+        from sentence_transformers import CrossEncoder
+        _cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+    return _cross_encoder
 
 # ---------------------------------------------------------------------
 # RAG Retriever
@@ -52,6 +76,9 @@ class RAGRetriever:
         self.client: Optional[QdrantClient] = None
 
         try:
+            from dotenv import load_dotenv
+            load_dotenv()
+
             url = os.environ.get("QDRANT_URL", "http://localhost:6333")
             api_key = os.environ.get("QDRANT_API_KEY", "")
             self.client = QdrantClient(
@@ -95,6 +122,8 @@ class RAGRetriever:
             # --------------------------------------------------
             # Hybrid search (BM25 + Dense via RRF)
             # --------------------------------------------------
+            fetch_limit = max(limit * 4, 20)
+
             with ProfileBlock("VectorQuery"):
                 response = self.client.query_points(
                     collection_name="EditorialChunk",
@@ -116,7 +145,7 @@ class RAGRetriever:
                     query=models.FusionQuery(
                         fusion=models.Fusion.RRF,
                     ),
-                    limit=limit,
+                    limit=fetch_limit,
                     with_payload=[
                         "content",
                         "source_title",
@@ -125,13 +154,13 @@ class RAGRetriever:
                 )
 
             # --------------------------------------------------
-            # Result formatting
+            # Result formatting (RRF-ordered candidates)
             # --------------------------------------------------
             with ProfileBlock("ResultFormatting"):
-                results: List[Dict] = []
+                candidates: List[Dict] = []
 
                 for point in response.points:
-                    results.append(
+                    candidates.append(
                         {
                             "content": point.payload.get("content"),
                             "source_title": point.payload.get(
@@ -140,15 +169,64 @@ class RAGRetriever:
                             "chunk_index": point.payload.get(
                                 "chunk_index"
                             ),
+                            # Original RRF fusion score — consumed by
+                            # quality_gate.py's threshold logic. Never
+                            # overwritten by the reranker below.
                             "score": point.score,
                         }
                     )
+
+            # --------------------------------------------------
+            # Cross-encoder reranking (fail-soft)
+            # --------------------------------------------------
+            with ProfileBlock("CrossEncoderRerank"):
+                results = self._rerank(query, candidates, limit)
 
             MetricsRegistry.get().observe(
                 "retrieval_results_count", len(results)
             )
 
             return results
+
+    # --------------------------------------------------
+    # Reranking
+    # --------------------------------------------------
+
+    def _rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        limit: int,
+    ) -> List[Dict]:
+        """
+        Reorder RRF candidates by cross-encoder relevance and slice
+        to `limit`. Adds a `rerank_score` field; leaves the original
+        `score` (RRF fusion score) untouched for downstream consumers.
+
+        Fail-soft: on any reranker error, falls back to the original
+        RRF ordering.
+        """
+        if not candidates:
+            return candidates
+
+        try:
+            encoder = _get_cross_encoder()
+            pairs = [(query, c.get("content") or "") for c in candidates]
+            rerank_scores = encoder.predict(pairs)
+
+            for c, s in zip(candidates, rerank_scores):
+                c["rerank_score"] = float(s)
+
+            candidates.sort(
+                key=lambda c: c["rerank_score"], reverse=True
+            )
+
+        except Exception as exc:
+            logger.warning(
+                f"Cross-encoder rerank unavailable (fail-soft): {exc}"
+            )
+
+        return candidates[:limit]
 
     # --------------------------------------------------
     # Resource Management
@@ -238,7 +316,7 @@ def main() -> None:
         prompt = format_llama3_prompt(args.query, chunks)
 
         try:
-            from llm.ragent_client_streaming import chat_completion_remote
+            from llm.ragent_client import chat_completion_remote
         except Exception as exc:
             print(
                 "\n⚠️ Generation skipped: unable to import ragent_client\n"

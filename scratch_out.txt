@@ -1,0 +1,60 @@
+HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/cross-encoder/ms-marco-MiniLM-L6-v2/c5ee24cb16019beea0893ab7796b1df96625c6b8/special_tokens_map.json "HTTP/1.1 200 OK"
+HTTP Request: GET https://huggingface.co/api/resolve-cache/models/cross-encoder/ms-marco-MiniLM-L6-v2/c5ee24cb16019beea0893ab7796b1df96625c6b8/special_tokens_map.json "HTTP/1.1 200 OK"
+HTTP Request: HEAD https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/chat_template.jinja "HTTP/1.1 307 Temporary Redirect"
+HTTP Request: HEAD https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/main/chat_template.jinja "HTTP/1.1 404 Not Found"
+HTTP Request: HEAD https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/README.md "HTTP/1.1 307 Temporary Redirect"
+HTTP Request: HEAD https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/main/README.md "HTTP/1.1 307 Temporary Redirect"
+HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/cross-encoder/ms-marco-MiniLM-L6-v2/c5ee24cb16019beea0893ab7796b1df96625c6b8/README.md "HTTP/1.1 200 OK"
+HTTP Request: GET https://huggingface.co/api/resolve-cache/models/cross-encoder/ms-marco-MiniLM-L6-v2/c5ee24cb16019beea0893ab7796b1df96625c6b8/README.md "HTTP/1.1 200 OK"
+Use pytorch device: cpu
+HTTP Request: GET https://huggingface.co/api/models/cross-encoder/ms-marco-MiniLM-L-6-v2 "HTTP/1.1 307 Temporary Redirect"
+HTTP Request: GET https://huggingface.co/api/models/cross-encoder/ms-marco-MiniLM-L6-v2 "HTTP/1.1 200 OK"
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|##########| 1/1 [00:03<00:00,  3.74s/it]Batches: 100%|##########| 1/1 [00:03<00:00,  3.74s/it]
+Traceback (most recent call last):
+  File "D:\Sukesh\Anti-Gravity\RAG_ent\retriever\rag_retriever.py", line 315, in main
+    from llm.ragent_client_streaming import chat_completion_remote
+  File "D:\Sukesh\Anti-Gravity\RAG_ent\llm\ragent_client_streaming.py", line 8, in <module>
+    from groq import Groq
+ModuleNotFoundError: No module named 'groq'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Sukesh\Anti-Gravity\RAG_ent\retriever\rag_retriever.py", line 348, in <module>
+    main()
+  File "D:\Sukesh\Anti-Gravity\RAG_ent\retriever\rag_retriever.py", line 317, in main
+    print(
+  File "C:\Users\sukes\anaconda3\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 2-3: character maps to <undefined>
+
+================ Retrieved Context ================
+
+[1] The Biggest Upcoming Xbox Games (score=0.5000)
+The Biggest Upcoming Xbox Games
+
+the game is not complete without noting Blizzard has been making headlines of late over its workplace culture, including the bombshell revelation that CEO Bobby Kotick knew about and covered up instances of sexual harassment and other abuse. Elden Ring Elden Ring One of 2022's most anticipated games is Elden Ring for Xbox Series X. Developed by From Software (Bloodborne, Dark Souls), Elden Ring is another dark fantasy RPG directed by Hidetaka Miyzaki with a story
+----------------------------------------------------------------------
+[2] Elden Ring Review - Death Of The Wild (score=0.2000)
+Elden Ring Review - Death Of The Wild
+
+Lanterns, or Idols did in other titles. At each of these sites is a dim trail of golden light pointing in the general direction of� something. Perhaps it's the next milestone in your quest or maybe it's just another area that has a dungeon--the only way to find out is to make the journey. The challenge for From Software lies in the friction between the studio's design hallmarks and the expected conventions of a genre filled with games that try to be all thi
+----------------------------------------------------------------------
+[3] Elden Ring Review - Death Of The Wild (score=0.1111)
+Elden Ring Review - Death Of The Wild
+
+system, which is a little more lenient to accommodate the open nature of the game. Instead of being returned to a Site of Grace when killed, the open world is littered with small statues called Stakes of Marika. These can usually be found around particularly challenging areas, whether that's because there's a group of enemies in a fortified location or a singular mini-boss that must be faced in one of the many heart-pounding, soul-crushing, and utterly conf
+----------------------------------------------------------------------
+[4] Elden Ring Review - Death Of The Wild (score=0.2500)
+Elden Ring Review - Death Of The Wild
+
+out in the world or summoning in someone to help defeat a challenging boss. The same sense of achievement derived from taking down a powerful foe is there when you team up with another person, as difficulty scales to account for multiple combatants, so it still feels like you're earning a victory. On the other hand, if you want to play the role of antagonist, you can invade other players' worlds and attempt to assassinate them. Souls games aren't often the 
+----------------------------------------------------------------------
+[5] Elden Ring Review - Death Of The Wild (score=0.2500)
+Elden Ring Review - Death Of The Wild
+
+Fifteen hours into Elden Ring, I defeated Godrick, the first of five Elden Lords. In the time between emerging into the Lands Between and striking him down, I'd discovered decrepit ruins, ventured into twisting caves, stumbled upon enemy encampments, and battled tooth and nail against challenging bosses. From Software's games have always made you feel small in many ways: They tell you that you're worthless--a plague-ridden rat or accursed Undead, unfit even
+----------------------------------------------------------------------

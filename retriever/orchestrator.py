@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Dict, Any, Iterable, Tuple
+from typing import List, Dict, Any, Iterable, Optional, Tuple
 
 from retriever.strategy_selector import RetrievalConfiguration
 from retriever.rag_retriever import RAGRetriever
 from retriever.quality_gate import RetrievalQualityGate, QualityStatus
 from agent.tools.web_search import WebSearchTool
 from agent.task_router import TaskType, RouterDecision
+from agent.decisions.web_search_decision import WebSearchDecision, decide_web_search
 
 from utils.observability import ProfileBlock, MetricsRegistry
 
@@ -64,7 +65,7 @@ class RetrievalOrchestrator:
         query: str,
         decision: RouterDecision,
         config: RetrievalConfiguration,
-    ) -> Tuple[List[Dict[str, Any]], str, Any]:
+    ) -> Tuple[List[Dict[str, Any]], str, Any, Optional[WebSearchDecision]]:
         """
         Execute retrieval according to routing + strategy.
 
@@ -72,6 +73,7 @@ class RetrievalOrchestrator:
             chunks
             merge_state
             quality_report (QualityReport object)
+            web_decision (WebSearchDecision or None if no ambiguous decision was needed)
         """
 
         task = decision.task
@@ -113,15 +115,37 @@ class RetrievalOrchestrator:
             # -------------------------------------------------
 
             should_attempt_web = False
+            web_decision: Optional[WebSearchDecision] = None
 
-            if quality_report.status in {
-                QualityStatus.QUALITY_EMPTY,
-                QualityStatus.QUALITY_WEAK,
-            }:
+            if quality_report.status == QualityStatus.QUALITY_EMPTY:
+                # Honesty-gate certain case: no ambiguity, no LLM call.
                 should_attempt_web = True
 
-            elif config.allow_web_fallback and quality_report.has_temporal_signal:
-                should_attempt_web = True
+            elif (
+                quality_report.status == QualityStatus.QUALITY_WEAK
+                or (config.allow_web_fallback and quality_report.has_temporal_signal)
+            ):
+                # Bounded, single-shot agentic decision with fail-soft fallback.
+                with ProfileBlock("WebSearchDecision"):
+                    web_decision = decide_web_search(
+                        query=query,
+                        task=task,
+                        quality_report=quality_report,
+                        allow_web_fallback=config.allow_web_fallback,
+                        evidence_summary=[
+                            {"source_title": c.get("source_title"), "score": c.get("score")}
+                            for c in local_chunks[:3]
+                        ],
+                    )
+
+                should_attempt_web = web_decision.should_search_web
+
+                MetricsRegistry.get().record(
+                    "web_decision_source", web_decision.source
+                )
+                MetricsRegistry.get().observe(
+                    "web_decision_confidence", web_decision.confidence
+                )
 
             # -------------------------------------------------
             # STEP 4: WEB AUGMENTATION (OBSERVABLE)
@@ -174,16 +198,17 @@ class RetrievalOrchestrator:
             with ProfileBlock("ChunkMerge"):
 
                 if not local_chunks and web_chunks:
-                    return web_chunks, merge_state, quality_report
+                    return web_chunks, merge_state, quality_report, web_decision
 
                 if web_chunks:
                     return (
                         local_chunks + web_chunks,
                         merge_state,
                         quality_report,
+                        web_decision,
                     )
 
-                return local_chunks, merge_state, quality_report
+                return local_chunks, merge_state, quality_report, web_decision
 
     # =========================================================
     # Web refinement

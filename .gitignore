@@ -42,6 +42,7 @@ logs/
 # ---------- Local notes / scratch files ----------
 quadrent_data.txt
 structure.md
+SESSION_NOTES.md
 
 # ---------- Frontend (deployed separately on Vercel) ----------
 frontend/node_modules/

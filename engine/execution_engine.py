@@ -16,6 +16,7 @@ from agent.capability.capability_assessor import CapabilityAssessor
 from agent.capability.capability_types import AnswerCapability
 from agent.context_assembler import ContextAssembler
 from agent.prompt_manager import PromptManager
+from agent.output_validator import validate_answer
 
 from utils.observability import MetricsRegistry, ProfileBlock
 
@@ -79,6 +80,7 @@ class RageEngine:
             raise RuntimeError("Engine already closed")
 
         registry = MetricsRegistry.get()
+        self._reset_metrics(registry)
 
         engine_start = time.perf_counter()
 
@@ -128,13 +130,15 @@ class RageEngine:
                 # ------------------------------------------------
                 # STEP 3: RETRIEVAL
                 # ------------------------------------------------
-                raw_chunks, merge_state, quality = self.orchestrator.run(
+                raw_chunks, merge_state, quality, web_decision = self.orchestrator.run(
                     query=query,
                     decision=decision,
                     config=config,
                 )
 
                 agent_decisions["merge_state"] = merge_state
+                if web_decision is not None:
+                    agent_decisions["web_search_decision"] = web_decision.model_dump()
 
                 # QualityReport is an OBJECT (correct)
                 quality_status = quality.status.value
@@ -190,6 +194,17 @@ class RageEngine:
 
                         final_answer = response.strip()
                         llm_ran = True
+
+                        validation = validate_answer(
+                            final_answer, capability
+                        )
+                        agent_decisions["output_validation"] = (
+                            validation.model_dump()
+                        )
+                        MetricsRegistry.get().record(
+                            "output_validation",
+                            "valid" if validation.is_valid else "invalid",
+                        )
 
                     except Exception as exc:
                         logger.warning(

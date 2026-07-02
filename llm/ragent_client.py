@@ -49,3 +49,33 @@ def chat_completion_remote(
     response = "".join(accumulated)
     MetricsRegistry.get().observe("llm_output_chars", len(response))
     return response
+
+def chat_completion_decision(
+    prompt: str,
+    max_tokens: int = 150,
+    temperature: float = 0.0,
+    **kwargs: Any,
+) -> str:
+    """
+    Non-streaming, single-shot LLM call for bounded structured decisions
+    (JSON-object responses). Distinct from chat_completion_remote, which
+    is streaming and intended for user-facing answer generation.
+    """
+    if not prompt:
+        return ""
+    MetricsRegistry.get().observe("llm_decision_prompt_chars", len(prompt))
+    client = _get_groq_client()
+
+    with ProfileBlock("LLMDecision"):
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stream=False,
+            **kwargs,
+        )
+        response = completion.choices[0].message.content or ""
+
+    MetricsRegistry.get().observe("llm_decision_output_chars", len(response))
+    return response
