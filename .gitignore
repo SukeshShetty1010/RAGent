@@ -44,6 +44,12 @@ quadrent_data.txt
 structure.md
 SESSION_NOTES.md
 
+# ---------- Claude Code local files ----------
+Claude.md
+CLAUDE.md
+**/CLAUDE.md
+.claude/settings.local.json
+
 # ---------- Frontend (deployed separately on Vercel) ----------
 frontend/node_modules/
 frontend/.next/
