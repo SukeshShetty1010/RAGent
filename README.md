@@ -41,13 +41,18 @@ flowchart TB
     
     subgraph Retrieval["Step 3: Evidence Retrieval"]
         RO[RetrievalOrchestrator]
-        WV[(Qdrant<br/>Hybrid Search)]
+        WV[(Qdrant<br/>Hybrid Search: BM25 + E5 Dense, RRF Fusion)]
+        RR[Cross-Encoder Reranker<br/>ms-marco-MiniLM-L-6-v2 on Modal]
         QG[RetrievalQualityGate]
-        WS[WebSearchTool]
+        WD[decide_web_search LLM decision]
+        WS[WebSearchTool / Tavily]
         SS --> RO
         RO --> WV
-        WV --> QG
-        QG -->|Weak/Temporal| WS
+        WV --> RR
+        RR --> QG
+        QG -->|EMPTY| WS
+        QG -->|WEAK/Temporal| WD
+        WD --> WS
     end
     
     subgraph Assessment["Step 4-5: Honesty & Assembly"]
@@ -61,13 +66,15 @@ flowchart TB
     subgraph Generation["Step 6-7: Prompt & LLM"]
         PM[PromptManager]
         LLM[Llama 3.1 8B via Groq / Gemma 3 via Modal]
+        OV[OutputValidator]
         CTX --> PM
         PM -->|FULL/PARTIAL| LLM
         PM -->|INSUFFICIENT| REF[Safe Refusal]
+        LLM --> OV
     end
     
     subgraph Output["📊 Response"]
-        LLM --> ANS[Final Answer]
+        OV --> ANS[Final Answer]
         REF --> ANS
     end
 ```
@@ -185,7 +192,8 @@ The retrieval layer implements **hybrid search** combining BM25 keyword matching
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
 | Vector DB Schema Design | `vector/create_schema.py` | 5 collections: EditorialChunk, Game, PlatformSpec, IGDB_Game, GameSpot_Game |
-| Hybrid Search (BM25 + Vector) | `retriever/rag_retriever.py` | `RAGRetriever.retrieve()` with `dense` + `bm25` sparse |
+| Hybrid Search (BM25 + Vector) | `retriever/rag_retriever.py` | `RAGRetriever.retrieve()` with `FusionQuery(fusion=Fusion.RRF)` over `dense` + `bm25` sparse |
+| Cross-Encoder Reranking | `llm/modal_rerank.py` | `ms-marco-MiniLM-L-6-v2` on Modal reorders fused candidates into `rerank_score` (original RRF `score` preserved for the quality gate) |
 | Word-Based Chunking | `chunking/editorial_chunker.py` | `EditorialChunker` (500 tokens, 50 overlap) |
 | GPU Embedding Service | `llm/modal_embed.py` | `E5Embedder` on T4 GPU (`intfloat/e5-base-v2`) |
 
@@ -200,12 +208,14 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 | Deterministic Task Routing | `agent/task_router.py` | `TaskRouter.route()`, `RouterDecision` dataclass |
 | Intent-Aware Strategy Selection | `retriever/strategy_selector.py` | `StrategySelector.select()`, `RetrievalConfiguration` |
 | Multi-strategy Retrieval | `retriever/orchestrator.py` | `RetrievalOrchestrator.run()`, `_execute_comparison()` |
-| Evidence Quality Gating | `retriever/quality_gate.py` | `RetrievalQualityGate.evaluate()`, `QualityReport` |
+| Evidence Quality Gating | `retriever/quality_gate.py` | `RetrievalQualityGate.evaluate()`, `QualityReport` (OK/WEAK/EMPTY) |
 | Capability Assessment | `agent/capability/capability_assessor.py` | `CapabilityAssessor.assess()` → FULL/PARTIAL/INSUFFICIENT |
 | Context Assembly Pipeline | `agent/context_assembler.py` | `ContextAssembler.assemble()` with dedup + ordering |
 | Pure Context Algorithms | `agent/context_algorithms.py` | `deduplicate_chunks()`, `apply_character_budget()` |
 | Prompt Budget Enforcement | `agent/prompt_manager.py` | 3-stage fallback: verbose → concise → truncated |
+| Bounded LLM Web-Search Decision | `agent/decisions/web_search_decision.py` | `decide_web_search()` — fail-soft, degrades to deterministic rule on any LLM/parse failure |
 | Web Search Fallback | `agent/tools/web_search.py` | `WebSearchTool.search()` via Tavily API |
+| Post-Generation Output Validation | `agent/output_validator.py` | `validate_answer()` — balanced Markdown + required PARTIAL section, fail-soft, never discards `final_answer` |
 | Execution Engine | `engine/execution_engine.py` | `RageEngine.run()` (7-step pipeline) |
 | Streaming Engine | `engine/execution_engine_streaming.py` | `StreamingRageEngine.run_streaming()` (SSE API) |
 
@@ -274,7 +284,7 @@ RAG_env\Scripts\activate    # Windows
 # source RAG_env/bin/activate  # Linux/Mac
 
 # Install dependencies
-pip install -e .
+pip install -r requirements.txt
 
 # Configure environment variables
 cp .env.example .env
@@ -290,10 +300,13 @@ modal setup
 # Store your HuggingFace token as a Modal secret (required for Gemma 3)
 modal secret create huggingface-secret HF_TOKEN=<your_hf_token>
 
-# Deploy the LLM and embedding services
+# Deploy the LLM, embedding, and reranking services
 modal deploy llm/modal_llm.py
 modal deploy llm/modal_embed.py
+modal deploy llm/modal_rerank.py
 ```
+
+> `retriever/rag_retriever.py` resolves the embed/rerank services via `modal.Cls.from_name(...)` at import time — deploy these before starting the API or ingesting data.
 
 ### Ingest Data
 
@@ -322,6 +335,23 @@ python -m KPI.Unified_KPI_Runner
 
 ---
 
+## ☁️ Production Deployment
+
+Production runs as a **single Render web service** on the free tier (512MB RAM), not a separately hosted frontend:
+
+- `Dockerfile` is a multi-stage build — Stage 1 builds the Next.js frontend as a static export (`npm run build` → `frontend/out`), Stage 2 installs Python deps and copies the static export into `frontend_build/`, served directly by FastAPI.
+- `render.yaml` defines the single web service and its health check (`/health`).
+- Because RAM is capped at 512MB, heavy ML deps (`torch`, `sentence-transformers`, local model loads) must **never** be added to `requirements.txt` — embedding, reranking, and (optionally) generation are hosted on Modal instead. Keep new dependencies on the Render request path lightweight.
+- All API keys/secrets must be set in the Render dashboard's environment variables — `.env` is gitignored and not deployed.
+
+```bash
+# Build and run the production image locally
+docker build -t ragent .
+docker run -p 10000:10000 --env-file .env ragent
+```
+
+---
+
 ## 🎬 Sample Query Walkthrough
 
 **Query**: `"Compare Far Cry 5 vs Assassin's Creed Valhalla"`
@@ -331,12 +361,14 @@ python -m KPI.Unified_KPI_Runner
 | 1 | `IntentSignalExtractor` | Detects `COMPARISON` signal via regex patterns |
 | 2 | `TaskRouter` | Routes to `TaskType.COMPARISON` |
 | 3 | `StrategySelector` | Selects `decomposition` strategy (separate sub-queries) |
-| 4 | `RetrievalOrchestrator` | Retrieves 5 chunks per game entity |
-| 5 | `RetrievalQualityGate` | Evaluates evidence → `QUALITY_OK` |
-| 6 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
-| 7 | `ContextAssembler` | Deduplicates, orders by entity balance |
-| 8 | `PromptManager` | Applies `comparison_verbose` template |
-| 9 | `RageEngine` | Generates via Modal LLM (`Gemma 3 12B`) |
+| 4 | `RetrievalOrchestrator` | Retrieves 5 chunks per game entity (hybrid BM25 + dense, RRF fusion) |
+| 5 | Cross-Encoder Reranker | Reorders fused candidates by `rerank_score` (RRF `score` preserved) |
+| 6 | `RetrievalQualityGate` | Evaluates evidence → `QUALITY_OK` |
+| 7 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
+| 8 | `ContextAssembler` | Deduplicates, orders by entity balance |
+| 9 | `PromptManager` | Applies `comparison_verbose` template |
+| 10 | `RageEngine` | Generates via Modal LLM (`Gemma 3 12B`) |
+| 11 | `OutputValidator` | Checks balanced Markdown + required PARTIAL section, annotates result (fail-soft) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.
 
@@ -366,25 +398,30 @@ python -m KPI.Unified_KPI_Runner
 RAGent/
 ├── agent/                 # Agentic logic & control flow
 │   ├── capability/        # Honesty gate (FULL/PARTIAL/INSUFFICIENT)
+│   ├── decisions/         # Bounded LLM decisions (web-search routing)
 │   ├── intent/            # Intent signal extraction
-│   ├── tools/             # Web search fallback
+│   ├── tools/             # Web search fallback (Tavily)
 │   ├── context_*.py       # Context assembly algorithms
 │   ├── prompt_*.py        # Prompt management & templates
+│   ├── output_validator.py # Post-generation structural validation
 │   └── task_router.py     # Deterministic task routing
+├── api/                   # FastAPI backend (SSE /api/chat, /health, /ping)
 ├── chunking/              # Editorial text chunking
 ├── data/                  # API clients (RAWG, IGDB, GameSpot)
 ├── embed/                 # Embedding payload preparation
-├── engine/                # RageEngine (7-step execution)
-├── frontend/              # Next.js web application
+├── engine/                # RageEngine (7-step execution) + streaming variant
+├── frontend/              # Next.js web application (built as static export in prod)
 ├── ingest/                # Multi-source data ingestion
 ├── KPI/                   # Executive KPI dashboard (5 modules)
-├── llm/                   # Groq streaming clients & Modal services
+├── llm/                   # Groq streaming client & Modal services (LLM, embed, rerank)
 ├── modal_lib/             # Modal utilities and configurations
 ├── pre_process/           # Data cleaning & transformation
-├── retriever/             # Orchestrator, quality gate, strategy
-├── tests/                 # Observability, caching, evaluation
+├── retriever/             # Orchestrator, quality gate, strategy selector
+├── tests/                 # pytest suite + standalone regression/verification scripts
 ├── upsert/                # Batch insertion orchestrator
+├── utils/                 # Observability (metrics/profiling) & caching
 ├── vector/                # Qdrant collection management
+├── Dockerfile             # Multi-stage build: Next.js static export + FastAPI
 └── render.yaml            # Render deployment configuration
 ```
 
