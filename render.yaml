@@ -1,0 +1,32 @@
+# ============================================================
+# RAGent — Render Infrastructure-as-Code
+# ============================================================
+# Deploy: push to GitHub → Render auto-builds from Dockerfile
+# ============================================================
+
+services:
+  - type: web
+    name: ragent
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      # Qdrant Cloud
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      # Groq LLM
+      - key: GROQ_API_KEY
+        sync: false
+      # External APIs
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: GAMESPOT_API_KEY
+        sync: false
+      - key: RAWG_API_KEY
+        sync: false
+      - key: TWITCH_CLIENT_ID
+        sync: false
+      - key: TWITCH_CLIENT_SECRET
+        sync: false

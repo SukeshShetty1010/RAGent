@@ -1,0 +1,36 @@
+# ============================================================
+# RAGent — Production Dependencies
+# ============================================================
+# Core: Python 3.11+
+# Vector DB: Qdrant Cloud
+# LLM: Groq (Llama 3.1 8B Instant)
+# Backend: FastAPI + SSE
+# ============================================================
+
+# ---------- Vector Database ----------
+qdrant-client>=1.17.0
+fastembed                       # BM25 sparse vector generation (CPU)
+
+# ---------- Caching ----------
+diskcache
+
+# ---------- HTTP / API ----------
+requests
+python-dotenv
+
+# ---------- NLP / Text Processing ----------
+transformers                    # Tokenizers for chunking
+# sentence-transformers/torch removed — cross-encoder reranking now runs
+# on Modal (llm/modal_rerank.py), keeping them off Render's 512MB process.
+
+# ---------- Search / Agent Tools ----------
+tavily-python                   # Tavily web search API
+
+# ---------- Backend API ----------
+fastapi
+uvicorn
+sse-starlette
+groq
+httpx<0.28.0                    # Pin to avoid 'proxies' breaking change
+modal
+aiofiles

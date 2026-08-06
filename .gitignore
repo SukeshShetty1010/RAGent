@@ -1,0 +1,67 @@
+# Python environment
+# Python virtual environment / libraries
+RAG/lib/
+**/site-packages/
+*.so
+__pycache__/
+*.pyc
+RAG-main (1).zip
+RAG_env/
+.semantic_cache/
+
+# ---------- Environment ----------
+.env
+.env.*
+venv/
+.venv/
+
+# ---------- Secrets ----------
+gitpat.txt
+*.pat
+*token*.txt
+
+# ---------- Local debug output ----------
+scratch_out.txt
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Data artifacts (generated at runtime) ----------
+*_gamespot_full_textual.json
+*_editorial_chunks.json
+*_editorial_chunk_payloads.json
+rawg_data_*.json
+igdb_data_*.json
+data/gamespot/
+
+# ---------- Docker / Deployment ----------
+*.log
+
+# ---------- Logs ----------
+logs/
+*.log
+
+# ---------- Local notes / scratch files ----------
+quadrent_data.txt
+structure.md
+SESSION_NOTES.md
+
+# ---------- Claude Code local files ----------
+Claude.md
+CLAUDE.md
+**/CLAUDE.md
+.claude/settings.local.json
+
+# ---------- Frontend (deployed separately on Vercel) ----------
+frontend/node_modules/
+frontend/.next/
+
+# ---------- Database files ----------
+*.db
+*.sqlite
