@@ -7,6 +7,7 @@ from agent.decisions.web_search_decision import decide_web_search, WebSearchDeci
 import agent.decisions.web_search_decision as web_search_decision_mod
 
 
+@pytest.mark.live
 def test_decide_web_search_live_llm_quality_weak():
     if not os.environ.get("GROQ_API_KEY"):
         pytest.skip("GROQ_API_KEY not set")
@@ -33,6 +34,7 @@ def test_decide_web_search_live_llm_quality_weak():
     assert result.reason
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "broken_return",
     [

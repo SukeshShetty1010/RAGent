@@ -34,23 +34,43 @@ if not logger.handlers:
 
 
 # ---------------------------------------------------------------------
-# Embedding Models (CPU-only, no Modal dependency)
+# Embedding Models
 # ---------------------------------------------------------------------
-
-import modal
+# BM25 sparse encoding runs locally (CPU-only, no Modal dependency).
+# Dense embedding and cross-encoder reranking are resolved lazily from
+# Modal on first use, not at import time — importing this module (e.g.
+# for test collection) must not require Modal credentials or network
+# access. Loading torch/sentence-transformers in-process instead was
+# rejected: alongside fastembed's BM25 encoder it exceeded Render's
+# 512MB free-tier RAM limit.
 
 # BM25 sparse encoder (lightweight, CPU-only)
 bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 
-# Dense encoder — matches ingestion model (via Modal)
-E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
-dense_encoder_app = E5Embedder()
+_dense_encoder_app = None
+_reranker_app = None
 
-# Cross-encoder reranker — hosted on Modal, not loaded locally. Loading
-# torch/sentence-transformers in this process (alongside fastembed's BM25
-# encoder) exceeded Render's 512MB free-tier RAM limit.
-CrossEncoderReranker = modal.Cls.from_name("cross-encoder-rerank-service", "CrossEncoderReranker")
-reranker_app = CrossEncoderReranker()
+
+def _get_dense_encoder():
+    global _dense_encoder_app
+    if _dense_encoder_app is None:
+        import modal
+
+        E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
+        _dense_encoder_app = E5Embedder()
+    return _dense_encoder_app
+
+
+def _get_reranker():
+    global _reranker_app
+    if _reranker_app is None:
+        import modal
+
+        CrossEncoderReranker = modal.Cls.from_name(
+            "cross-encoder-rerank-service", "CrossEncoderReranker"
+        )
+        _reranker_app = CrossEncoderReranker()
+    return _reranker_app
 
 # ---------------------------------------------------------------------
 # RAG Retriever
@@ -105,7 +125,7 @@ class RAGRetriever:
             # Embedding generation (dense + sparse)
             # --------------------------------------------------
             with ProfileBlock("EmbeddingGeneration"):
-                dense_vec = dense_encoder_app.embed_texts.remote([query])[0]
+                dense_vec = _get_dense_encoder().embed_texts.remote([query])[0]
                 sparse_emb = list(bm25_encoder.query_embed(query))[0]
 
             MetricsRegistry.get().observe(
@@ -204,7 +224,7 @@ class RAGRetriever:
 
         try:
             contents = [c.get("content") or "" for c in candidates]
-            rerank_scores = reranker_app.rerank.remote(query, contents)
+            rerank_scores = _get_reranker().rerank.remote(query, contents)
 
             for c, s in zip(candidates, rerank_scores):
                 c["rerank_score"] = float(s)

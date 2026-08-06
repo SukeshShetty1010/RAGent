@@ -10,12 +10,18 @@ It is strictly evidence-driven and does NOT judge upstream routing
 decisions or prompt strategies.
 """
 
+import logging
 from typing import Set, List, Dict, Any, DefaultDict
 from collections import defaultdict
 
 from agent.capability.capability_types import AnswerCapability
 from agent.intent.intent_signals import IntentSignal
-from retriever.quality_gate import QualityStatus
+from retriever.quality_gate import QualityReport, QualityStatus
+from utils.observability import MetricsRegistry
+
+logger = logging.getLogger("RAG_CAPABILITY_ASSESSOR")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 class CapabilityAssessor:
@@ -43,14 +49,14 @@ class CapabilityAssessor:
         *,
         intent_signals: Set[IntentSignal],
         evidence: List[Dict[str, Any]],
-        quality: Dict[str, Any],
+        quality: QualityReport,
     ) -> AnswerCapability:
         """
         Assess the system's ability to honestly answer a request.
         """
 
         try:
-            quality_status = quality.get("status")
+            quality_status = quality.status
 
             # ----------------------------------------------------------
             # Absolute honesty checks
@@ -76,23 +82,25 @@ class CapabilityAssessor:
                     capability = AnswerCapability.PARTIAL
 
             # ----------------------------------------------------------
-            # LISTICLE (AUTHORITATIVE — FINAL FIX)
+            # LISTICLE — no dedicated rule.
+            # A listicle with evidence is never INSUFFICIENT (guaranteed by
+            # the check above), but it must not upgrade past a WEAK-evidence
+            # downgrade either, so it simply keeps the `capability` value
+            # quality has already determined.
             # ----------------------------------------------------------
-            if IntentSignal.LISTICLE in intent_signals:
-                # Listicles are FULL by definition if evidence exists.
-                # Ordering and completeness are guaranteed downstream.
-                return AnswerCapability.FULL
 
             # ----------------------------------------------------------
             # TEMPORAL
             # ----------------------------------------------------------
             if IntentSignal.TEMPORAL in intent_signals:
-                if not quality.get("has_temporal_signal", False):
+                if not quality.has_temporal_signal:
                     capability = AnswerCapability.PARTIAL
 
             return capability
 
         except Exception:
+            logger.exception("CapabilityAssessor.assess() failed unexpectedly")
+            MetricsRegistry.get().inc("capability_assess_errors")
             # Fail-safe: degrade, never hallucinate
             return AnswerCapability.PARTIAL
 

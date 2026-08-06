@@ -9,7 +9,7 @@ import logging
 from typing import Dict
 
 from engine.execution_engine import RageEngine
-from utils.observability import MetricsRegistry
+from utils.observability import MetricsRegistry, PROFILE_PATH_SEP
 from tests.evaluation_metrics import analyze_latency_profile
 from tests.regression_suite import REGRESSION_VAULT, RegressionRunner
 
@@ -75,12 +75,12 @@ class SystemPerformanceKPI:
         stage_times: Dict[str, float] = {}
 
         for path, avg_ms in metrics.items():
-            if not path.startswith("latency::REQUEST_TOTAL → "):
+            if not path.startswith(f"latency::REQUEST_TOTAL{PROFILE_PATH_SEP}"):
                 continue
 
-            parts = path.replace("latency::", "").split(" → ")
+            parts = path.replace("latency::", "").split(PROFILE_PATH_SEP)
 
-            # Accept only REQUEST_TOTAL → STAGE
+            # Accept only REQUEST_TOTAL -> STAGE
             if len(parts) != 2:
                 continue
 

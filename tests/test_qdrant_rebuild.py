@@ -8,6 +8,7 @@ No live API calls — reads .env and bulk_ingest source only.
 import os
 import ast
 import pathlib
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -52,6 +53,7 @@ def _get_top_games_list() -> list:
     return []
 
 
+@pytest.mark.unit
 def test_top_100_games_list_exists():
     """bulk_ingest.py must define TOP_100_GAMES (not TOP_300_GAMES)."""
     src = pathlib.Path("scripts/bulk_ingest.py").read_text(encoding="utf-8")
@@ -61,12 +63,14 @@ def test_top_100_games_list_exists():
     )
 
 
+@pytest.mark.unit
 def test_top_100_games_has_100_entries():
     """TOP_100_GAMES must contain exactly 100 game names."""
     games = _get_top_games_list()
     assert len(games) == 100, f"Expected 100 games, got {len(games)}"
 
 
+@pytest.mark.unit
 def test_top_100_games_no_duplicates():
     """TOP_100_GAMES must not contain duplicate game names."""
     games = _get_top_games_list()
@@ -79,6 +83,7 @@ def test_top_100_games_no_duplicates():
     assert not duplicates, f"Duplicate game names found: {duplicates}"
 
 
+@pytest.mark.live
 def test_qdrant_url_points_to_cloud():
     """QDRANT_URL in .env must point to the new cloud cluster, not localhost."""
     url = os.environ.get("QDRANT_URL", "")
@@ -89,6 +94,7 @@ def test_qdrant_url_points_to_cloud():
     )
 
 
+@pytest.mark.live
 def test_qdrant_api_key_is_set():
     """QDRANT_API_KEY in .env must be non-empty."""
     key = os.environ.get("QDRANT_API_KEY", "")

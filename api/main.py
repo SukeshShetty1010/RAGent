@@ -29,8 +29,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global engine instance to cache connections (like Qdrant)
-engine = StreamingRageEngine()
+# Lazily-built, cached engine instance (owns connections like Qdrant).
+# Built on first request rather than at import time, so importing this
+# module (e.g. for test collection) never touches Qdrant/Modal.
+_engine: StreamingRageEngine | None = None
+
+
+def get_engine() -> StreamingRageEngine:
+    global _engine
+    if _engine is None:
+        _engine = StreamingRageEngine()
+    return _engine
 
 class ChatRequest(BaseModel):
     query: str
@@ -73,7 +82,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
     def run_engine():
         try:
-            result = engine.run_streaming(
+            result = get_engine().run_streaming(
                 query=body.query,
                 on_token_callback=on_token,
                 on_stage_callback=on_stage

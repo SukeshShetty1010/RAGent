@@ -15,7 +15,6 @@ from engine.execution_engine import RageEngine
 from agent.task_router import TaskType
 from agent.capability.capability_types import AnswerCapability
 
-from utils.observability import ProfileBlock
 from tests.evaluation_metrics import (
     calculate_precision_at_k,
     analyze_latency_profile,
@@ -98,8 +97,7 @@ class EvaluationRunner:
 
             start = time.perf_counter()
 
-            with ProfileBlock("REQUEST_TOTAL"):
-                execution = self.engine.run(tc.query)
+            execution = self.engine.run(tc.query)
 
             latency_ms = round(
                 (time.perf_counter() - start) * 1000.0,

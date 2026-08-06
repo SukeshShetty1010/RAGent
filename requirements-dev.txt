@@ -1,0 +1,13 @@
+# ============================================================
+# RAGent — Development / Test Dependencies
+# ============================================================
+# Install on top of requirements.txt for local dev and CI.
+# Keep these OUT of requirements.txt: Render's 512MB free-tier
+# process only needs runtime deps (see CLAUDE.md).
+# ============================================================
+
+-r requirements.txt
+
+pytest
+colorama                        # used by tests/verify_engine.py
+# httpx is already pinned in requirements.txt; fastapi.testclient uses it directly.

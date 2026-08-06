@@ -23,6 +23,17 @@ from contextlib import ContextDecorator
 
 
 # ============================================================
+# Shared constants
+# ============================================================
+
+# Separator used to join nested ProfileBlock names into a single
+# latency:: metric key. Defined once and imported everywhere a
+# ProfileBlock path is produced or parsed, so the two sides can never
+# drift out of sync again.
+PROFILE_PATH_SEP = " -> "
+
+
+# ============================================================
 # Metric Payloads
 # ============================================================
 
@@ -158,7 +169,7 @@ class ProfileBlock(ContextDecorator):
         end = time.perf_counter()
         duration_ms = (end - (self.start or end)) * 1000.0
 
-        path = " -> ".join(self._thread_local.stack)
+        path = PROFILE_PATH_SEP.join(self._thread_local.stack)
 
         MetricsRegistry.get().observe(
             f"latency::{path}", duration_ms

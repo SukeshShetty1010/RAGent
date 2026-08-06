@@ -7,6 +7,9 @@ These tests are fully local — no Modal calls, no GPU required.
 
 import importlib
 import types
+import pytest
+
+pytestmark = pytest.mark.unit
 
 
 def _load_modal_llm_constants() -> dict:

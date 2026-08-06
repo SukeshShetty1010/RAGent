@@ -12,6 +12,7 @@ RAG_env/
 # ---------- Environment ----------
 .env
 .env.*
+!.env.example
 venv/
 .venv/
 
