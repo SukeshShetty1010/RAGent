@@ -40,12 +40,16 @@ VISUAL_KEYS = {"artworks", "cover", "screenshots", "videos"}
 
 
 # ---------------------------------------
-# RAWG — Correct Game Name Resolver
+# Correct Game Name Resolver
 # ---------------------------------------
 
-def _resolve_correct_name(query: str) -> Optional[str]:
+def _resolve_via_rawg(query: str) -> Optional[str]:
+    """Optional fail-soft pre-normalizer. RAWG's fuzzy search sometimes
+    returns a cleaner title than a raw query would match on IGDB, but
+    this must never block IGDB resolution — mirrors the pattern in
+    data/gamespot_data.py's resolve_game_name."""
     if not RAWG_API_KEY:
-        raise ValueError("Missing RAWG_API_KEY in environment!")
+        return None
 
     url = "https://api.rawg.io/api/games"
     params = {"key": RAWG_API_KEY, "search": query, "page_size": 1}
@@ -56,9 +60,35 @@ def _resolve_correct_name(query: str) -> Optional[str]:
         data = res.json()
         if data.get("results"):
             return data["results"][0].get("name")
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_via_igdb(query: str, token: str) -> Optional[str]:
+    """Resolve a search query to IGDB's own canonical name."""
+    try:
+        records = _igdb_post(f'fields name; search "{query}"; limit 1;', token)
+    except Exception:
         return None
-    except Exception as e:
-        raise RuntimeError(f"RAWG error resolving correct name: {e}")
+
+    if records:
+        return records[0].get("name")
+    return None
+
+
+def _resolve_correct_name(query: str, token: str) -> Optional[str]:
+    """
+    Resolve a search query to a name IGDB will match well.
+
+    Tries RAWG first (optional, fail-soft); falls back to IGDB's own
+    search if RAWG is unavailable, unset, or down. IGDB is never
+    hard-blocked by RAWG's outage state.
+    """
+    resolved = _resolve_via_rawg(query)
+    if resolved:
+        return resolved
+    return _resolve_via_igdb(query, token)
 
 
 # ---------------------------------------
@@ -119,15 +149,15 @@ def fetch_igdb_game_data(
     Fetch IGDB metadata for a game name.
 
     Steps:
-      1. Resolve correct RAWG name
-      2. Authenticate with IGDB
+      1. Authenticate with IGDB
+      2. Resolve correct name (RAWG pre-normalize, IGDB fallback)
       3. Search IGDB using 'fields *'
       4. Optionally remove visual/media fields
 
     Returns dict:
     {
         "query_name": original user name,
-        "resolved_name": name from RAWG,
+        "resolved_name": resolved canonical name,
         "raw": full IGDB records,
         "clean": cleaned records (no visual fields)
     }
@@ -136,13 +166,13 @@ def fetch_igdb_game_data(
     if not query:
         raise ValueError("Query must be a non-empty string.")
 
-    # 1. RAWG resolve name
-    resolved = _resolve_correct_name(query)
-    if not resolved:
-        raise RuntimeError(f"No matching game found on RAWG for {query!r}")
-
-    # 2. IGDB authentication
+    # 1. IGDB authentication
     token = _get_twitch_token()
+
+    # 2. Resolve name
+    resolved = _resolve_correct_name(query, token)
+    if not resolved:
+        raise RuntimeError(f"No matching game found on IGDB for {query!r}")
 
     # 3. IGDB fetch
     igdb_query = f"""

@@ -10,7 +10,8 @@ Features:
   - Resume support (reads success_games.log to skip already-processed games)
   - Dry-run mode (prints game list without making API calls)
   - Range slicing (--start / --end for batched execution)
-  - Structured logging to failed_games.log and success_games.log
+  - Structured logging to success_games.log, partial_games.log (identity
+    resolved but 0 editorial chunks), and failed_games.log
 
 Usage:
     python scripts/bulk_ingest.py --dry-run
@@ -53,6 +54,7 @@ INTER_GAME_DELAY: float = 2.0   # seconds between games (rate limiting)
 LOG_DIR: Path = Path("logs")
 SUCCESS_LOG: Path = LOG_DIR / "success_games.log"
 FAILED_LOG: Path = LOG_DIR / "failed_games.log"
+PARTIAL_LOG: Path = LOG_DIR / "partial_games.log"
 
 # =====================================================================
 # LOGGING SETUP
@@ -237,34 +239,47 @@ def _log_result(filepath: Path, game_name: str, detail: str = "") -> None:
         f.write(entry + "\n")
 
 
-def _ingest_single_game(client: QdrantClient, game_name: str) -> None:
+def _ingest_single_game(client: QdrantClient, game_name: str) -> int:
     """
     Run the full 5-stage ingestion pipeline for a single game.
 
     Mirrors the logic in upsert/upsert_all.py:main() but without
     argparse or sys.exit, so failures are catchable.
+
+    Returns the number of editorial chunks upserted in Stage 5. A game
+    can only be counted SUCCESS by the caller when this is > 0 — a
+    game that resolves its identity but yields zero retrievable
+    content is not a success, even though no exception was raised.
     """
 
-    # Stage 1: Canonical Game Anchor
+    # Stage 1: Canonical Game Anchor (hard-fails the game — identity is
+    # not optional)
     logger.info("  Stage 1: Canonical Game Anchor...")
     game_uuid = upsert_game_anchor(client, game_name)
     if not game_uuid or not isinstance(game_uuid, str):
         raise RuntimeError("Invalid UUID from upsert_game_anchor")
     logger.info("    ✅ Anchor UUID: %s", game_uuid)
 
-    # Stage 2: Platform Specs
+    # Stage 2: Platform Specs (fail-soft — degrades this game's metadata,
+    # doesn't kill it)
     logger.info("  Stage 2: Platform Specs...")
-    spec_count = upsert_platform_specs(
-        client=client, game_name=game_name, game_uuid=game_uuid
-    )
-    logger.info("    ✅ Upserted %d platform specs", spec_count)
+    try:
+        spec_count = upsert_platform_specs(
+            client=client, game_name=game_name, game_uuid=game_uuid
+        )
+        logger.info("    ✅ Upserted %d platform specs", spec_count)
+    except Exception as exc:
+        logger.warning("    ⚠️  Stage 2 failed (non-fatal): %s", exc)
 
-    # Stage 3: IGDB Metadata
+    # Stage 3: IGDB Metadata (fail-soft)
     logger.info("  Stage 3: IGDB Metadata...")
-    igdb_count = upsert_igdb_context(
-        client=client, game_title=game_name, game_uuid=game_uuid
-    )
-    logger.info("    ✅ Upserted %d IGDB entities", igdb_count)
+    try:
+        igdb_count = upsert_igdb_context(
+            client=client, game_title=game_name, game_uuid=game_uuid
+        )
+        logger.info("    ✅ Upserted %d IGDB entities", igdb_count)
+    except Exception as exc:
+        logger.warning("    ⚠️  Stage 3 failed (non-fatal): %s", exc)
 
     # Stage 4: GameSpot Editorial Container (fail-soft)
     logger.info("  Stage 4: GameSpot Editorial Container...")
@@ -281,15 +296,18 @@ def _ingest_single_game(client: QdrantClient, game_name: str) -> None:
 
     # Stage 5: Editorial Chunking + Embedding (fail-soft)
     logger.info("  Stage 5: Editorial Chunking & Embedding...")
+    chunk_count = 0
     try:
         chunks = generate_chunk_payloads(game_name, game_uuid)
         if chunks:
-            upsert_chunk_batch(chunks)
-            logger.info("    ✅ Upserted %d editorial chunks", len(chunks))
+            chunk_count = upsert_chunk_batch(chunks)
+            logger.info("    ✅ Upserted %d editorial chunks", chunk_count)
         else:
             logger.warning("    ⚠️  No editorial chunks generated — skipped")
     except Exception as exc:
         logger.warning("    ⚠️  Stage 5 failed (non-fatal): %s", exc)
+
+    return chunk_count
 
 
 # =====================================================================
@@ -364,6 +382,7 @@ def main() -> None:
     client = _get_qdrant_client()
 
     succeeded = 0
+    partial = 0
     failed = 0
     skipped = 0
 
@@ -384,10 +403,15 @@ def main() -> None:
             logger.info("=" * 60)
 
             try:
-                _ingest_single_game(client, game_name)
-                succeeded += 1
-                _log_result(SUCCESS_LOG, game_name)
-                logger.info("✅ SUCCESS: %s", game_name)
+                chunk_count = _ingest_single_game(client, game_name)
+                if chunk_count > 0:
+                    succeeded += 1
+                    _log_result(SUCCESS_LOG, game_name)
+                    logger.info("✅ SUCCESS: %s", game_name)
+                else:
+                    partial += 1
+                    _log_result(PARTIAL_LOG, game_name, "0 editorial chunks upserted")
+                    logger.warning("⚠️  PARTIAL (0 chunks): %s", game_name)
 
             except Exception as exc:
                 failed += 1
@@ -411,9 +435,11 @@ def main() -> None:
         logger.info("=" * 60)
         logger.info("  Total in range:  %d", total)
         logger.info("  Succeeded:       %d", succeeded)
+        logger.info("  Partial (0 chunks): %d", partial)
         logger.info("  Failed:          %d", failed)
         logger.info("  Skipped (resume):%d", skipped)
         logger.info("  Success log:     %s", SUCCESS_LOG)
+        logger.info("  Partial log:     %s", PARTIAL_LOG)
         logger.info("  Failed log:      %s", FAILED_LOG)
         logger.info("=" * 60)
 

@@ -12,28 +12,18 @@ Canonical Game Anchor Upsert (Qdrant Compatible)
 import argparse
 import os
 import sys
-from uuid import UUID, uuid5
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-from ingest.rawg_identity_ingest import fetch_and_prepare_identity
+from ingest.identity_resolver import GAME_NAMESPACE_UUID, resolve_identity
 
 
 # -------------------------------------------------------------------
 # CONSTANTS
 # -------------------------------------------------------------------
 
-GAME_NAMESPACE_UUID = UUID("12345678-1234-5678-1234-567812345678")
 GAME_CLASS_NAME = "Game"
-
-
-# -------------------------------------------------------------------
-# UUID HELPER (replaces weaviate.util.generate_uuid5)
-# -------------------------------------------------------------------
-
-def _generate_uuid5(namespace: UUID, seed: str) -> str:
-    return str(uuid5(namespace, seed))
 
 
 # -------------------------------------------------------------------
@@ -46,17 +36,19 @@ def validate_game_contract(game: dict) -> None:
 
     This validates *data integrity*, not storage schema.
     Qdrant enforces payload correctness at query time.
+
+    Identity root is `unified_game_id` (provider-independent), not any
+    single vendor's primary key — `rawg_id`/`igdb_id` are optional
+    provenance fields, present only when that provider resolved this
+    game.
     """
 
     if not isinstance(game, dict):
         raise RuntimeError("Game contract violation: payload is not a dictionary")
 
     # ---- Required identity fields ----
-    if "game_id" not in game or game["game_id"] is None:
-        raise RuntimeError("Game contract violation: missing 'game_id'")
-
-    if not isinstance(game["game_id"], int):
-        raise RuntimeError("Game contract violation: 'game_id' must be int")
+    if not game.get("unified_game_id") or not isinstance(game["unified_game_id"], str):
+        raise RuntimeError("Game contract violation: missing 'unified_game_id'")
 
     if "title" not in game or not isinstance(game["title"], str) or not game["title"].strip():
         raise RuntimeError("Game contract violation: missing or empty 'title'")
@@ -89,13 +81,23 @@ def get_qdrant_client() -> QdrantClient:
 
 def upsert_game_anchor(client: QdrantClient, game_name: str) -> str:
     """
-    Fetch → Contract Validate → Deterministic UUID → Idempotent Upsert
+    Resolve identity (provider-independent) → Contract Validate →
+    Idempotent Upsert.
     """
 
     # ------------------------------------------------------------
-    # 1. Fetch canonical identity from RAWG
+    # 1. Resolve canonical identity (IGDB, then RAWG)
     # ------------------------------------------------------------
-    game_obj = fetch_and_prepare_identity(game_name)
+    identity = resolve_identity(game_name)
+
+    game_obj = {
+        "unified_game_id": identity.unified_game_id,
+        "identity_source": identity.identity_source,
+        "title": identity.title,
+        "release_year": identity.release_year,
+        "rawg_id": identity.source_ids.get("rawg"),
+        "igdb_id": identity.source_ids.get("igdb"),
+    }
 
     # ------------------------------------------------------------
     # 2. Enforce Canonical Game contract (NOT schema validation)
@@ -103,10 +105,10 @@ def upsert_game_anchor(client: QdrantClient, game_name: str) -> str:
     validate_game_contract(game_obj)
 
     # ------------------------------------------------------------
-    # 3. Deterministic UUID (RAWG ID is the identity root)
+    # 3. Deterministic UUID (seeded from unified_game_id, not any
+    #    single vendor's primary key — reproducible across providers)
     # ------------------------------------------------------------
-    rawg_id = game_obj["game_id"]
-    game_uuid = _generate_uuid5(GAME_NAMESPACE_UUID, str(rawg_id))
+    game_uuid = identity.game_uuid
 
     # ------------------------------------------------------------
     # 4. Idempotency check

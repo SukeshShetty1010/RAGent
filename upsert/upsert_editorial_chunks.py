@@ -6,7 +6,6 @@ import logging
 import os
 from typing import Dict, Optional, List
 
-import modal
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, SparseVector
 from fastembed import SparseTextEmbedding
@@ -21,12 +20,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------------------
-# Modal class lookup
+# Modal class lookup — resolved lazily on first use, not at import time,
+# so importing this module (e.g. for test collection) never requires
+# Modal credentials or network access. Mirrors retriever/rag_retriever.py.
 # ------------------------------------------------------------------------------
-E5Embedder = modal.Cls.from_name(
-    "editorial-embedding-service",
-    "E5Embedder",
-)
+_embedder_app = None
+
+
+def _get_embedder():
+    global _embedder_app
+    if _embedder_app is None:
+        import modal
+
+        E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
+        _embedder_app = E5Embedder()
+    return _embedder_app
+
 
 # BM25 sparse encoder (lightweight, CPU-only)
 bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
@@ -74,11 +83,15 @@ def validate_chunk(chunk_uuid: str, properties: Dict) -> bool:
 def upsert_chunk_batch(
     payloads: List[Dict],
     batch_size: int = 64,
-) -> None:
+) -> int:
     """
     Stage 5:
     - Embed editorial chunks via Modal (E5 on T4) + BM25 sparse
     - Upsert dual vectors into Qdrant
+
+    Returns the number of chunks actually upserted (0 if none were
+    valid) — bulk_ingest.py's success gate depends on this count to
+    distinguish "ingested successfully" from "produced nothing".
     """
 
     # --------------------------------------------------
@@ -97,14 +110,14 @@ def upsert_chunk_batch(
 
     if not valid_objects:
         logger.warning("No valid editorial chunks to process.")
-        return
+        return 0
 
     logger.info("Validated %d editorial chunks", len(valid_objects))
 
     # --------------------------------------------------
     # 2. Dense embedding via Modal (E5)
     # --------------------------------------------------
-    embedder = E5Embedder()
+    embedder = _get_embedder()
 
     dense_vectors: List[List[float]] = []
     total_batches = (len(texts) - 1) // batch_size + 1
@@ -197,6 +210,8 @@ def upsert_chunk_batch(
         "✅ Stage 5 complete — %d editorial chunks embedded & upserted",
         len(valid_objects),
     )
+
+    return len(valid_objects)
 
 
 # ------------------------------------------------------------------------------

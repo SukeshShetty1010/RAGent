@@ -173,6 +173,7 @@ def main() -> None:
             # ------------------------------------------------------------
             logger.info("Starting Stage 5: Editorial Chunking & Embedding...")
 
+            upserted_count = 0
             try:
                 with ProfileBlock("Stage5_ChunkGeneration"):
                     chunks = generate_chunk_payloads(args.game, game_uuid)
@@ -191,7 +192,7 @@ def main() -> None:
                     )
 
                     with ProfileBlock("Stage5_VectorInsert"):
-                        upsert_chunk_batch(chunks)
+                        upserted_count = upsert_chunk_batch(chunks)
 
                     logger.info("✅ Stage 5 Complete.")
 
@@ -202,6 +203,17 @@ def main() -> None:
                 )
 
             logger.info("Pipeline execution complete (Stages 1–5).")
+
+            # A game whose identity resolved but produced zero
+            # retrievable content is not a success — this is the exit
+            # code bulk rebuild scripts key off of.
+            if upserted_count == 0:
+                logger.error(
+                    "❌ Pipeline produced 0 editorial chunks for '%s' — "
+                    "not counted as success.",
+                    args.game,
+                )
+                sys.exit(1)
 
         except Exception as exc:
             logger.error(f"❌ Pipeline failed: {exc}")
