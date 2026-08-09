@@ -11,3 +11,8 @@
 pytest
 colorama                        # used by tests/verify_engine.py
 # httpx is already pinned in requirements.txt; fastapi.testclient uses it directly.
+
+# Phase 3 — offline evaluation only (never imported on the Render request path)
+ragas
+datasets
+langchain-groq

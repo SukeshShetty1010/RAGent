@@ -1,0 +1,45 @@
+{
+  "retrieval_only": {
+    "dense": {
+      "mean_precision_at_k": 0.94,
+      "mean_entity_coverage": 0.8875,
+      "n": 40
+    },
+    "bm25": {
+      "mean_precision_at_k": 0.935,
+      "mean_entity_coverage": 0.8375,
+      "n": 40
+    },
+    "hybrid": {
+      "mean_precision_at_k": 0.95,
+      "mean_entity_coverage": 0.875,
+      "n": 40
+    },
+    "hybrid_rerank": {
+      "mean_precision_at_k": 0.92,
+      "mean_entity_coverage": 0.8125,
+      "n": 40
+    }
+  },
+  "ragas_context_precision": {
+    "dense": {
+      "mean_context_precision": 0.6537,
+      "n": 20
+    },
+    "bm25": {
+      "mean_context_precision": 0.5208,
+      "n": 20
+    },
+    "hybrid": {
+      "mean_context_precision": 0.6397,
+      "n": 20
+    },
+    "hybrid_rerank": {
+      "mean_context_precision": 0.5168,
+      "n": 20
+    }
+  },
+  "ragas_judge_backend": "modal",
+  "hybrid_rerank_wins_on_precision_at_k": false,
+  "markdown_table": "| Mode | Precision@K | Entity Coverage | RAGAS Context Precision |\n|---|---|---|---|\n| `dense` | 0.9400 | 0.8875 | 0.6537 |\n| `bm25` | 0.9350 | 0.8375 | 0.5208 |\n| `hybrid` | 0.9500 | 0.8750 | 0.6397 |\n| `hybrid_rerank` | 0.9200 | 0.8125 | 0.5168 |"
+}

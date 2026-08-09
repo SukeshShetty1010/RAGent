@@ -1,0 +1,299 @@
+{
+  "judge_model": "modal:google/gemma-3-12b-it",
+  "embeddings_model": "Modal E5Embedder (intfloat/e5-base-v2)",
+  "runs_source": "evaluation\\results\\runs_2026-08-09_default.jsonl",
+  "scored_count": 40,
+  "excluded_unanswerable_count": 10,
+  "unreviewed_golden_records": 50,
+  "corpus_fingerprint": {
+    "games": 100,
+    "editorial_chunks": 2791
+  },
+  "aggregates": {
+    "context_precision": 0.5722,
+    "faithfulness": 0.9077,
+    "answer_relevancy": 0.7306
+  },
+  "per_query": [
+    {
+      "id": "g001",
+      "query": "When was Fortnite released?",
+      "context_precision": 0.9999999999666667,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g002",
+      "query": "When was Final Fantasy XIV Online released?",
+      "context_precision": 0.99999999995,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g003",
+      "query": "When was The Legend of Zelda: Breath of the Wild released?",
+      "context_precision": 0.9999999999666667,
+      "faithfulness": 0.6666666666666666,
+      "answer_relevancy": 0.9999999999998748
+    },
+    {
+      "id": "g004",
+      "query": "When was Baldur's Gate 3: Digital Deluxe Edition released?",
+      "context_precision": 0.8333333332916666,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g005",
+      "query": "When was PUBG: Battlegrounds released?",
+      "context_precision": 0.9999999999,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9875414145852988
+    },
+    {
+      "id": "g006",
+      "query": "When was Half-Life 2 released?",
+      "context_precision": 0.0,
+      "faithfulness": 0.36363636363636365,
+      "answer_relevancy": 0.9857816508059654
+    },
+    {
+      "id": "g007",
+      "query": "When was Age of Empires IV released?",
+      "context_precision": 0.9999999999666667,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g008",
+      "query": "When was Red Dead Redemption 2 released?",
+      "context_precision": 0.9999999999,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.999999999999864
+    },
+    {
+      "id": "g009",
+      "query": "When was Call of Duty: Warzone released?",
+      "context_precision": 0.999999999975,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999998845
+    },
+    {
+      "id": "g010",
+      "query": "When was Spider-Man released?",
+      "context_precision": 0.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g011",
+      "query": "When was Resident Evil Village released?",
+      "context_precision": 0.99999999995,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9627965389850672
+    },
+    {
+      "id": "g012",
+      "query": "When was BioShock Infinite released?",
+      "context_precision": 0.0,
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.9665913368926815
+    },
+    {
+      "id": "g013",
+      "query": "When was Honkai: Star Rail - Then Wake to Weep released?",
+      "context_precision": 0.8333333332916666,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g014",
+      "query": "When was It Takes Two released?",
+      "context_precision": 0.0,
+      "faithfulness": 0.4,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g015",
+      "query": "When was Resident Evil 4 released?",
+      "context_precision": 0.0,
+      "faithfulness": 0.7272727272727273,
+      "answer_relevancy": 0.9999999999998695
+    },
+    {
+      "id": "g016",
+      "query": "When was Ghost of Tsushima released?",
+      "context_precision": 0.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g017",
+      "query": "When was Grand Theft Auto V released?",
+      "context_precision": 0.9999999999,
+      "faithfulness": 0.9166666666666666,
+      "answer_relevancy": 0.9517067162959263
+    },
+    {
+      "id": "g018",
+      "query": "When was The Legend of Zelda: Tears of the Kingdom released?",
+      "context_precision": 0.8333333332916666,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.999999999999916
+    },
+    {
+      "id": "g019",
+      "query": "When was Rust released?",
+      "context_precision": 0.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g020",
+      "query": "When was Fallout 4 released?",
+      "context_precision": 0.49999999995,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0
+    },
+    {
+      "id": "g021",
+      "query": "What are the differences between Doom Eternal and Crusader Kings III?",
+      "context_precision": 0.4166666666458333,
+      "faithfulness": null,
+      "answer_relevancy": 0.9937584042311052
+    },
+    {
+      "id": "g022",
+      "query": "What are the differences between Dragon's Dogma II and Valheim?",
+      "context_precision": 0.0,
+      "faithfulness": null,
+      "answer_relevancy": 0.944334834549962
+    },
+    {
+      "id": "g023",
+      "query": "What are the differences between Starfield and Hades?",
+      "context_precision": 0.3333333333,
+      "faithfulness": null,
+      "answer_relevancy": 0.9455564959871929
+    },
+    {
+      "id": "g024",
+      "query": "What are the differences between Subnautica and Death Stranding?",
+      "context_precision": 0.7499999999625,
+      "faithfulness": null,
+      "answer_relevancy": 0.9677701933899163
+    },
+    {
+      "id": "g025",
+      "query": "What are the differences between Terraria and EA Sports FC 24?",
+      "context_precision": 0.5833333333041666,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9527325198757803
+    },
+    {
+      "id": "g026",
+      "query": "What are the differences between Assassin's Creed Valhalla and Gran Turismo 7?",
+      "context_precision": 0.0,
+      "faithfulness": 0.7631578947368421,
+      "answer_relevancy": 0.9527677835650227
+    },
+    {
+      "id": "g027",
+      "query": "What are the differences between Minecraft and No Man's Sky?",
+      "context_precision": 0.0,
+      "faithfulness": 0.9714285714285714,
+      "answer_relevancy": 0.9802232805690755
+    },
+    {
+      "id": "g028",
+      "query": "What are the differences between RimWorld and Genshin Impact: Blades Weaving Betwixt Brocade?",
+      "context_precision": 0.0,
+      "faithfulness": 0.9117647058823529,
+      "answer_relevancy": 0.9502539556854087
+    },
+    {
+      "id": "g029",
+      "query": "What are the differences between Warframe and Halo Infinite?",
+      "context_precision": 0.9999999999,
+      "faithfulness": null,
+      "answer_relevancy": 0.9919638516973542
+    },
+    {
+      "id": "g030",
+      "query": "What are the differences between Super Smash Bros. Ultimate and Borderlands 3?",
+      "context_precision": 0.0,
+      "faithfulness": null,
+      "answer_relevancy": 0.9429500335416501
+    },
+    {
+      "id": "g031",
+      "query": "What is Fall Guys best known for?",
+      "context_precision": 0.99999999995,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999999237
+    },
+    {
+      "id": "g032",
+      "query": "What is Cyberpunk 2077 best known for?",
+      "context_precision": 0.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9192989686183913
+    },
+    {
+      "id": "g033",
+      "query": "What is Far Cry 5 best known for?",
+      "context_precision": 0.99999999995,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.915205408452846
+    },
+    {
+      "id": "g034",
+      "query": "What is Final Fantasy VII Remake best known for?",
+      "context_precision": 0.8333333332916666,
+      "faithfulness": 0.7272727272727273,
+      "answer_relevancy": 0.9999999999999037
+    },
+    {
+      "id": "g035",
+      "query": "What is Control Resonant best known for?",
+      "context_precision": 0.9999999999,
+      "faithfulness": 0.9583333333333334,
+      "answer_relevancy": 0.9999999999998598
+    },
+    {
+      "id": "g036",
+      "query": "What is Palworld best known for?",
+      "context_precision": 0.99999999995,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999998916
+    },
+    {
+      "id": "g037",
+      "query": "What is Mortal Kombat 11 best known for?",
+      "context_precision": 0.3333333333,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999998798
+    },
+    {
+      "id": "g038",
+      "query": "What is Monster Hunter: World best known for?",
+      "context_precision": 0.99999999995,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9109106903363796
+    },
+    {
+      "id": "g039",
+      "query": "What is Assassin's Creed Odyssey best known for?",
+      "context_precision": 0.9999999999,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9999999999998929
+    },
+    {
+      "id": "g040",
+      "query": "What is Elden Ring best known for?",
+      "context_precision": 0.6388888888675925,
+      "faithfulness": 0.9565217391304348,
+      "answer_relevancy": 0.9999999999999053
+    }
+  ]
+}

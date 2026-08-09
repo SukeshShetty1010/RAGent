@@ -1,0 +1,40 @@
+{
+  "judge_model": "qwen/qwen3.6-27b",
+  "embeddings_model": "Modal E5Embedder (intfloat/e5-base-v2)",
+  "runs_source": "evaluation\\results\\runs_2026-08-09_default.jsonl",
+  "scored_count": 3,
+  "excluded_unanswerable_count": 10,
+  "unreviewed_golden_records": 50,
+  "corpus_fingerprint": {
+    "games": 100,
+    "editorial_chunks": 2791
+  },
+  "aggregates": {
+    "context_precision": 0.7917,
+    "faithfulness": null,
+    "answer_relevancy": 1.0
+  },
+  "per_query": [
+    {
+      "id": "g001",
+      "query": "When was Fortnite released?",
+      "context_precision": null,
+      "faithfulness": null,
+      "answer_relevancy": 0.9999999999998753
+    },
+    {
+      "id": "g002",
+      "query": "When was Final Fantasy XIV Online released?",
+      "context_precision": 0.9999999999,
+      "faithfulness": null,
+      "answer_relevancy": null
+    },
+    {
+      "id": "g003",
+      "query": "When was The Legend of Zelda: Breath of the Wild released?",
+      "context_precision": 0.5833333333041666,
+      "faithfulness": null,
+      "answer_relevancy": 0.9999999999998748
+    }
+  ]
+}

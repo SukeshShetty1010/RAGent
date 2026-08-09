@@ -1,0 +1,76 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "refusal_precision": 0.0,
+  "refusal_recall": 0.0,
+  "refusal_f1": 0.0,
+  "false_answer_rate": 1.0,
+  "over_refusal_rate": 0.0,
+  "confusion": {
+    "tp": 0,
+    "fp": 0,
+    "fn": 10,
+    "tn": 40
+  },
+  "by_merge_state": {
+    "LOCAL_ONLY": {
+      "total": 29,
+      "refused": 0,
+      "should_refuse": 3
+    },
+    "LOCAL_PLUS_WEB": {
+      "total": 16,
+      "refused": 0,
+      "should_refuse": 5
+    },
+    "LOCAL_WEB_ATTEMPTED": {
+      "total": 5,
+      "refused": 0,
+      "should_refuse": 2
+    }
+  },
+  "false_answers": [
+    {
+      "id": "g041",
+      "query": "What's the plot of Disco Elysium?"
+    },
+    {
+      "id": "g042",
+      "query": "What's the plot of Untitled Goose Game?"
+    },
+    {
+      "id": "g043",
+      "query": "What's the plot of Outer Wilds?"
+    },
+    {
+      "id": "g044",
+      "query": "What's the plot of Return of the Obra Dinn?"
+    },
+    {
+      "id": "g045",
+      "query": "What platforms can I play Grand Theft Auto VI on?"
+    },
+    {
+      "id": "g046",
+      "query": "What platforms can I play The Elder Scrolls VI on?"
+    },
+    {
+      "id": "g047",
+      "query": "What platforms can I play Beyond Good and Evil 2 on?"
+    },
+    {
+      "id": "g048",
+      "query": "What is the capital of France?"
+    },
+    {
+      "id": "g049",
+      "query": "What's a good recipe for chocolate chip cookies?"
+    },
+    {
+      "id": "g050",
+      "query": "Who won the 2024 US presidential election?"
+    }
+  ],
+  "over_refusals": [],
+  "errored_ids": []
+}

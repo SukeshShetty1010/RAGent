@@ -57,10 +57,10 @@ class RageEngine:
     - Full observability
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, enable_web: bool = True) -> None:
         self.router = TaskRouter()
         self.strategy_selector = StrategySelector()
-        self.orchestrator = RetrievalOrchestrator()
+        self.orchestrator = RetrievalOrchestrator(enable_web=enable_web)
         self.capability_assessor = CapabilityAssessor()
         self.context_assembler = ContextAssembler()
         self.prompt_manager = PromptManager()

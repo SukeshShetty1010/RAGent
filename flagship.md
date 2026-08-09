@@ -30,40 +30,58 @@ README's claims; the README is treated as an assertion to be checked, not as evi
 | Hybrid retrieval | Qdrant `query_points` with two `Prefetch` branches — BM25 sparse (`using="bm25"`) and dense (`using="dense"`) — fused by `models.FusionQuery(fusion=models.Fusion.RRF)`, `fetch_limit = max(limit*4, 20)` | `retriever/rag_retriever.py:118-147` |
 | Reranking | Cross-encoder on Modal reorders fused candidates into `rerank_score`; original RRF `score` deliberately preserved for the quality gate; fail-soft to RRF order on error | `retriever/rag_retriever.py:188-221` |
 | Domain corpus | Gaming. Three source APIs (RAWG identity, IGDB relational metadata, GameSpot editorial), 5 Qdrant collections, editorial chunking under a written contract (~500 tok / 50 overlap, no-orphan rule) | `data/`, `ingest/`, `vector/create_schema.py`, `chunking/chunk_contract.md` |
-| Corpus volume | 50+ games indexed *[candidate]* | — |
+| Corpus volume | **100 games, 2791 `EditorialChunk` points, verified zero orphans and zero duplicate `unified_game_id`s** — full rebuild since the original audit, decoupled ingestion identity from RAWG, added Wikipedia + Steam editorial sources alongside GameSpot | `scripts/verify_corpus.py` (live run, 2026-08-09); commits `c595571`, `16079a2` |
 | Refusal path | `CapabilityAssessor.assess()` returns `INSUFFICIENT` on empty evidence or `QUALITY_EMPTY`; engine hard-guards generation behind `if capability != AnswerCapability.INSUFFICIENT:` | `agent/capability/capability_assessor.py:58-59`; `engine/execution_engine.py:185` |
 | Citation attribution | Context blocks injected as `[Source: {title} | Type: {type}]`; every task template instructs "Cite sources"; frontend renders a "Sources (Evidence)" panel with `source_title` + snippet | `agent/prompt_templates.py:52-55, 105/121/138/152/167`; `frontend/src/app/page.tsx:257-267` |
-| Evaluation | **Homegrown deterministic metrics only.** No RAGAS. Test set = 6 hardcoded queries (`TRAFFIC`) + 2 in an `__main__` block | `tests/evaluation_metrics.py`; `KPI/Faith_Fair_KPI.py:30-38`; `tests/evaluation_runner.py:187-214` |
+| Evaluation | **RAGAS + a 50-query golden set complete** (`evaluation/`): 20 factual, 10 comparison, 10 listicle, 10 deliberately unanswerable, drafted from live corpus payloads. Two full production-path runs completed (web-enabled and corpus-only). Refusal precision/recall, RAGAS context precision/faithfulness/answer relevancy (40/40 answerable queries, Modal-judged), and a 4-mode retrieval ablation (both precision@k and RAGAS context precision per mode) are all committed under `evaluation/results/`. See Phase 3 results below — the homegrown metrics in `tests/evaluation_metrics.py` remain as a separate, smaller diagnostic layer | `evaluation/build_golden_set.py`, `evaluation/run_eval.py`, `evaluation/refusal_metrics.py`, `evaluation/ragas_eval.py`, `evaluation/ablation.py`, `evaluation/modal_judge_llm.py`; `evaluation/results/*` |
 | Observability | Homegrown `MetricsRegistry` + `ProfileBlock` (thread-safe, nested wall-clock). **In-process only** — no export, no persistence, no token/cost capture | `utils/observability.py`; no `token`/`cost`/`usage` match in `engine/execution_engine.py` |
 | Containerization | Multi-stage Dockerfile (Node 20 static export → python:3.11-slim), `HEALTHCHECK`, `PORT`-aware CMD | `Dockerfile` |
-| Deployment | `render.yaml` exists. **Not deployed** *[candidate]*. No `.git` directory in this folder; repo exists on another machine *[candidate]* | `Test-Path .git` → `False`; `render.yaml` |
+| Deployment | `render.yaml` now declares `healthCheckPath: /health` and `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` (`sync: false`). Render service reported **live but broken** *[candidate]* — consistent with defect #3 (Modal creds were never set). Real values still need to be set in the Render dashboard and the service redeployed; not yet re-verified live | `render.yaml`; `git remote -v` confirms public repo `SukeshShetty1010/RAG_ent` |
 | README | Value prop, two Mermaid diagrams, five metrics tables, quick-start, deployment notes. **No live demo link** (`YOUR_USERNAME` placeholder at line 278). **No "what I rejected" section** | `README.md` |
 
 ### Defects found during inspection (not rubric items, but blocking)
 
 These matter because the README publishes these numbers as headline achievements.
 
-1. **The safety KPIs cannot fail.** `hallucinated_claims` is initialised to `0` and **never
-   incremented** (`KPI/Faith_Fair_KPI.py:69`); "Unsafe Outputs Produced | 0" is a **hardcoded
-   string literal** (`:177-179`); all three capability branches print `Safe` (`:105-121`); and
-   `honest_rate = (full + partial) / total` is tautological — every non-refusal counts as
-   honest by definition. The GTA VI safety-trap query passes regardless of what it outputs.
-   The README's "Honest Answer Rate 100.00% / Hallucinated Claims 0" is therefore an artifact
-   of the scoring code, not a measurement.
-2. **Grounding fidelity is dead code with a format mismatch.** `calculate_grounding_fidelity`
-   matches the regex `\(Source:\s*'([^']+)'\)` (`tests/evaluation_metrics.py:175`), but the
-   engine's prompt templates only say "Cite sources" with **no format specified** — the strict
-   `(Source: 'X')` format exists only in the unused CLI helper `format_llama3_prompt`
-   (`retriever/rag_retriever.py:263-264`). So fidelity scores ~0, and it is computed at
-   `Faith_Fair_KPI.py:97` then **thrown away** at `:126-128` (the branch body is `pass`).
-3. **Deployment will crash on boot as configured.** `retriever/rag_retriever.py:46-53` calls
-   `modal.Cls.from_name(...)` at **import time**, and `api/main.py:33` instantiates the engine
-   at module import. But `render.yaml` declares no `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET`, and
-   the Dockerfile has no Modal credential handling. First request → import → unauthenticated
-   Modal lookup → boot failure.
-4. `render.yaml` has **no `healthCheckPath`**, despite the README claiming it defines one.
-5. `KPI/Unified_KPI_Runner.py:16` uses `parents[2]`, correct only from the file's old
-   `tests/KPI/` location; it now resolves *outside* the project root.
+1. ✅ **RESOLVED.** The hardcoded `hallucinated_claims`/"Unsafe Outputs" rows are gone from
+   `KPI/Faith_Fair_KPI.py`. `calculate_grounding_fidelity` now feeds a real
+   `Citation-Grounded Sentence Rate`; the code explicitly documents that `capability_distribution`
+   (not `honest_rate`) is a rate of FULL+PARTIAL vs INSUFFICIENT outcomes, not a hallucination
+   measurement. The tautological `calculate_honesty_rate` still exists in
+   `tests/evaluation_metrics.py` as a diagnostic, but Phase 3's `evaluation/refusal_metrics.py`
+   now supplies the falsifiable replacement (see Phase 3 results below).
+2. ✅ **RESOLVED.** `CITATION_FORMAT` / `CITATION_PATTERN` are now a single shared source of
+   truth in `agent/output_validator.py:39-40`, imported by `tests/evaluation_metrics.py` and
+   enforced (`Cite every factual claim inline as (Source: 'Exact Source Title').`) in every
+   template in `agent/prompt_templates.py`. `validate_answer()` checks emitted citations against
+   assembled context and flags unmatched ones on `agent_decisions["output_validation"]` —
+   fail-soft, never discards the answer. **Caveat found during Phase 3 live runs:** the LLM does
+   not always follow the instructed format even though it is now specified and validated (e.g.
+   `"(Source: Fortnite — Overview)"` without the required quotes) — `output_validation.is_valid`
+   correctly flags these as invalid. Enforcement exists; compliance is not 100%.
+3. ⚠️ **PARTIALLY RESOLVED.** Modal lookups are now lazy (`_get_dense_encoder()` /
+   `_get_reranker()` in `retriever/rag_retriever.py`, not called at import time). `render.yaml`
+   now declares `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` (this session). Still outstanding: real
+   values must be set in the Render dashboard and the service redeployed — reported **live but
+   broken** *[candidate]*, unverified since the fix.
+4. ✅ **RESOLVED** (this session). `render.yaml` now declares `healthCheckPath: /health`.
+5. ✅ **RESOLVED.** `KPI/Unified_KPI_Runner.py` uses `parents[1]`; confirmed by a clean run this
+   session (`python -m KPI.Unified_KPI_Runner`, exit 0, no regression from Phase 3 changes).
+6. ✅ **RESOLVED (found and fixed this session).** `llm/modal_llm.py` — the same Modal service
+   backing live user-facing generation via `ragent_client_streaming.py`, not just this eval
+   harness — had a latent concurrency bug: `@modal.concurrent(max_inputs=8)` dispatches
+   concurrent `generate()` calls from multiple worker threads onto one shared `asyncio` event
+   loop driven by the non-reentrant `run_until_complete()`. Two threads racing on it corrupts
+   the loop's internal state, permanently wedging that container for the rest of its life —
+   confirmed via `modal app logs` showing hundreds of consecutive, identical `RuntimeError: This
+   event loop is already running` tracebacks with zero successful generations in between, while
+   a caller's retry logic kept hammering the dead container and silently burning GPU-seconds.
+   Fixed by running the loop continuously in a dedicated background thread and bridging calls in
+   via `asyncio.run_coroutine_threadsafe` (the correct pattern for many threads submitting to one
+   running loop — `AsyncLLMEngine` already supports concurrent `generate()` internally via
+   continuous batching, so this also lets `@modal.concurrent`'s parallelism actually take
+   effect). Validated with an ephemeral `modal run` concurrent smoke test (6 simultaneous calls,
+   all clean, no race) before `modal deploy`-ing the fix to production.
 
 ---
 
@@ -77,7 +95,7 @@ These matter because the README publishes these numbers as headline achievements
 | Specific non-generic corpus | **PRESENT** | 3-API gaming corpus, 50+ games, 5 collections |
 | Explicit "insufficient information" handling | **PRESENT** | `capability_assessor.py:58-59` + hard guard `execution_engine.py:185` |
 | Source/citation attribution in outputs | **PRESENT (weak enforcement)** | Sources injected + rendered in UI; but no enforced citation format, and nothing validates that emitted citations match retrieved titles |
-| Quantified RAGAS-equivalent eval (context precision, faithfulness, answer relevancy) | **ABSENT** | No `ragas` dependency; homegrown metrics are capability-label bookkeeping, not faithfulness; test set is 8 queries total |
+| Quantified RAGAS-equivalent eval (context precision, faithfulness, answer relevancy) | **PRESENT** | 50-query golden set + RAGAS scoring vs a Groq 70B judge, committed under `evaluation/results/` — see Phase 3 results below. Full RAGAS scoring is still catching up on a Groq free-tier daily token quota (checkpoint-resumable); the golden set, both production-path runs, and the refusal + ablation metrics are complete |
 
 ### Engineering proof
 
@@ -106,7 +124,7 @@ Sequencing rationale: fix the **credibility liability** first (it is actively ha
 to fix), then get something **live** (observability and README demo links both depend on it),
 then **measure** (the README cannot cite scores that don't exist), then **write**.
 
-### Phase 0 — Stop the bleeding (2–3 h)
+### Phase 0 — Stop the bleeding (2–3 h) — ✅ COMPLETE
 
 **0.1 Neuter the fake safety metrics** *(~1 h)*
 Delete the hardcoded `hallucinated_claims`/`Unsafe Outputs` rows from
@@ -124,7 +142,7 @@ from "instructed" into "enforced" — a real differentiator.
 
 **0.3 Fix `KPI/Unified_KPI_Runner.py:16`** `parents[2]` → `parents[1]`. *(2 min)*
 
-### Phase 1 — Get it live (3–5 h)
+### Phase 1 — Get it live (3–5 h) — ⚠️ 1.1/1.2 COMPLETE, 1.3/1.4 OUTSTANDING
 
 **1.1 Version control** *(~30 min)* — `git init` here, reconcile against the repo on the other
 machine, push to a public GitHub repo. Note: `git` is **not on PATH in this shell** and must be
@@ -162,7 +180,87 @@ cost from the Groq response's `usage` field**, which is currently discarded.
 **2.2 Keep `MetricsRegistry`** — Do not rip it out. It feeds the KPI runners and is a genuine
 "I built this myself" talking point. Langfuse is the external trace layer; they coexist.
 
-### Phase 3 — Real evaluation (8–12 h) ← *the highest-value work in this plan*
+### Phase 3 — Real evaluation (8–12 h) ← *the highest-value work in this plan* — ✅ LANDED (2026-08-09)
+
+**Results, measured live against the rebuilt 100-game corpus.** Full methodology and all
+committed artifacts: `evaluation/`. Golden set: 50 records (20 factual, 10 comparison, 10
+listicle, 10 unanswerable), auto-drafted from real Qdrant payloads by
+`evaluation/build_golden_set.py`, `reviewed: false` on all records pending a human pass — the
+numbers below are reported honestly as **provisional** until that review lands.
+
+**Refusal precision/recall — the falsifiable number this phase exists to produce, and it did
+find something real:**
+
+| Run | Refusal precision | Refusal recall | False-answer rate | Over-refusal rate |
+|---|---|---|---|---|
+| Default (web fallback on) | 0.0 | **0.0** | **1.0** | 0.0 |
+| Corpus-only (web fallback off) | 0.0 | **0.0** | **1.0** | 0.0 |
+
+**Root cause identified, not just measured:** the engine answered all 10 unanswerable queries
+in both runs — including "What is the capital of France?" and "Who won the 2024 US presidential
+election?" — instead of returning `INSUFFICIENT`. This is not a web-fallback masking effect
+(same result with web fallback fully disabled). Direct inspection of
+`retriever/quality_gate.py`'s output on these runs shows the quality gate classified 9/10 as
+`quality_ok` and 1/10 as `quality_weak` — **never `quality_empty`** — because Qdrant's hybrid
+search always returns *k* nearest neighbors regardless of true relevance, and the gate has no
+similarity floor low enough to catch "these results are nearest-neighbor noise, not evidence."
+`CapabilityAssessor.assess()` only escalates to `INSUFFICIENT` on `quality_empty` or zero
+evidence, so a confidently-wrong quality classification propagates straight through the honesty
+gate. **This is the single most important finding of this phase** and should be treated as a
+new, higher-priority item — see the open item added to Step 4's checklist below.
+
+**Retrieval ablation — a negative result, reported as-is per the plan, and confirmed by a second
+independent metric:**
+
+| Mode | Precision@K | Entity Coverage | RAGAS Context Precision |
+|---|---|---|---|
+| `dense` | 0.9400 | 0.8875 | 0.6537 |
+| `bm25` | 0.9350 | 0.8375 | 0.5208 |
+| `hybrid` (RRF, no rerank) | **0.9500** | **0.8750** | **0.6397** |
+| `hybrid_rerank` (production default) | 0.9200 | 0.8125 | 0.5168 |
+
+Plain RRF hybrid beats both single-mode baselines on precision@k, but the cross-encoder
+reranking stage — the production default — scores *lowest of all four modes* on both
+precision@k/entity coverage (40 answerable golden-set queries, no LLM) **and** RAGAS context
+precision (20-query subset, Modal-judged) — two independently-computed metrics agreeing that
+reranking is actively hurting retrieval quality on this corpus, not just failing to help. The
+rerank stage is not currently earning its latency cost (it accounted for ~40-75% of retrieval
+latency in the KPI runner's profile). Worth a follow-up look at the cross-encoder model choice
+or a corpus-specific relevance check before the README cites reranking as a differentiator —
+right now the honest claim is the opposite of what the architecture intends.
+
+**RAGAS (context precision, faithfulness, answer relevancy) — complete, 40/40 answerable
+queries scored (2026-08-09):**
+
+| Metric | Score |
+|---|---|
+| context_precision | 0.5722 |
+| faithfulness | 0.9077 *(6/40 null from per-job scoring timeouts, averaged over the remaining 34)* |
+| answer_relevancy | 0.7306 |
+
+Getting a full run took two independent judge tracks. Groq was tried first —
+`llama-3.3-70b-versatile` (100K TPD), then `openai/gpt-oss-120b` (200K TPD), then
+`qwen/qwen3.6-27b` (200K TPD) — and each was exhausted in turn by the same day's judge calls
+(Groq's free-tier daily token quota, not a per-minute limit). The Groq/qwen track is preserved
+as a partial, separate checkpoint (5/40) rather than discarded; independent judge backends are
+tagged distinctly in every output filename (`_modal` suffix) specifically so no single result
+file is ever scored by a mix of judges. The completed numbers above are from a second, parallel
+judge track built on Modal-hosted `google/gemma-3-12b-it` (`evaluation/modal_judge_llm.py`,
+wrapping `llm/modal_llm.py`'s existing `generate()` endpoint — no new model deployment needed).
+
+Building that track surfaced and fixed a real bug in **production** code, not just eval-harness
+glue — see defect #6 above. Three bugs total were found and fixed getting this judge track
+working: (1) `ragas`'s self-consistency sampling shape mismatch — a non-langchain
+`BaseRagasLLM` must return all `n` samples inside a single outer `Generation` list
+(`resp.generations[0]`), the opposite convention from LangChain-wrapped LLMs; (2) an internal
+`asyncio.gather` over `n` samples was firing concurrent Modal calls even with the executor
+serialized to `max_workers=1`, fixed by awaiting sequentially instead; (3) the deeper one —
+defect #6, the shared-event-loop race in `llm/modal_llm.py` itself, which had been silently
+corrupting containers and wasting GPU-seconds on every retry until traced through `modal app
+logs` and fixed at the source. Embeddings for both judge tracks use the same Modal `E5Embedder`
+retrieval already relies on. Groq's `LangchainLLMWrapper(..., bypass_n=True)` and
+checkpoint-only-on-partial-success fixes from the original wiring remain in place and apply to
+the Groq track if it is resumed to finish its remaining 35 records on a later day.
 
 **3.1 Build a 50-query golden set** *(~4 h)* — Persist as `tests/data/golden_set.jsonl`, not as
 Python literals. Given 50+ games indexed, target: 20 factual (single-entity, verifiable),
@@ -213,15 +311,22 @@ then the GTA VI query producing a refusal. The refusal is the differentiator; sh
 
 ### Total: ~25–35 hours. Phase 0 and Phase 3 carry the most value per hour.
 
-### Open questions for the candidate
+### Open questions for the candidate — answered
 
-1. **Does the off-machine repo have history worth preserving,** or is a fresh `git init` +
-   single initial commit acceptable? This changes Phase 1.1 from 30 min to potentially 2 h.
-2. **Is `google/gemma-3-12b-it` on Modal still a live path, or is Groq now the only LLM?**
-   `structure.md:36` says Qwen 2.5 7B, the README says Gemma 3 12B — these already disagree.
-   If Modal LLM is dead, delete it rather than maintaining a third inconsistent claim.
-3. **Do you have Groq/Modal budget for ~500 judge calls** (50 queries × 3 RAGAS metrics ×
-   retries)? If not, cut the golden set to 30 queries; the plan still holds.
+1. **Resolved.** Git history was preserved — merge commit `a78e73f` folded the off-machine
+   history (20 pre-Phase-0 commits) into this repo rather than starting fresh.
+2. **Resolved, from live traffic.** `engine/execution_engine.py`'s `STEP 7` calls
+   `llm/ragent_client.py`'s `chat_completion_remote` (Groq `llama-3.1-8b-instant`) — this is the
+   only LLM path exercised across every one of the 100 golden-set query runs this session.
+   `llm/modal_llm.py` (Gemma 3 12B) was not invoked. Recommend deleting it or clearly marking it
+   experimental/unused rather than maintaining a third inconsistent claim in the README.
+3. **Answered by direct measurement, and the answer is "less than expected."** ~500 judge calls
+   was the estimate; the actual constraint hit was Groq's **daily** token quota for the 70B
+   judge model (100,000 TPD), not a per-minute rate limit — it was nearly exhausted after
+   roughly 8-10 fully-scored golden-set records in a single session. The checkpoint/resume
+   design (built for exactly this) worked once a bug in it was found and fixed (see Phase 3
+   results). Recommend either running RAGAS scoring across multiple days, or reducing the
+   golden set / RAGAS subset size if a same-day result is required.
 
 ### Rubric conflict flagged
 
@@ -237,11 +342,11 @@ the system it measures is wrong.
 
 | # | Rubric item | Status | Action |
 |---|---|---|---|
-| 1 | Hybrid dense+sparse, RRF | ✅ PRESENT | Already complete — add ablation proof (3.4) |
-| 2 | Specific non-generic corpus | ✅ PRESENT | Already complete |
-| 3 | "Insufficient information" refusal | ✅ PRESENT | Already complete — add falsifiable metric (3.3) |
-| 4 | Source/citation attribution | ⚠️ WEAK | Enforce citation format + validate against context (0.2) |
-| 5 | RAGAS: context precision, faithfulness, answer relevancy | ❌ ABSENT | Golden set + RAGAS, committed results (3.1, 3.2) |
+| 1 | Hybrid dense+sparse, RRF | ✅ PRESENT | Ablation run (2026-08-09): RRF hybrid beats dense/BM25 on precision@k (0.95 vs 0.94/0.935); production `hybrid_rerank` default scores *lowest of all four modes* on both precision@k (0.92) and RAGAS context precision (0.5168) — negative result confirmed by two independent metrics, see Phase 3 results |
+| 2 | Specific non-generic corpus | ✅ PRESENT | Rebuilt: 100 games, 2791 chunks, verified zero orphans/duplicates |
+| 3 | "Insufficient information" refusal | 🚨 PRESENT BUT NOT WORKING AS INTENDED | Falsifiable metric added (3.3) and it found a real defect: refusal recall = **0.0** on both production-path runs — see Phase 3 results and new row 21 below |
+| 4 | Source/citation attribution | ✅ ENFORCED (compliance not 100%) | Citation format specified + `validate_answer()` checks against context (0.2); live runs show the LLM doesn't always comply — validator correctly flags it |
+| 5 | RAGAS: context precision, faithfulness, answer relevancy | ✅ COMPLETE | 40/40 answerable queries scored (Modal-judged, 2026-08-09): context_precision 0.5722, faithfulness 0.9077, answer_relevancy 0.7306. Groq track partial (5/40, quota-exhausted) and preserved separately, not mixed |
 | 6 | Live public deployment | ❌ ABSENT | Fix Modal lazy-binding, deploy to Render, cron keep-alive (1.2–1.4) |
 | 7 | Containerized / one-command | ⚠️ UNVERIFIED | Actually build and boot the image locally (1.3) |
 | 8 | Observability: latency | ✅ PRESENT | `ProfileBlock` — keep |
@@ -253,10 +358,12 @@ the system it measures is wrong.
 | 14 | README live demo link | ❌ ABSENT | Replace `YOUR_USERNAME` placeholder after 1.1 |
 | 15 | "Why this approach / what I rejected" | ❌ ABSENT | Write it from existing code comments + ablation (4.2) |
 | 16 | Depth signal, not checklist | ⚠️ AT RISK | Collapse 5 KPI tables → 1; purge "resume-grade" strings (4.1, 4.3) |
-| 17 | Version control / public repo | ❌ ABSENT here | Install git, `git init`, reconcile, push (1.1) |
-| 18 | *(defect)* Modal creds missing from Render | 🚨 BOOT BLOCKER | Add tokens to `render.yaml` + lazy binding (1.2) |
-| 19 | *(defect)* `healthCheckPath` missing | ❌ ABSENT | Add to `render.yaml` (1.2) |
-| 20 | *(defect)* `Unified_KPI_Runner` path bug | 🐛 BROKEN | `parents[2]` → `parents[1]` (0.3) |
+| 17 | Version control / public repo | ✅ PRESENT | Public repo `SukeshShetty1010/RAG_ent`, history preserved via merge commit `a78e73f` |
+| 18 | *(defect)* Modal creds missing from Render | ⚠️ PARTIALLY RESOLVED | Lazy binding done; `render.yaml` now declares the token keys (1.2) — real values + redeploy still needed |
+| 19 | *(defect)* `healthCheckPath` missing | ✅ RESOLVED | Added to `render.yaml` (2026-08-09) |
+| 20 | *(defect)* `Unified_KPI_Runner` path bug | ✅ RESOLVED | `parents[1]`; confirmed clean run this session |
+| 21 | *(new, found by 3.3)* Honesty gate never returns `INSUFFICIENT` on off-corpus queries | 🚨 NEW — HIGH PRIORITY | `RetrievalQualityGate` classifies off-corpus queries as `quality_ok`/`quality_weak`, never `quality_empty`, because Qdrant hybrid search always returns *k* nearest neighbors regardless of relevance — no similarity floor catches pure noise. Needs a fix to the quality gate's threshold logic, not the refusal metric (which is working correctly by catching this) |
+| 22 | *(new, found while wiring the Modal RAGAS judge)* Production `llm/modal_llm.py` had a concurrency-corrupting event-loop race | ✅ RESOLVED | See defect #6. Real bug in the live generation service, not eval-only; fixed and redeployed (2026-08-09), validated via ephemeral concurrent smoke test before deploy |
 
 ---
 
@@ -269,7 +376,15 @@ the system it measures is wrong.
   two checks against the public Render URL.
 - **Phase 2:** One query produces one Langfuse trace with 7 nested spans and non-zero token
   counts.
-- **Phase 3:** `evaluation/results/ragas_<date>.json` exists with all three metrics over 50
-  queries; refusal recall on the 10 unanswerable queries is reported and is **not** 100% by
-  construction — confirm by hand-checking at least 3 of those traces.
+- **Phase 3:** ✅ Done, 2026-08-09. `evaluation/results/runs_2026-08-09_default.jsonl` and
+  `_corpusonly.jsonl` (50 records each), `refusal_2026-08-09_default.json` /
+  `_corpusonly.json`, `ablation_2026-08-09.json`, and `ragas_2026-08-09_default_modal.json`
+  (40/40 complete) all committed. Refusal recall on the 10 unanswerable queries is reported and
+  is **not** 100% — it is **0%**, hand-confirmed by reading 5 of the 10 unanswerable answer
+  texts directly (all 10 got a `full`/`partial` answer instead of a refusal).
+  `ragas_2026-08-09_default.json` (Groq/qwen track) remains partial (5/40, quota-exhausted) and
+  is preserved as-is rather than mixed with the completed Modal track.
+- **Phase 3 KPI regression:** `python -m KPI.Unified_KPI_Runner` re-run after all of the above
+  (including the `llm/modal_llm.py` concurrency fix and redeploy) — exit 0, full dashboard
+  produced, no regression.
 - **Phase 4:** Every number in the README maps to a committed file under `evaluation/results/`.

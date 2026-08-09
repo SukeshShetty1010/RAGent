@@ -18,7 +18,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Literal
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -107,9 +107,27 @@ class RAGRetriever:
     # Public API
     # --------------------------------------------------
 
-    def retrieve(self, query: str, limit: int = 5) -> List[Dict]:
+    def retrieve(
+        self,
+        query: str,
+        limit: int = 5,
+        *,
+        mode: Literal[
+            "hybrid_rerank", "hybrid", "dense", "bm25"
+        ] = "hybrid_rerank",
+    ) -> List[Dict]:
         """
-        Hybrid retrieval: BM25 Sparse + Dense Vector with RRF
+        Retrieval, defaulting to today's production path (hybrid RRF
+        fusion + cross-encoder rerank).
+
+        `mode` is ablation-only plumbing (see evaluation/ablation.py):
+        - "hybrid_rerank" (default): BM25 + dense via RRF, then reranked.
+          Identical to pre-`mode` behavior.
+        - "hybrid": BM25 + dense via RRF, rerank skipped.
+        - "dense": dense vector search only.
+        - "bm25": BM25 sparse search only.
+        Production call sites (retriever/orchestrator.py) never pass a
+        non-default mode.
         """
         if not query or not isinstance(query, str):
             raise ValueError("Query must be a non-empty string")
@@ -122,52 +140,91 @@ class RAGRetriever:
         with ProfileBlock("LocalVectorSearch"):
 
             # --------------------------------------------------
-            # Embedding generation (dense + sparse)
+            # Embedding generation (only what this mode needs)
             # --------------------------------------------------
+            needs_dense = mode in ("hybrid_rerank", "hybrid", "dense")
+            needs_sparse = mode in ("hybrid_rerank", "hybrid", "bm25")
+
             with ProfileBlock("EmbeddingGeneration"):
-                dense_vec = _get_dense_encoder().embed_texts.remote([query])[0]
-                sparse_emb = list(bm25_encoder.query_embed(query))[0]
+                dense_vec = (
+                    _get_dense_encoder().embed_texts.remote([query])[0]
+                    if needs_dense
+                    else None
+                )
+                sparse_emb = (
+                    list(bm25_encoder.query_embed(query))[0]
+                    if needs_sparse
+                    else None
+                )
 
             MetricsRegistry.get().observe(
                 "embedding_batch_size", 1
             )
 
             # --------------------------------------------------
-            # Hybrid search (BM25 + Dense via RRF)
+            # Vector search (hybrid RRF, or single-branch for ablation)
             # --------------------------------------------------
             fetch_limit = max(limit * 4, 20)
 
             with ProfileBlock("VectorQuery"):
-                response = self.client.query_points(
-                    collection_name="EditorialChunk",
-                    prefetch=[
-                        models.Prefetch(
-                            query=models.SparseVector(
-                                indices=sparse_emb.indices.tolist(),
-                                values=sparse_emb.values.tolist(),
+                if mode in ("hybrid_rerank", "hybrid"):
+                    response = self.client.query_points(
+                        collection_name="EditorialChunk",
+                        prefetch=[
+                            models.Prefetch(
+                                query=models.SparseVector(
+                                    indices=sparse_emb.indices.tolist(),
+                                    values=sparse_emb.values.tolist(),
+                                ),
+                                using="bm25",
+                                limit=20,
                             ),
-                            using="bm25",
-                            limit=20,
+                            models.Prefetch(
+                                query=dense_vec,
+                                using="dense",
+                                limit=20,
+                            ),
+                        ],
+                        query=models.FusionQuery(
+                            fusion=models.Fusion.RRF,
                         ),
-                        models.Prefetch(
-                            query=dense_vec,
-                            using="dense",
-                            limit=20,
+                        limit=fetch_limit,
+                        with_payload=[
+                            "content",
+                            "source_title",
+                            "chunk_index",
+                        ],
+                    )
+                elif mode == "dense":
+                    response = self.client.query_points(
+                        collection_name="EditorialChunk",
+                        query=dense_vec,
+                        using="dense",
+                        limit=fetch_limit,
+                        with_payload=[
+                            "content",
+                            "source_title",
+                            "chunk_index",
+                        ],
+                    )
+                else:  # mode == "bm25"
+                    response = self.client.query_points(
+                        collection_name="EditorialChunk",
+                        query=models.SparseVector(
+                            indices=sparse_emb.indices.tolist(),
+                            values=sparse_emb.values.tolist(),
                         ),
-                    ],
-                    query=models.FusionQuery(
-                        fusion=models.Fusion.RRF,
-                    ),
-                    limit=fetch_limit,
-                    with_payload=[
-                        "content",
-                        "source_title",
-                        "chunk_index",
-                    ],
-                )
+                        using="bm25",
+                        limit=fetch_limit,
+                        with_payload=[
+                            "content",
+                            "source_title",
+                            "chunk_index",
+                        ],
+                    )
 
             # --------------------------------------------------
-            # Result formatting (RRF-ordered candidates)
+            # Result formatting (fusion/search-ordered candidates)
             # --------------------------------------------------
             with ProfileBlock("ResultFormatting"):
                 candidates: List[Dict] = []
@@ -182,7 +239,7 @@ class RAGRetriever:
                             "chunk_index": point.payload.get(
                                 "chunk_index"
                             ),
-                            # Original RRF fusion score — consumed by
+                            # Original fusion/search score — consumed by
                             # quality_gate.py's threshold logic. Never
                             # overwritten by the reranker below.
                             "score": point.score,
@@ -190,10 +247,14 @@ class RAGRetriever:
                     )
 
             # --------------------------------------------------
-            # Cross-encoder reranking (fail-soft)
+            # Cross-encoder reranking (fail-soft; skipped outside
+            # the default mode)
             # --------------------------------------------------
-            with ProfileBlock("CrossEncoderRerank"):
-                results = self._rerank(query, candidates, limit)
+            if mode == "hybrid_rerank":
+                with ProfileBlock("CrossEncoderRerank"):
+                    results = self._rerank(query, candidates, limit)
+            else:
+                results = candidates[:limit]
 
             MetricsRegistry.get().observe(
                 "retrieval_results_count", len(results)

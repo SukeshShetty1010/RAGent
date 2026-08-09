@@ -69,3 +69,7 @@ frontend/.next/
 
 # ---------- Corpus snapshots (scripts/export_corpus.py) ----------
 backups/
+
+# ---------- Evaluation (Phase 3) ----------
+# Checkpoint state only — evaluation/results/*.json(l) itself IS committed.
+evaluation/results/.ragas_checkpoint_*.jsonl

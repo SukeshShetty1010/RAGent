@@ -28,6 +28,7 @@ Design guarantees
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 from typing import AsyncIterator, Iterator
 
@@ -170,8 +171,23 @@ class Gemma312BVLLM:
         )
 
         self._engine: AsyncLLMEngine = AsyncLLMEngine.from_engine_args(engine_args)
+
+        # @modal.concurrent(max_inputs=8) dispatches concurrent calls to the
+        # sync `generate()` method from multiple worker threads. A loop driven
+        # by run_until_complete() is not reentrant/thread-safe -- two threads
+        # calling it on the same loop object race with "event loop is already
+        # running", and once that happens mid-generation the loop is left in
+        # a broken state for the rest of the container's life (every later
+        # call fails the same way). Fix: run the loop continuously in its own
+        # dedicated thread and bridge into it with run_coroutine_threadsafe,
+        # which is explicitly designed for many threads submitting work to
+        # one running loop. AsyncLLMEngine already supports concurrent
+        # generate() calls internally (continuous batching), so this also
+        # lets @modal.concurrent's parallelism actually take effect.
         self._loop = asyncio.new_event_loop()
-        self._loop.run_until_complete(self._warmup())
+        self._loop_thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._loop_thread.start()
+        asyncio.run_coroutine_threadsafe(self._warmup(), self._loop).result()
 
     async def _warmup(self) -> None:
         """Send a minimal request through the engine to trigger lazy init."""
@@ -187,8 +203,10 @@ class Gemma312BVLLM:
 
     @modal.exit()
     def shutdown_engine(self) -> None:
-        """Clean up the event loop when the container is about to stop."""
+        """Stop the loop's thread, then close the loop."""
         try:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._loop_thread.join(timeout=10)
             self._loop.close()
         except Exception:
             pass
@@ -245,7 +263,7 @@ class Gemma312BVLLM:
 
         while True:
             try:
-                chunk = self._loop.run_until_complete(gen.__anext__())
+                chunk = asyncio.run_coroutine_threadsafe(gen.__anext__(), self._loop).result()
                 yield chunk
             except StopAsyncIteration:
                 break

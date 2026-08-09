@@ -45,15 +45,18 @@ class RetrievalOrchestrator:
 
     MAX_WEB_CHUNKS = 3
 
-    def __init__(self) -> None:
+    def __init__(self, *, enable_web: bool = True) -> None:
         self.retriever = RAGRetriever()
         self.quality_gate = RetrievalQualityGate()
 
-        try:
-            self.web_tool = WebSearchTool()
-        except Exception as exc:
-            logger.warning(f"WebSearchTool unavailable: {exc}")
+        if not enable_web:
             self.web_tool = None
+        else:
+            try:
+                self.web_tool = WebSearchTool()
+            except Exception as exc:
+                logger.warning(f"WebSearchTool unavailable: {exc}")
+                self.web_tool = None
 
     # =========================================================
     # Public API
