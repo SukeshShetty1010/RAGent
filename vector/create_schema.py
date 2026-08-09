@@ -4,7 +4,7 @@ Qdrant Collection Schema Creator
 
 Creates all required collections in Qdrant:
 - EditorialChunk: dual vectors (dense E5-768 + BM25 sparse with IDF)
-- Game, PlatformSpec, IGDB_Game, GameSpot_Game: metadata-only (1-dim dummy)
+- Game, PlatformSpec, IGDB_Game, GameSpot_Game, EditorialSource: metadata-only (1-dim dummy)
 """
 
 from __future__ import annotations
@@ -17,6 +17,13 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
+
+# Windows consoles/redirected-output pipes often default to cp1252, which
+# can't encode the emoji status markers below.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 
 # -------------------------------------------------------------------
@@ -74,7 +81,13 @@ def create_all_collections(client: QdrantClient) -> None:
     # --------------------------------------------------
     # Metadata-only collections
     # --------------------------------------------------
-    metadata_collections = ["Game", "PlatformSpec", "IGDB_Game", "GameSpot_Game"]
+    metadata_collections = [
+        "Game",
+        "PlatformSpec",
+        "IGDB_Game",
+        "GameSpot_Game",
+        "EditorialSource",  # Wikipedia / Steam editorial containers
+    ]
 
     for name in metadata_collections:
         if name not in existing:

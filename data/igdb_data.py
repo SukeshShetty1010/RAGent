@@ -34,6 +34,7 @@ TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 # Endpoints
 TOKEN_URL = "https://id.twitch.tv/oauth2/token"
 IGDB_GAMES_URL = "https://api.igdb.com/v4/games"
+IGDB_PLATFORMS_URL = "https://api.igdb.com/v4/platforms"
 
 # Visual fields to remove
 VISUAL_KEYS = {"artworks", "cover", "screenshots", "videos"}
@@ -47,34 +48,56 @@ def _resolve_via_rawg(query: str) -> Optional[str]:
     """Optional fail-soft pre-normalizer. RAWG's fuzzy search sometimes
     returns a cleaner title than a raw query would match on IGDB, but
     this must never block IGDB resolution — mirrors the pattern in
-    data/gamespot_data.py's resolve_game_name."""
-    if not RAWG_API_KEY:
+    data/gamespot_data.py's resolve_game_name.
+
+    Gated behind rawg_available()'s shared circuit breaker: this runs
+    on every game via fetch_igdb_game_data's resolve step, so against a
+    black-holed RAWG host it's the single biggest source of dead wait
+    across a bulk rebuild.
+    """
+    from data.rawg_data import rawg_available, record_rawg_success, record_rawg_failure
+
+    if not RAWG_API_KEY or not rawg_available():
         return None
 
     url = "https://api.rawg.io/api/games"
     params = {"key": RAWG_API_KEY, "search": query, "page_size": 1}
 
     try:
-        res = requests.get(url, params=params, timeout=15)
+        res = requests.get(url, params=params, timeout=5)
         res.raise_for_status()
         data = res.json()
+        record_rawg_success()
         if data.get("results"):
             return data["results"][0].get("name")
     except Exception:
-        pass
+        record_rawg_failure()
     return None
 
 
 def _resolve_via_igdb(query: str, token: str) -> Optional[str]:
-    """Resolve a search query to IGDB's own canonical name."""
+    """Resolve a search query to IGDB's own canonical name.
+
+    Uses the same exact-match preference ladder as identity_resolver's
+    _igdb_adapter — a plain top-1 pick here previously fed the wrong
+    canonical name (e.g. "Elden Ring" -> "Elden Ring Nightreign") into
+    the main search below, poisoning every downstream record.
+
+    Also strips a trailing "(YYYY)" qualifier (e.g. TOP_100_GAMES'
+    "Resident Evil 4 (2023)") before searching — IGDB's `search`
+    returns zero hits on a literal parenthetical suffix.
+    """
+    from ingest.identity_resolver import select_best_igdb_match, split_trailing_year
+
+    clean_query, _year_hint = split_trailing_year(query)
+
     try:
-        records = _igdb_post(f'fields name; search "{query}"; limit 1;', token)
+        records = _igdb_post(f'fields name; search "{clean_query}"; limit 10;', token)
     except Exception:
         return None
 
-    if records:
-        return records[0].get("name")
-    return None
+    best = select_best_igdb_match(records, clean_query)
+    return best.get("name") if best else None
 
 
 def _resolve_correct_name(query: str, token: str) -> Optional[str]:
@@ -112,12 +135,12 @@ def _get_twitch_token() -> str:
     return resp.json()["access_token"]
 
 
-def _igdb_post(query: str, token: str) -> List[Dict[str, Any]]:
+def _igdb_post(query: str, token: str, url: str = IGDB_GAMES_URL) -> List[Dict[str, Any]]:
     headers = {
         "Client-ID": TWITCH_CLIENT_ID,
         "Authorization": f"Bearer {token}",
     }
-    resp = requests.post(IGDB_GAMES_URL, headers=headers, data=query, timeout=60)
+    resp = requests.post(url, headers=headers, data=query, timeout=60)
     resp.raise_for_status()
     return resp.json()
 

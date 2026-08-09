@@ -36,8 +36,8 @@ across ingestion, embedding, and search layers.
 | `chunk_id`               | UUID   | Deterministic UUID derived from content hash |
 | `content`                | Text   | The chunk text (token-bounded) |
 | `game_uuid`              | UUID   | Canonical Game UUID |
-| `parent_editorial_uuid`  | UUID   | UUID of the source GameSpot_Game object |
-| `source`                 | Text   | Constant value: `"gamespot"` |
+| `parent_editorial_uuid`  | UUID   | UUID of the source editorial container object |
+| `source`                 | Text   | One of: `"gamespot"`, `"wikipedia"`, `"steam"` |
 | `content_type`           | Enum   | `"review"` or `"article"` |
 | `chunk_index`            | Int    | Order of this chunk within the source text |
 | `source_title`           | Text   | Title of the original review or article |

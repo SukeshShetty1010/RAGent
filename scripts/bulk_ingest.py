@@ -43,6 +43,9 @@ from upsert.upsert_canonical_game import upsert_game_anchor
 from upsert.upsert_platform_specs import upsert_platform_specs
 from upsert.upsert_igdb_metadata import upsert_igdb_context
 from upsert.upsert_gamespot_chunks import upsert_gamespot_container
+from upsert.upsert_editorial_source import upsert_editorial_source_container
+from ingest.wikipedia_editorial_normalize import fetch_and_prepare_wikipedia
+from ingest.steam_editorial_normalize import fetch_and_prepare_steam
 from embed.prepare_editorial_payloads import generate_chunk_payloads
 from upsert.upsert_editorial_chunks import upsert_chunk_batch
 
@@ -281,18 +284,38 @@ def _ingest_single_game(client: QdrantClient, game_name: str) -> int:
     except Exception as exc:
         logger.warning("    ⚠️  Stage 3 failed (non-fatal): %s", exc)
 
-    # Stage 4: GameSpot Editorial Container (fail-soft)
-    logger.info("  Stage 4: GameSpot Editorial Container...")
+    # Stage 4: Editorial Source Containers (fail-soft, per-provider).
+    # GameSpot keeps its dedicated GameSpot_Game path; Wikipedia/Steam
+    # share the EditorialSource collection.
+    logger.info("  Stage 4: Editorial Source Containers...")
     try:
         gamespot_uuid = upsert_gamespot_container(
             client=client, game_name=game_name, game_uuid=game_uuid
         )
         if gamespot_uuid:
-            logger.info("    ✅ GameSpot UUID: %s", gamespot_uuid)
+            logger.info("    ✅ (gamespot) UUID: %s", gamespot_uuid)
         else:
-            logger.warning("    ⚠️  No GameSpot data found — skipped")
+            logger.warning("    ⚠️  (gamespot) No data found — skipped")
     except Exception as exc:
-        logger.warning("    ⚠️  Stage 4 failed (non-fatal): %s", exc)
+        logger.warning("    ⚠️  Stage 4 (gamespot) failed (non-fatal): %s", exc)
+
+    for source_name, normalize_fn in (
+        ("wikipedia", fetch_and_prepare_wikipedia),
+        ("steam", fetch_and_prepare_steam),
+    ):
+        try:
+            container = normalize_fn(game_name, game_uuid)
+            source_uuid = upsert_editorial_source_container(
+                client=client, container=container, game_name=game_name
+            )
+            if source_uuid:
+                logger.info("    ✅ (%s) UUID: %s", source_name, source_uuid)
+            else:
+                logger.warning("    ⚠️  (%s) No data found — skipped", source_name)
+        except Exception as exc:
+            logger.warning(
+                "    ⚠️  Stage 4 (%s) failed (non-fatal): %s", source_name, exc
+            )
 
     # Stage 5: Editorial Chunking + Embedding (fail-soft)
     logger.info("  Stage 5: Editorial Chunking & Embedding...")

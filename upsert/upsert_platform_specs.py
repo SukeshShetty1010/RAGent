@@ -8,8 +8,9 @@ from typing import Dict, Optional
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
 
-from data.rawg_data import fetch_rawg_game_data
+from data.rawg_data import fetch_rawg_game_data, rawg_available
 from pre_process.cleaner import RAWGCleaner
+from ingest.platform_sources import build_platform_cleaned_data
 from ingest.platformspec_ingest import generate_platform_payloads
 
 
@@ -42,38 +43,53 @@ def upsert_platform_specs(
     """
 
     # --------------------------------------------------
-    # 1. Fetch RAWG
+    # 1. Fetch platform data — RAWG when its circuit breaker is closed,
+    #    else fall through to the provider-independent IGDB+Steam
+    #    substitute (ingest/platform_sources.py).
     # --------------------------------------------------
-    try:
-        rawg_raw = fetch_rawg_game_data(game_name)
-    except Exception as exc:
-        logger.warning(
-            "RAWG fetch failed for '%s': %s. Skipping PlatformSpec ingest.",
-            game_name,
-            exc,
-        )
-        return 0
+    cleaned: Optional[Dict] = None
 
-    if not rawg_raw:
-        logger.warning("No RAWG data returned for '%s'.", game_name)
-        return 0
+    if rawg_available():
+        try:
+            rawg_raw = fetch_rawg_game_data(game_name)
+        except Exception as exc:
+            logger.warning(
+                "RAWG fetch failed for '%s': %s. Falling back to IGDB+Steam.",
+                game_name,
+                exc,
+            )
+            rawg_raw = None
 
-    # --------------------------------------------------
-    # 2. Clean RAWG
-    # --------------------------------------------------
-    cleaner = RAWGCleaner()
-    try:
-        cleaned = cleaner.clean(rawg_raw)
-    except Exception as exc:
-        logger.warning(
-            "RAWG cleaning failed for '%s': %s. Skipping PlatformSpec ingest.",
+        if rawg_raw:
+            cleaner = RAWGCleaner()
+            try:
+                cleaned = cleaner.clean(rawg_raw)
+            except Exception as exc:
+                logger.warning(
+                    "RAWG cleaning failed for '%s': %s. Falling back to IGDB+Steam.",
+                    game_name,
+                    exc,
+                )
+                cleaned = None
+    else:
+        logger.info(
+            "RAWG unavailable (disabled or circuit open) — using IGDB+Steam for '%s'.",
             game_name,
-            exc,
         )
-        return 0
 
     if not cleaned:
-        logger.info("RAWG cleaner produced no usable data for '%s'.", game_name)
+        try:
+            cleaned = build_platform_cleaned_data(game_name)
+        except Exception as exc:
+            logger.warning(
+                "IGDB+Steam platform fallback failed for '%s': %s.",
+                game_name,
+                exc,
+            )
+            cleaned = None
+
+    if not cleaned:
+        logger.info("No platform data available for '%s' from any source.", game_name)
         return 0
 
     # --------------------------------------------------

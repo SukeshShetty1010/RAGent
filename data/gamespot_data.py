@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import os
 import json
+import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
@@ -53,22 +55,29 @@ def get_correct_game_name_from_rawg(query: str, rawg_api_key: str, page_size: in
     """
     Query RAWG API for the closest match and return its official name.
     Returns None if RAWG can't provide a match or if there is an error.
+
+    Gated behind rawg_available()'s shared circuit breaker (data/rawg_data.py)
+    so a dead RAWG host doesn't add a 20s stall to every GameSpot fetch.
     """
-    if not rawg_api_key:
+    from data.rawg_data import rawg_available, record_rawg_success, record_rawg_failure
+
+    if not rawg_api_key or not rawg_available():
         return None
 
     url = "https://api.rawg.io/api/games"
     params = {"key": rawg_api_key, "search": query, "page_size": page_size}
     try:
-        resp = requests.get(url, params=params, timeout=20)
+        resp = requests.get(url, params=params, timeout=5)
         resp.raise_for_status()
         data = resp.json()
+        record_rawg_success()
         results = data.get("results") or []
         if results:
             return results[0].get("name")
         return None
     except requests.RequestException:
         # Don't raise here — we gracefully fall back to the raw query
+        record_rawg_failure()
         return None
 
 
@@ -225,6 +234,58 @@ def fetch_all_pages_from_url(
     return all_results
 
 
+_gamespot_block_logged = False
+
+
+def _gamespot_json_or_none(resp: "requests.Response") -> Optional[Dict[str, Any]]:
+    """
+    GameSpot fronts its API with Cloudflare bot protection. When blocked
+    it still returns HTTP 200/403 but with an HTML challenge page
+    ("IdentityEngine" / "Just a moment...") instead of JSON — resp.json()
+    then raises. Treat that as "no data" (fail-soft) instead of crashing
+    the pipeline; GameSpot reactivates automatically once the block lifts.
+    """
+    global _gamespot_block_logged
+    try:
+        return resp.json()
+    except ValueError:
+        if not _gamespot_block_logged:
+            logging.getLogger(__name__).warning(
+                "GameSpot returned non-JSON response (likely Cloudflare "
+                "bot-protection block) — content-type=%s. Treating as no "
+                "data for this run.",
+                resp.headers.get("content-type"),
+            )
+            _gamespot_block_logged = True
+        return None
+
+
+_API_KEY_PARAM_RE = re.compile(r"([?&]api_key=)[^&\s]+")
+
+
+def _redact(text: str) -> str:
+    return _API_KEY_PARAM_RE.sub(r"\1***", text)
+
+
+def _get_redacted(url: str, **kwargs: Any) -> "requests.Response":
+    """
+    Like requests.get(), but with the api_key query param stripped from
+    any exception message. requests/urllib3 embed the full request URL
+    (including query params) in ConnectionError, Timeout, and HTTPError
+    messages by default — uncaught, that's exactly how a RAWG key ended
+    up in a log file once already (data/rawg_data.py's _redact fixes
+    the same issue there). A DNS blip or GameSpot's common 403
+    (Cloudflare bot-protection) both hit this path, so every exception
+    type needs redacting, not just HTTP status errors.
+    """
+    try:
+        resp = requests.get(url, **kwargs)
+        resp.raise_for_status()
+        return resp
+    except requests.exceptions.RequestException as e:
+        raise type(e)(_redact(str(e))) from None
+
+
 # ---- GameSpot-specific fetchers ----
 def fetch_games_by_name(api_key: str, name: str, limit: int = 100) -> List[Dict[str, Any]]:
     """
@@ -238,9 +299,10 @@ def fetch_games_by_name(api_key: str, name: str, limit: int = 100) -> List[Dict[
         "limit": limit,
         "offset": 0,
     }
-    resp = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    resp = _get_redacted(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=30)
+    data = _gamespot_json_or_none(resp)
+    if data is None:
+        return []
     games = data.get("results", []) or []
 
     total = data.get("number_of_total_results", len(games))
@@ -253,9 +315,10 @@ def fetch_games_by_name(api_key: str, name: str, limit: int = 100) -> List[Dict[
         offset += page_count
         params["offset"] = offset
         params["limit"] = limit
-        resp = requests.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        resp = _get_redacted(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=30)
+        data = _gamespot_json_or_none(resp)
+        if data is None:
+            break
         games = data.get("results", []) or []
         page_count = data.get("number_of_page_results", len(games))
         all_games.extend(games)

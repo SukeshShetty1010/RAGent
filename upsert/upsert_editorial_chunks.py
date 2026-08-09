@@ -67,7 +67,7 @@ def validate_chunk(chunk_uuid: str, properties: Dict) -> bool:
         if not game_beacon:
             return False
 
-    if properties.get("source") != "gamespot":
+    if properties.get("source") not in {"gamespot", "wikipedia", "steam"}:
         return False
 
     if properties.get("content_type") not in {"review", "article"}:

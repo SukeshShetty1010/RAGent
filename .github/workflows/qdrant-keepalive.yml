@@ -1,0 +1,30 @@
+name: Qdrant keepalive
+
+# Free-tier Qdrant clusters get reaped after a period of inactivity —
+# that's what forced the full corpus rebuild this workflow exists to
+# prevent a repeat of. One request a day is enough to keep the cluster
+# alive; QDRANT_URL / QDRANT_API_KEY live in repo secrets, never here.
+
+on:
+  schedule:
+    - cron: "0 12 * * *" # daily at 12:00 UTC
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Qdrant collections endpoint
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 15 \
+            -H "api-key: ${QDRANT_API_KEY}" \
+            "${QDRANT_URL}/collections")
+          echo "Qdrant responded with HTTP $status"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Qdrant keepalive ping failed (HTTP $status)"
+            exit 1
+          fi
+        env:
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}

@@ -57,7 +57,6 @@ def generate_platform_payloads(
         List of dictionaries ready for Weaviate batch insertion
     """
 
-    game_id = cleaned_data.get("game_id")
     platforms = cleaned_data.get("platforms") or []
 
     payloads: List[Dict[str, Any]] = []
@@ -70,9 +69,13 @@ def generate_platform_payloads(
 
         # ------------------------------------------------------------------
         # Deterministic UUID
-        # Seed: "<game_id>_<platform_name>"
+        # Seed: "<game_uuid>_<platform_name>" — provider-independent
+        # (previously seeded from RAWG's integer game_id, which vendor-
+        # locked PlatformSpec identity the same way the Game anchor used
+        # to be before ingest/identity_resolver.py's provider-independent
+        # resolution; game_uuid is stable across providers).
         # ------------------------------------------------------------------
-        uuid_seed = f"{game_id}_{platform_name}"
+        uuid_seed = f"{game_uuid}_{platform_name}"
         _NS = UUID("12345678-1234-5678-1234-567812345678")
         platform_uuid = str(uuid5(_NS, uuid_seed))
 

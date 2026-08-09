@@ -27,6 +27,9 @@ from upsert.upsert_canonical_game import upsert_game_anchor
 from upsert.upsert_platform_specs import upsert_platform_specs
 from upsert.upsert_igdb_metadata import upsert_igdb_context
 from upsert.upsert_gamespot_chunks import upsert_gamespot_container
+from upsert.upsert_editorial_source import upsert_editorial_source_container
+from ingest.wikipedia_editorial_normalize import fetch_and_prepare_wikipedia
+from ingest.steam_editorial_normalize import fetch_and_prepare_steam
 
 from embed.prepare_editorial_payloads import generate_chunk_payloads
 from upsert.upsert_editorial_chunks import upsert_chunk_batch
@@ -141,10 +144,12 @@ def main() -> None:
             )
 
             # ------------------------------------------------------------
-            # Stage 4: GameSpot Editorial Container (FAIL-SOFT)
+            # Stage 4: Editorial Source Containers (FAIL-SOFT, per-provider)
+            #          GameSpot keeps its dedicated GameSpot_Game path;
+            #          Wikipedia/Steam share the EditorialSource collection.
             # ------------------------------------------------------------
-            with ProfileBlock("Stage4_GameSpotContainer"):
-                logger.info("Starting Stage 4: GameSpot Editorial Container...")
+            with ProfileBlock("Stage4_EditorialContainers"):
+                logger.info("Starting Stage 4: Editorial Source Containers...")
                 try:
                     gamespot_uuid = upsert_gamespot_container(
                         client=client,
@@ -154,18 +159,45 @@ def main() -> None:
 
                     if gamespot_uuid:
                         logger.info(
-                            f"✅ Stage 4 Complete. GameSpot Container UUID: {gamespot_uuid}"
+                            f"✅ Stage 4 (gamespot) Complete. UUID: {gamespot_uuid}"
                         )
                     else:
                         logger.warning(
-                            "⚠️ Stage 4 Skipped (No GameSpot data found)."
+                            "⚠️ Stage 4 (gamespot) Skipped (No data found)."
                         )
 
                 except Exception as exc:
                     logger.warning(
-                        "⚠️ Stage 4 failed but pipeline will continue: %s",
+                        "⚠️ Stage 4 (gamespot) failed but pipeline will continue: %s",
                         exc,
                     )
+
+                for source_name, normalize_fn in (
+                    ("wikipedia", fetch_and_prepare_wikipedia),
+                    ("steam", fetch_and_prepare_steam),
+                ):
+                    try:
+                        container = normalize_fn(args.game, game_uuid)
+                        source_uuid = upsert_editorial_source_container(
+                            client=client,
+                            container=container,
+                            game_name=args.game,
+                        )
+
+                        if source_uuid:
+                            logger.info(
+                                f"✅ Stage 4 ({source_name}) Complete. UUID: {source_uuid}"
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️ Stage 4 ({source_name}) Skipped (No data found)."
+                            )
+
+                    except Exception as exc:
+                        logger.warning(
+                            f"⚠️ Stage 4 ({source_name}) failed but pipeline will continue: %s",
+                            exc,
+                        )
 
             # ------------------------------------------------------------
             # Stage 5: Editorial Chunking + Embedding + Insert

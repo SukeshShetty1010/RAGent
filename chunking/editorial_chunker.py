@@ -38,7 +38,8 @@ class EditorialChunker:
         self,
         editorial_object: Dict,
         game_uuid: str,
-        gamespot_uuid: str,
+        parent_uuid: str,
+        source: str = "gamespot",
     ) -> List[Dict]:
         chunks: List[Dict] = []
 
@@ -49,8 +50,9 @@ class EditorialChunker:
                     body=review.get("body"),
                     title=review.get("title"),
                     game_uuid=game_uuid,
-                    parent_uuid=gamespot_uuid,
+                    parent_uuid=parent_uuid,
                     content_type="review",
+                    source=source,
                 )
             )
 
@@ -61,8 +63,9 @@ class EditorialChunker:
                     body=article.get("body"),
                     title=article.get("title"),
                     game_uuid=game_uuid,
-                    parent_uuid=gamespot_uuid,
+                    parent_uuid=parent_uuid,
                     content_type="article",
+                    source=source,
                 )
             )
 
@@ -78,6 +81,7 @@ class EditorialChunker:
         game_uuid: str,
         parent_uuid: str,
         content_type: str,
+        source: str = "gamespot",
     ) -> List[Dict]:
         if not body or not isinstance(body, str):
             return []
@@ -114,7 +118,7 @@ class EditorialChunker:
                     "content": content,
                     "game_uuid": game_uuid,
                     "parent_editorial_uuid": parent_uuid,
-                    "source": "gamespot",
+                    "source": source,
                     "content_type": content_type,
                     "chunk_index": index,
                     "source_title": title,

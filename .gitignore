@@ -66,3 +66,6 @@ frontend/.next/
 # ---------- Database files ----------
 *.db
 *.sqlite
+
+# ---------- Corpus snapshots (scripts/export_corpus.py) ----------
+backups/

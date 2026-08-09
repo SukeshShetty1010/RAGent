@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple
 from uuid import UUID, uuid5
 
 from chunking.editorial_chunker import EditorialChunker
-from ingest.gamespot_editorial_normalize import fetch_and_prepare_gamespot
+from ingest.editorial_providers import fetch_all_editorial_containers
 
 # ---------------------------------------------------------------------
 # Logging
@@ -71,23 +71,34 @@ class QualityFilter:
 # Core Generator
 # ---------------------------------------------------------------------
 def generate_chunk_payloads(game_name: str, canonical_uuid: str) -> List[Dict]:
-    gamespot_payload = fetch_and_prepare_gamespot(
-        game_name=game_name,
-        canonical_game_uuid=canonical_uuid,
-    )
+    """
+    Fan out across every registered editorial provider (GameSpot,
+    Wikipedia, Steam — see ingest/editorial_providers.py), chunk each
+    provider's content against its own container UUID, and concatenate.
 
-    if not gamespot_payload:
-        raise RuntimeError("No GameSpot data available")
-
-    gamespot_uuid = gamespot_payload["uuid"]
-    editorial_object = gamespot_payload["properties"]
+    Returns [] (not a raise) when every provider comes up empty —
+    upsert/upsert_all.py and scripts/bulk_ingest.py already treat 0
+    chunks as a non-success, so the honesty contract holds without a
+    RuntimeError short-circuiting stage 4/5 observability.
+    """
+    containers = fetch_all_editorial_containers(game_name, canonical_uuid)
 
     chunker = EditorialChunker(chunk_size=300, overlap=50)
-    raw_chunks = chunker.process_game_editorial(
-        editorial_object=editorial_object,
-        game_uuid=canonical_uuid,
-        gamespot_uuid=gamespot_uuid,
-    )
+    raw_chunks: List[Dict] = []
+    for container in containers:
+        source = container["properties"].get("source", container.get("class", "unknown"))
+        raw_chunks.extend(
+            chunker.process_game_editorial(
+                editorial_object=container["properties"],
+                game_uuid=canonical_uuid,
+                parent_uuid=container["uuid"],
+                source=source,
+            )
+        )
+
+    if not raw_chunks:
+        logger.warning("No editorial chunks from any provider for '%s'.", game_name)
+        return []
 
     quality_filter = QualityFilter()
 
@@ -139,7 +150,7 @@ def generate_chunk_payloads(game_name: str, canonical_uuid: str) -> List[Dict]:
                     "content_type": chunk["content_type"],
                     "chunk_index": chunk["chunk_index"],
                     "game_uuid": canonical_uuid,
-                    "parent_editorial_uuid": gamespot_uuid,
+                    "parent_editorial_uuid": chunk["parent_editorial_uuid"],
                 },
             }
         )
