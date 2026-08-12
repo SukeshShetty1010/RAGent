@@ -130,7 +130,7 @@ class RageEngine:
                 # ------------------------------------------------
                 # STEP 3: RETRIEVAL
                 # ------------------------------------------------
-                raw_chunks, merge_state, quality, web_decision = self.orchestrator.run(
+                raw_chunks, merge_state, quality, web_decision, pre_web_quality = self.orchestrator.run(
                     query=query,
                     decision=decision,
                     config=config,
@@ -144,11 +144,19 @@ class RageEngine:
                 quality_status = quality.status.value
                 confidence_score = quality.confidence_score
 
-                agent_decisions["quality"] = {
-                    "status": quality.status.value,
-                    "confidence_score": quality.confidence_score,
-                    "has_temporal_signal": quality.has_temporal_signal,
-                }
+                def _report_dict(q):
+                    return {
+                        "status": q.status.value,
+                        "confidence_score": q.confidence_score,
+                        "has_temporal_signal": q.has_temporal_signal,
+                        "max_relevance": q.max_relevance,
+                        "entity_grounded": q.entity_grounded,
+                        "evidence_count": q.evidence_count,
+                    }
+
+                agent_decisions["quality"] = _report_dict(quality)
+                if pre_web_quality is not quality:
+                    agent_decisions["quality_pre_web"] = _report_dict(pre_web_quality)
 
                 # ------------------------------------------------
                 # STEP 4: CAPABILITY ASSESSMENT

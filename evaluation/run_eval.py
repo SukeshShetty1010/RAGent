@@ -89,6 +89,8 @@ def run_eval(
                         {
                             "content": c.get("content"),
                             "source_title": c.get("source_title"),
+                            "score": c.get("score"),
+                            "rerank_score": c.get("rerank_score"),
                         }
                         for c in evidence
                     ],
@@ -96,6 +98,8 @@ def run_eval(
                     "answer_capability": agent.get("answer_capability"),
                     "merge_state": agent.get("merge_state"),
                     "quality_status": (agent.get("quality") or {}).get("status"),
+                    "quality": agent.get("quality"),
+                    "quality_pre_web": agent.get("quality_pre_web"),
                     "output_validation": agent.get("output_validation"),
                     "engine_latency_ms": kpis.get("engine_latency_ms"),
                     "llm_latency_ms": kpis.get("llm_latency_ms"),

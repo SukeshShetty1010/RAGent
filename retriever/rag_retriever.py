@@ -263,6 +263,31 @@ class RAGRetriever:
             return results
 
     # --------------------------------------------------
+    # Public relevance scoring (for evidence already retrieved
+    # elsewhere, e.g. web search results — same cross-encoder scale
+    # as the local rerank_score, so quality_gate can compare them).
+    # --------------------------------------------------
+
+    def score_relevance(self, query: str, contents: List[str]) -> List[float]:
+        """
+        Score `contents` against `query` with the same Modal-hosted
+        cross-encoder used by `_rerank`. Fail-soft: on any reranker
+        error, returns 0.0 for every item rather than raising, so a
+        caller merging these scores into evidence never crashes on a
+        degraded reranker.
+        """
+        if not contents:
+            return []
+
+        try:
+            return [float(s) for s in _get_reranker().rerank.remote(query, contents)]
+        except Exception as exc:
+            logger.warning(
+                f"Cross-encoder rerank unavailable (fail-soft): {exc}"
+            )
+            return [0.0] * len(contents)
+
+    # --------------------------------------------------
     # Reranking
     # --------------------------------------------------
 

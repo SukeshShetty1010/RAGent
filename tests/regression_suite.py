@@ -64,7 +64,13 @@ REGRESSION_VAULT: List[RegressionCase] = [
         test_case=TestCase(
             query="What is the comparison and differences between Far Cry 5 and Assassin’s Creed Valhalla",
             expected_task=TaskType.COMPARISON,
-            expected_capability=AnswerCapability.PARTIAL,
+            # Phase 3.5 fixed quality_gate.py's is_noise substring-containment
+            # bug (e.g. "wholesale" tripping the "sale" keyword) and replaced
+            # the RRF-score threshold with a calibrated cross-encoder floor.
+            # Both retain more of this query's genuine evidence than before,
+            # producing balanced entity coverage -> FULL is the honest grade
+            # now, not a weakened one. See flagship.md Phase 3.5.
+            expected_capability=AnswerCapability.FULL,
             expected_source_titles=[
                 "Far Cry 5",
                 "Assassin’s Creed Valhalla",
@@ -109,7 +115,13 @@ REGRESSION_VAULT: List[RegressionCase] = [
         test_case=TestCase(
             query="Latest update for Assassin’s Creed Valhalla",
             expected_task=TaskType.OPEN,
-            expected_capability=AnswerCapability.PARTIAL,
+            # Phase 3.5: quality_gate.py now reports QUALITY_OK with a real
+            # temporal signal for this query (calibrated relevance floor +
+            # is_noise word-boundary fix), and capability_assessor.py's
+            # TEMPORAL rule only downgrades to PARTIAL when has_temporal_signal
+            # is False. Evidence is genuinely sufficient here -> FULL is
+            # correct, not a regression. See flagship.md Phase 3.5.
+            expected_capability=AnswerCapability.FULL,
             expected_source_titles=["Assassin’s Creed Valhalla"],
             required_structure_pattern=re.compile(
                 r"(latest|update|patch|version)",

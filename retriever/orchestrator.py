@@ -68,15 +68,20 @@ class RetrievalOrchestrator:
         query: str,
         decision: RouterDecision,
         config: RetrievalConfiguration,
-    ) -> Tuple[List[Dict[str, Any]], str, Any, Optional[WebSearchDecision]]:
+    ) -> Tuple[List[Dict[str, Any]], str, Any, Optional[WebSearchDecision], Any]:
         """
         Execute retrieval according to routing + strategy.
 
         Returns:
             chunks
             merge_state
-            quality_report (QualityReport object)
+            quality_report (QualityReport object, re-evaluated on merged
+                evidence when a web search actually contributed chunks —
+                a genuine web rescue must be able to move the gate)
             web_decision (WebSearchDecision or None if no ambiguous decision was needed)
+            pre_web_quality_report (QualityReport from local evidence only,
+                always the same object as quality_report when no web
+                chunks were merged in; kept for observability)
         """
 
         task = decision.task
@@ -195,23 +200,44 @@ class RetrievalOrchestrator:
             logger.info(f"[ORCHESTRATOR] Merge State: {merge_state}")
 
             # -------------------------------------------------
-            # STEP 5: FINAL MERGE
+            # STEP 5: FINAL MERGE (+ re-gate if web contributed)
             # -------------------------------------------------
+
+            pre_web_quality_report = quality_report
 
             with ProfileBlock("ChunkMerge"):
 
-                if not local_chunks and web_chunks:
-                    return web_chunks, merge_state, quality_report, web_decision
-
-                if web_chunks:
+                if not web_chunks:
                     return (
-                        local_chunks + web_chunks,
+                        local_chunks,
                         merge_state,
                         quality_report,
                         web_decision,
+                        pre_web_quality_report,
                     )
 
-                return local_chunks, merge_state, quality_report, web_decision
+                merged_chunks = local_chunks + web_chunks
+
+                with ProfileBlock("ScoreWebEvidence"):
+                    contents = [c.get("content") or "" for c in web_chunks]
+                    web_scores = self.retriever.score_relevance(query, contents)
+                    for c, s in zip(web_chunks, web_scores):
+                        c["rerank_score"] = s
+
+                with ProfileBlock("QualityGateReMerge"):
+                    quality_report = self.quality_gate.evaluate(
+                        query=query,
+                        task=task,
+                        chunks=merged_chunks,
+                    )
+
+                return (
+                    merged_chunks,
+                    merge_state,
+                    quality_report,
+                    web_decision,
+                    pre_web_quality_report,
+                )
 
     # =========================================================
     # Web refinement

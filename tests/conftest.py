@@ -44,6 +44,19 @@ def quality_empty() -> QualityReport:
 
 
 @pytest.fixture
+def quality_offcorpus() -> QualityReport:
+    """A query whose evidence was rejected on entity grounding, not relevance."""
+    return QualityReport(
+        status=QualityStatus.QUALITY_EMPTY,
+        reason="Query entity absent from corpus",
+        confidence_score=0.0,
+        has_temporal_signal=False,
+        entity_grounded=False,
+        evidence_count=3,
+    )
+
+
+@pytest.fixture
 def chunk():
     """Factory for evidence chunks matching the keys CapabilityAssessor reads."""
 

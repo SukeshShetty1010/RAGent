@@ -287,6 +287,83 @@ three ways: dense-only, BM25-only, RRF+rerank. A table showing RRF beating both 
 baselines on your own corpus is the single most interview-durable artifact this project can
 produce, and it directly supplies the "why this approach" section.
 
+### Phase 3.5 — Make the honesty gate actually refuse (~6 h) — ✅ LANDED (2026-08-12)
+
+Direct follow-up to Phase 3's row-21 finding: `RetrievalQualityGate` could not express "results
+exist but are irrelevant" (`QUALITY_EMPTY` was only reachable on a literally-empty chunk list),
+and `CapabilityAssessor` had no severity ladder to act on it even if it could. Two independent
+structural blockers, verified in code, fixed without touching `capability_assessor.py` at all —
+routing the new failure paths to `QUALITY_EMPTY` was enough, since `assess()` already returns
+`INSUFFICIENT` there.
+
+**What changed:**
+
+- **`retriever/quality_gate.py`** — replaced the single FACTUAL-only `avg_score < 0.5` rule
+  (thresholding the RRF fusion score, which is rank-derived and identical for a perfect match
+  and pure noise) with a task-agnostic ladder on the cross-encoder `rerank_score` — the signal
+  the reranker already computed and that nothing previously read. Also fixed `is_noise`'s
+  substring-containment bug (`"deal" in "ideal"` was `True`).
+- **`retriever/corpus_index.py`** (new) — `CorpusEntityIndex`: a fail-soft, lazily-loaded set of
+  the corpus's actual `Game` titles. Catches the case the relevance floor alone cannot: a
+  same-franchise query (e.g. "Grand Theft Auto VI") retrieving genuinely well-scoring chunks
+  from the wrong entry ("Grand Theft Auto V"). Token-tuple equality, not substring matching —
+  `"grand theft auto v"` is a raw substring of `"grand theft auto vi"`.
+- **`retriever/orchestrator.py`** — the quality report is now re-evaluated on merged evidence
+  after a web search actually contributes chunks, so a genuine web rescue can move the gate
+  (previously the pre-web report was returned unconditionally even after a successful merge).
+- **Calibration, not a guess** — `evaluation/calibrate_relevance.py` (new) measured the actual
+  `rerank_score` distribution before any threshold was written. Finding worth recording:
+  `ms-marco-MiniLM-L-6-v2` on this corpus applies `Identity`, not `Sigmoid` — raw logits
+  (~-8 to +11), not a 0–1 score, contradicting the initial assumption. See
+  `evaluation/results/relevance_calibration_2026-08-12.json`.
+
+**Result — the headline number, corpus-only (web fallback off):**
+
+| Run | Refusal precision | Refusal recall | False-answer rate | Over-refusal rate |
+|---|---|---|---|---|
+| Before (2026-08-09) | 0.0 | 0.0 | 1.0 | 0.0 |
+| **After (2026-08-12), corpus-only** | **1.0** | **0.9** | **0.1** | **0.0** |
+| After (2026-08-12), default (web on) | 1.0 | 0.8 | 0.2 | 0.0 |
+
+9 of 10 deliberately-unanswerable queries now correctly refuse with **zero** regressions on the
+40 answerable queries (`over_refusal_rate = 0.0` was treated as a hard gate, not a nice-to-have —
+a refusal-storm regression would have been a worse failure than the one being fixed). The
+default (web-enabled) run reports lower recall by design: web search genuinely produces
+answering evidence for 2 of the 10 (`g047` "Beyond Good and Evil 2" and `g050` "2024 US
+presidential election" — the latter is arguably a domain-restriction gap, not an evidence gap,
+and is out of this phase's scope), so those two get re-graded `FULL` post-merge rather than
+staying refused. `evaluation/refusal_metrics.py`'s `by_merge_state` breakdown:
+`LOCAL_WEB_ATTEMPTED` (web tried, found nothing usable) refused 4/4 correctly;
+`LOCAL_PLUS_WEB` (web contributed chunks) refused 4/6 — the 2 rescues are exactly `g047`/`g050`.
+
+**The one accepted miss:** `g047` ("Beyond Good and Evil 2") has a real corpus `Game` identity
+(likely a RAWG catalog entry with no editorial content ingested) — `entity_grounded=True`, so
+the entity check doesn't fire, and its `max_relevance` (1.07) sits between legitimately-weak
+answerable evidence (e.g. "RimWorld", 0.02) and the lowest genuinely-unanswerable score not
+already caught by entity grounding (-4.32). No single scalar floor separates these three without
+causing over-refusal on the answerable side — the honest call, per the calibration data, is to
+let it land `QUALITY_WEAK` (partial, not refused) rather than pick a number that happens to score
+well on this one query. Documented in `retriever/quality_gate.py`'s `REFUSE_FLOOR` comment.
+
+**A real bug found and fixed mid-verification, worth recording:** the first version of the
+entity-grounding span extractor fragmented multi-word titles containing lowercase connector
+words (e.g. "Honkai: Star Rail - Then Wake **to** Weep" split into two spans at "to"), which
+wrongly refused a legitimately-answerable query (`over_refusal_rate` was 0.025, not 0.0, on the
+first corpus-only run). Fixed by letting a lowercase connector (`of`/`to`/`the`/`in`/`on`/`for`/
+`at`) bridge a span when a capitalized token follows — deliberately excluding `and`/`or`/`vs`,
+which must keep splitting comparison queries into two separate entity spans
+("Doom Eternal **and** Crusader Kings III"). Re-verified clean afterward.
+
+**Test coverage added** (previously zero for this module): `tests/test_quality_gate.py`,
+`tests/test_corpus_index.py` — hermetic, entity index injected via
+`CorpusEntityIndex.from_titles()`, no network. `tests/regression_suite.py`'s BUG-001/BUG-003
+fixtures were updated from `PARTIAL`→`FULL` with inline comments — the relevance-ladder and
+`is_noise` fixes retain more genuine evidence for those two historical cases, which is a correct
+grading change, not a silent weakening (both now pass).
+
+Full artifacts: `evaluation/results/relevance_calibration_2026-08-12.json`,
+`runs_2026-08-12_{default,corpusonly}.jsonl`, `refusal_2026-08-12_{default,corpusonly}.json`.
+
 ### Phase 4 — Presentation (4–6 h)
 
 **4.1 Rewrite the metrics section** *(~2 h)* — Replace the five "resume-grade" tables with
@@ -342,9 +419,9 @@ the system it measures is wrong.
 
 | # | Rubric item | Status | Action |
 |---|---|---|---|
-| 1 | Hybrid dense+sparse, RRF | ✅ PRESENT | Ablation run (2026-08-09): RRF hybrid beats dense/BM25 on precision@k (0.95 vs 0.94/0.935); production `hybrid_rerank` default scores *lowest of all four modes* on both precision@k (0.92) and RAGAS context precision (0.5168) — negative result confirmed by two independent metrics, see Phase 3 results |
+| 1 | Hybrid dense+sparse, RRF | ✅ PRESENT | Ablation run (2026-08-09): RRF hybrid beats dense/BM25 on precision@k (0.95 vs 0.94/0.935); production `hybrid_rerank` default scores *lowest of all four modes* on both precision@k (0.92) and RAGAS context precision (0.5168) on the reordering ablation. Phase 3.5 (2026-08-12) gives the cross-encoder's `rerank_score` a second job it does earn: the calibrated relevance floor that drives the honesty gate below — it lost the reordering ablation but is now load-bearing for refusal |
 | 2 | Specific non-generic corpus | ✅ PRESENT | Rebuilt: 100 games, 2791 chunks, verified zero orphans/duplicates |
-| 3 | "Insufficient information" refusal | 🚨 PRESENT BUT NOT WORKING AS INTENDED | Falsifiable metric added (3.3) and it found a real defect: refusal recall = **0.0** on both production-path runs — see Phase 3 results and new row 21 below |
+| 3 | "Insufficient information" refusal | ✅ WORKING (one accepted miss) | Phase 3.5 (2026-08-12): refusal recall **0.0 → 0.9** corpus-only, `over_refusal_rate = 0.0` on all 40 answerable queries — see Phase 3.5 results and resolved row 21 below |
 | 4 | Source/citation attribution | ✅ ENFORCED (compliance not 100%) | Citation format specified + `validate_answer()` checks against context (0.2); live runs show the LLM doesn't always comply — validator correctly flags it |
 | 5 | RAGAS: context precision, faithfulness, answer relevancy | ✅ COMPLETE | 40/40 answerable queries scored (Modal-judged, 2026-08-09): context_precision 0.5722, faithfulness 0.9077, answer_relevancy 0.7306. Groq track partial (5/40, quota-exhausted) and preserved separately, not mixed |
 | 6 | Live public deployment | ❌ ABSENT | Fix Modal lazy-binding, deploy to Render, cron keep-alive (1.2–1.4) |
@@ -362,7 +439,7 @@ the system it measures is wrong.
 | 18 | *(defect)* Modal creds missing from Render | ⚠️ PARTIALLY RESOLVED | Lazy binding done; `render.yaml` now declares the token keys (1.2) — real values + redeploy still needed |
 | 19 | *(defect)* `healthCheckPath` missing | ✅ RESOLVED | Added to `render.yaml` (2026-08-09) |
 | 20 | *(defect)* `Unified_KPI_Runner` path bug | ✅ RESOLVED | `parents[1]`; confirmed clean run this session |
-| 21 | *(new, found by 3.3)* Honesty gate never returns `INSUFFICIENT` on off-corpus queries | 🚨 NEW — HIGH PRIORITY | `RetrievalQualityGate` classifies off-corpus queries as `quality_ok`/`quality_weak`, never `quality_empty`, because Qdrant hybrid search always returns *k* nearest neighbors regardless of relevance — no similarity floor catches pure noise. Needs a fix to the quality gate's threshold logic, not the refusal metric (which is working correctly by catching this) |
+| 21 | *(found by 3.3)* Honesty gate never returns `INSUFFICIENT` on off-corpus queries | ✅ RESOLVED (Phase 3.5, 2026-08-12) | Replaced the RRF-score threshold with a calibrated cross-encoder relevance floor + a new corpus entity-grounding check (`retriever/corpus_index.py`); re-gates on merged evidence after web search. Refusal recall 0.0 → 0.9, `over_refusal_rate = 0.0`. One accepted miss (`g047`) documented as a genuine single-signal limit, not hidden |
 | 22 | *(new, found while wiring the Modal RAGAS judge)* Production `llm/modal_llm.py` had a concurrency-corrupting event-loop race | ✅ RESOLVED | See defect #6. Real bug in the live generation service, not eval-only; fixed and redeployed (2026-08-09), validated via ephemeral concurrent smoke test before deploy |
 
 ---
@@ -387,4 +464,14 @@ the system it measures is wrong.
 - **Phase 3 KPI regression:** `python -m KPI.Unified_KPI_Runner` re-run after all of the above
   (including the `llm/modal_llm.py` concurrency fix and redeploy) — exit 0, full dashboard
   produced, no regression.
+- **Phase 3.5:** ✅ Done, 2026-08-12. `python -m pytest tests/ -m unit -q` — 68 hermetic tests
+  pass, including two new files with previously-zero coverage
+  (`tests/test_quality_gate.py`, `tests/test_corpus_index.py`). Calibration artifact
+  `evaluation/results/relevance_calibration_2026-08-12.json` committed. Headline number:
+  `evaluation/results/refusal_2026-08-12_corpusonly.json` — recall 0.0 → 0.9,
+  `over_refusal_rate = 0.0` on all 40 answerable queries (hard gate, met). Default (web-on) run
+  and its `by_merge_state` breakdown in `refusal_2026-08-12_default.json`, reported as product
+  behavior, not the honesty claim. `tests/regression_suite.py` — 3/3 pass (two fixtures updated
+  `PARTIAL`→`FULL` with inline comments explaining the correct-direction change).
+  `python -m KPI.Unified_KPI_Runner` re-run after — exit 0, full dashboard, regression guard 3/3.
 - **Phase 4:** Every number in the README maps to a committed file under `evaluation/results/`.

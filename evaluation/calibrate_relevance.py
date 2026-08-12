@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""
+evaluation/calibrate_relevance.py — Relevance Floor Calibration
+
+retriever/quality_gate.py's REFUSE_FLOOR/WEAK_FLOOR thresholds must
+come from measurement, not a guess: CrossEncoder.predict applies
+Sigmoid when num_labels == 1 but honours a model-config-declared
+activation function, so ms-marco-MiniLM-L-6-v2's actual output range
+is unknown until observed (see sentence_transformers/cross_encoder/
+CrossEncoder.py:469-493 in the installed package).
+
+Retrieval-only: no LLM call, no web search, no orchestrator web
+decision. Runs every golden_set.jsonl query through RAGRetriever
+directly (same "hybrid_rerank" default mode production uses) and the
+real CorpusEntityIndex, dumps per-query max/mean rerank_score and the
+entity-grounding verdict split by should_refuse, and reports the
+max-F1 split point on max_relevance alone (a lower bound: the entity
+check in quality_gate.py catches cases this single-signal split
+cannot).
+
+Usage:
+    python -m evaluation.calibrate_relevance
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from datetime import date
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+
+from retriever.rag_retriever import RAGRetriever
+from retriever.corpus_index import _get_entity_index
+
+GOLDEN_SET_PATH = Path(__file__).resolve().parent / "data" / "golden_set.jsonl"
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
+
+
+def _load_golden_set(path: Path) -> List[Dict[str, Any]]:
+    records = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return records
+
+
+def _f1_at_threshold(records: List[Dict[str, Any]], threshold: float) -> Dict[str, float]:
+    """Predict refuse iff max_relevance < threshold; score against should_refuse."""
+    tp = fp = fn = tn = 0
+    for r in records:
+        should_refuse = bool(r["should_refuse"])
+        predicted_refuse = r["max_relevance"] < threshold
+        if should_refuse and predicted_refuse:
+            tp += 1
+        elif should_refuse and not predicted_refuse:
+            fn += 1
+        elif not should_refuse and predicted_refuse:
+            fp += 1
+        else:
+            tn += 1
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {"threshold": threshold, "precision": precision, "recall": recall, "f1": f1, "tp": tp, "fp": fp, "fn": fn, "tn": tn}
+
+
+def _best_split(records: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
+    candidates = sorted({r["max_relevance"] for r in records})
+    if not candidates:
+        return None
+    # Try each observed value as a threshold, plus one above the max
+    # (so "always answer" is representable) and 0.0 ("always refuse").
+    thresholds = candidates + [candidates[-1] + 1e-6]
+    scored = [_f1_at_threshold(records, t) for t in thresholds]
+    return max(scored, key=lambda s: s["f1"])
+
+
+def _summarize(records: List[Dict[str, Any]]) -> Dict[str, float]:
+    values = [r["max_relevance"] for r in records]
+    if not values:
+        return {"count": 0, "min": None, "max": None, "mean": None}
+    return {
+        "count": len(values),
+        "min": round(min(values), 4),
+        "max": round(max(values), 4),
+        "mean": round(sum(values) / len(values), 4),
+    }
+
+
+def calibrate(golden_set: List[Dict[str, Any]]) -> Dict[str, Any]:
+    retriever = RAGRetriever()
+    entity_index = _get_entity_index()
+    per_query: List[Dict[str, Any]] = []
+
+    try:
+        for i, record in enumerate(golden_set, start=1):
+            query = record["query"]
+            print(f"[{i}/{len(golden_set)}] {query}")
+
+            try:
+                chunks = retriever.retrieve(query, limit=5)
+            except Exception as exc:
+                print(f"  ⚠️ retrieve failed: {exc}")
+                per_query.append(
+                    {
+                        "id": record["id"],
+                        "query": query,
+                        "should_refuse": record.get("should_refuse"),
+                        "error": str(exc),
+                    }
+                )
+                continue
+
+            rerank_scores = [c["rerank_score"] for c in chunks if c.get("rerank_score") is not None]
+            max_relevance = max(rerank_scores) if rerank_scores else 0.0
+            mean_relevance = sum(rerank_scores) / len(rerank_scores) if rerank_scores else 0.0
+            entity_grounded = entity_index.assess_grounding(query, chunks)
+
+            per_query.append(
+                {
+                    "id": record["id"],
+                    "query": query,
+                    "should_refuse": bool(record.get("should_refuse")),
+                    "max_relevance": round(max_relevance, 4),
+                    "mean_relevance": round(mean_relevance, 4),
+                    "entity_grounded": entity_grounded,
+                    "evidence_count": len(chunks),
+                }
+            )
+    finally:
+        retriever.close()
+
+    scored = [r for r in per_query if "error" not in r]
+    should_refuse_group = [r for r in scored if r["should_refuse"]]
+    answerable_group = [r for r in scored if not r["should_refuse"]]
+
+    best_split = _best_split(scored)
+
+    return {
+        "generated": date.today().isoformat(),
+        "total_queries": len(golden_set),
+        "scored": len(scored),
+        "errored": len(per_query) - len(scored),
+        "should_refuse_relevance": _summarize(should_refuse_group),
+        "answerable_relevance": _summarize(answerable_group),
+        "best_split_relevance_only": best_split,
+        "entity_grounding_on_unanswerable": {
+            "false": sum(1 for r in should_refuse_group if r["entity_grounded"] is False),
+            "none": sum(1 for r in should_refuse_group if r["entity_grounded"] is None),
+            "true": sum(1 for r in should_refuse_group if r["entity_grounded"] is True),
+            "total": len(should_refuse_group),
+        },
+        "per_query": per_query,
+    }
+
+
+def main() -> None:
+    golden_set = _load_golden_set(GOLDEN_SET_PATH)
+    result = calibrate(golden_set)
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = RESULTS_DIR / f"relevance_calibration_{date.today().isoformat()}.json"
+    out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print(f"\nWrote {out_path}")
+    print("\n=== SEPARATION ===")
+    print(f"should_refuse group max_relevance: {result['should_refuse_relevance']}")
+    print(f"answerable group max_relevance:    {result['answerable_relevance']}")
+    print(f"\nBest single-signal split (relevance only): {result['best_split_relevance_only']}")
+    print(f"\nEntity grounding on should_refuse queries: {result['entity_grounding_on_unanswerable']}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,30 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "refusal_precision": 1.0,
+  "refusal_recall": 0.9,
+  "refusal_f1": 0.9474,
+  "false_answer_rate": 0.1,
+  "over_refusal_rate": 0.0,
+  "confusion": {
+    "tp": 9,
+    "fp": 0,
+    "fn": 1,
+    "tn": 40
+  },
+  "by_merge_state": {
+    "LOCAL_ONLY": {
+      "total": 50,
+      "refused": 9,
+      "should_refuse": 10
+    }
+  },
+  "false_answers": [
+    {
+      "id": "g047",
+      "query": "What platforms can I play Beyond Good and Evil 2 on?"
+    }
+  ],
+  "over_refusals": [],
+  "errored_ids": []
+}

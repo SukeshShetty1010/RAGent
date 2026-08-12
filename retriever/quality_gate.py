@@ -9,9 +9,10 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Optional, Set
 
 from agent.task_router import TaskType
+from retriever.corpus_index import CorpusEntityIndex, _get_entity_index
 
 
 # ============================================================
@@ -39,6 +40,12 @@ class QualityReport:
     reason: str
     confidence_score: float
     has_temporal_signal: bool = False
+    # Max cross-encoder rerank_score across evidence; None if no chunk
+    # carried one (reranker unavailable / ablation mode).
+    max_relevance: Optional[float] = None
+    # None = query names no entity (relevance floor is the only signal).
+    entity_grounded: Optional[bool] = None
+    evidence_count: int = 0
 
 
 # ============================================================
@@ -81,6 +88,41 @@ class RetrievalQualityGate:
     ]
 
     # --------------------------------------------------------
+    # Relevance floor — thresholds on the cross-encoder rerank_score,
+    # NOT the RRF fusion score (identical for a perfect match and pure
+    # noise, see rag_retriever.py:245).
+    #
+    # ms-marco-MiniLM-L-6-v2 turns out to apply Identity, not Sigmoid
+    # (raw logits, roughly -8..+11 on this corpus) — confirmed by
+    # evaluation/calibrate_relevance.py, NOT assumed. See
+    # evaluation/results/relevance_calibration_2026-08-12.json:
+    #   should_refuse group max_relevance: min=-7.97 max=4.87 mean=-2.38
+    #   answerable group max_relevance:    min=-2.74 max=10.77 mean=6.42
+    # REFUSE_FLOOR sits in the gap between the answerable group's
+    # minimum (-2.74, "Rust") and the lowest genuinely-unanswerable
+    # score that isn't already caught by entity grounding (-4.32,
+    # g050). One unanswerable query (g047, "Beyond Good and Evil 2",
+    # max_relevance=1.07) has a real corpus Game identity despite no
+    # editorial content — entity_grounded=True there, and no floor
+    # can separate it from legitimately-weak answerable evidence like
+    # RimWorld's 0.02 without causing over-refusal, so it lands WEAK
+    # (partial answer, not refused). That is the honest bound of a
+    # single scalar signal; see flagship.md Phase 3.5 for the accepted
+    # miss.
+    # --------------------------------------------------------
+
+    REFUSE_FLOOR = -3.0
+    WEAK_FLOOR = 2.0
+
+    # --------------------------------------------------------
+
+    def __init__(self, entity_index: Optional[CorpusEntityIndex] = None) -> None:
+        self._entity_index_override = entity_index
+
+    def _entity_index(self) -> CorpusEntityIndex:
+        if self._entity_index_override is not None:
+            return self._entity_index_override
+        return _get_entity_index()
 
     def evaluate(
         self,
@@ -94,12 +136,14 @@ class RetrievalQualityGate:
                 status=QualityStatus.QUALITY_EMPTY,
                 reason="No evidence retrieved",
                 confidence_score=0.0,
+                evidence_count=0,
             )
             self._log(report)
             return report
 
         valid_chunks: List[Dict[str, Any]] = []
         scores: List[float] = []
+        rerank_scores: List[float] = []
         temporal_signal = False
 
         for c in chunks:
@@ -113,6 +157,10 @@ class RetrievalQualityGate:
             valid_chunks.append(c)
             scores.append(score)
 
+            rerank_score = c.get("rerank_score")
+            if rerank_score is not None:
+                rerank_scores.append(float(rerank_score))
+
             if self._has_temporal_signal(title, content):
                 temporal_signal = True
 
@@ -121,28 +169,67 @@ class RetrievalQualityGate:
                 status=QualityStatus.QUALITY_WEAK,
                 reason="Only noise content detected",
                 confidence_score=0.0,
+                evidence_count=0,
+            )
+            self._log(report)
+            return report
+
+        entity_grounded = self._entity_index().assess_grounding(query, valid_chunks)
+
+        if entity_grounded is False:
+            report = QualityReport(
+                status=QualityStatus.QUALITY_EMPTY,
+                reason="Query entity absent from corpus",
+                confidence_score=0.0,
+                has_temporal_signal=temporal_signal,
+                entity_grounded=False,
+                evidence_count=len(valid_chunks),
             )
             self._log(report)
             return report
 
         avg_score = sum(scores) / len(scores) if scores else 0.0
 
-        # Task-specific strictness
-        if task == TaskType.FACTUAL and avg_score < 0.5:
+        if not rerank_scores:
+            # Reranker unavailable on this call (fail-soft omission —
+            # see rag_retriever.py:297-300 — or an ablation mode). A
+            # degraded reranker must not turn into a refusal storm, so
+            # the relevance ladder is skipped entirely rather than
+            # refusing or thresholding an uncalibrated number.
+            logger.warning(
+                "No rerank_score on any chunk — relevance floor skipped"
+            )
             report = QualityReport(
-                status=QualityStatus.QUALITY_WEAK,
-                reason="Low semantic similarity for factual query",
+                status=QualityStatus.QUALITY_OK,
+                reason="Evidence present (relevance floor skipped — no rerank_score)",
                 confidence_score=avg_score,
                 has_temporal_signal=temporal_signal,
+                entity_grounded=entity_grounded,
+                evidence_count=len(valid_chunks),
             )
             self._log(report)
             return report
 
+        max_relevance = max(rerank_scores)
+
+        if max_relevance < self.REFUSE_FLOOR:
+            status = QualityStatus.QUALITY_EMPTY
+            reason = "No evidence above relevance floor"
+        elif max_relevance < self.WEAK_FLOOR:
+            status = QualityStatus.QUALITY_WEAK
+            reason = "Evidence below confident-relevance floor"
+        else:
+            status = QualityStatus.QUALITY_OK
+            reason = "Evidence sufficient for LLM reasoning"
+
         report = QualityReport(
-            status=QualityStatus.QUALITY_OK,
-            reason="Evidence sufficient for LLM reasoning",
-            confidence_score=avg_score,
+            status=status,
+            reason=reason,
+            confidence_score=max_relevance,
             has_temporal_signal=temporal_signal,
+            max_relevance=max_relevance,
+            entity_grounded=entity_grounded,
+            evidence_count=len(valid_chunks),
         )
         self._log(report)
         return report
@@ -153,7 +240,9 @@ class RetrievalQualityGate:
 
     def is_noise(self, title: str, content: str) -> bool:
         text = f"{title} {content}".lower()
-        return any(k in text for k in self.NOISE_KEYWORDS)
+        return any(
+            re.search(rf"\b{re.escape(k)}\b", text) for k in self.NOISE_KEYWORDS
+        )
 
     def _has_temporal_signal(self, title: str, content: str) -> bool:
         text = f"{title} {content}".lower()
