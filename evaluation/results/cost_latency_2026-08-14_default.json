@@ -1,0 +1,110 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "engine_latency_ms": {
+    "p50": 727.42,
+    "p95": 10809.15,
+    "p99": 15127.7,
+    "mean": 3124.81
+  },
+  "llm_latency_ms": {
+    "p50": 2597.65,
+    "p95": 6555.21,
+    "mean": 3133.48
+  },
+  "cost_usd_per_query": {
+    "mean": 4.923e-05,
+    "median": 5.157e-05,
+    "total_for_run": 0.000738
+  },
+  "tokens_per_query": {
+    "mean_prompt_tokens": 914.7,
+    "mean_completion_tokens": 43.7
+  },
+  "stage_latency_attribution": {
+    "REQUEST_TOTAL -> LLMGeneration": {
+      "avg_ms": 2997.07,
+      "pct_of_total": 97.04
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> CrossEncoderRerank": {
+      "avg_ms": 2925.31,
+      "pct_of_total": 94.72
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch": {
+      "avg_ms": 2405.01,
+      "pct_of_total": 77.87
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 2404.89,
+      "pct_of_total": 77.87
+    },
+    "REQUEST_TOTAL -> Retrieval": {
+      "avg_ms": 2108.3,
+      "pct_of_total": 68.27
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 997.4,
+      "pct_of_total": 32.3
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition": {
+      "avg_ms": 758.77,
+      "pct_of_total": 24.57
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch": {
+      "avg_ms": 754.27,
+      "pct_of_total": 24.42
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 754.26,
+      "pct_of_total": 24.42
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 754.25,
+      "pct_of_total": 24.42
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> VectorQuery": {
+      "avg_ms": 593.31,
+      "pct_of_total": 19.21
+    },
+    "REQUEST_TOTAL -> Retrieval -> QualityGate": {
+      "avg_ms": 101.51,
+      "pct_of_total": 3.29
+    },
+    "REQUEST_TOTAL -> ContextAssembly": {
+      "avg_ms": 1.13,
+      "pct_of_total": 0.04
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> SafeContextCap": {
+      "avg_ms": 0.59,
+      "pct_of_total": 0.02
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Deduplication": {
+      "avg_ms": 0.5,
+      "pct_of_total": 0.02
+    },
+    "REQUEST_TOTAL -> PromptConstruction": {
+      "avg_ms": 0.1,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> TaskRouting": {
+      "avg_ms": 0.06,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> ResultFormatting": {
+      "avg_ms": 0.02,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge": {
+      "avg_ms": 0.01,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Ordering": {
+      "avg_ms": 0.01,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> PromptConstruction -> ContextFormatting": {
+      "avg_ms": 0.01,
+      "pct_of_total": 0.0
+    }
+  }
+}
