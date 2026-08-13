@@ -45,6 +45,7 @@ from agent.prompt_manager import PromptManager
 from agent.output_validator import validate_answer
 
 from utils.observability import MetricsRegistry, ProfileBlock
+from utils import tracing
 
 
 # ============================================================
@@ -157,8 +158,8 @@ class StreamingRageEngine:
                 on_stage_callback(stage)
 
         try:
-            with ProfileBlock("REQUEST_TOTAL"):
-                
+            with tracing.trace_request(query), ProfileBlock("REQUEST_TOTAL"):
+
                 # ------------------------------------------------
                 # STEP 1: ROUTING
                 # ------------------------------------------------
@@ -252,6 +253,13 @@ class StreamingRageEngine:
 
                 agent_decisions["answer_capability"] = capability.value
 
+                tracing.set_trace_attributes(
+                    task=decision.task.value,
+                    answer_capability=capability.value,
+                    quality_status=quality_status,
+                    merge_state=merge_state,
+                )
+
                 emit_stage("capability", "completed", {
                     "capability": capability.value
                 }, (time.perf_counter() - step_start) * 1000)
@@ -334,6 +342,17 @@ class StreamingRageEngine:
 
                     llm_latency_ms = (time.perf_counter() - step_start) * 1000.0
 
+                    if llm_ran:
+                        tracing.record_generation(
+                            model="llama-3.1-8b-instant",
+                            prompt=prompt,
+                            output=final_answer,
+                            prompt_tokens=int(MetricsRegistry.get().last("llm_prompt_tokens") or 0),
+                            completion_tokens=int(MetricsRegistry.get().last("llm_completion_tokens") or 0),
+                            cost_usd=MetricsRegistry.get().last("llm_cost_usd") or 0.0,
+                            latency_ms=llm_latency_ms,
+                        )
+
                     stage_data = {
                         "tokens_generated": len(final_answer.split()),
                         "llm_latency_ms": llm_latency_ms,
@@ -398,6 +417,13 @@ class StreamingRageEngine:
         }
 
         raw_metrics = registry.generate_report()
+
+        prompt_tokens_dist = raw_metrics["distributions"].get("llm_prompt_tokens")
+        completion_tokens_dist = raw_metrics["distributions"].get("llm_completion_tokens")
+        cost_dist = raw_metrics["distributions"].get("llm_cost_usd")
+        kpis["prompt_tokens"] = int(prompt_tokens_dist["avg"] * prompt_tokens_dist["count"]) if prompt_tokens_dist else None
+        kpis["completion_tokens"] = int(completion_tokens_dist["avg"] * completion_tokens_dist["count"]) if completion_tokens_dist else None
+        kpis["cost_usd"] = round(cost_dist["avg"] * cost_dist["count"], 8) if cost_dist else None
 
         return StreamingResult(
             final_answer=final_answer,

@@ -34,3 +34,6 @@ groq
 httpx<0.28.0                    # Pin to avoid 'proxies' breaking change
 modal
 aiofiles
+
+# ---------- Tracing (optional) ----------
+langfuse>=4,<5                  # No-op at runtime unless LANGFUSE_* env vars are set

@@ -92,7 +92,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             for ev in result.evidence:
                 safe_ev = {k: v for k, v in ev.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
                 safe_evidence.append(safe_ev)
-                
+
             q.put({"type": "done", "data": {
                 "final_answer": result.final_answer,
                 "kpis": result.kpis,
@@ -101,6 +101,12 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             }})
         except Exception as e:
             q.put({"type": "error", "data": str(e)})
+        finally:
+            # Force-deliver this request's trace before the daemon thread
+            # exits — a Render container idling out between requests must
+            # not silently drop the last trace's spans.
+            from utils import tracing
+            tracing.flush()
 
     threading.Thread(target=run_engine, daemon=True).start()
 

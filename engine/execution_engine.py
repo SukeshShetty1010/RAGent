@@ -19,6 +19,7 @@ from agent.prompt_manager import PromptManager
 from agent.output_validator import validate_answer
 
 from utils.observability import MetricsRegistry, ProfileBlock
+from utils import tracing
 
 
 # ============================================================
@@ -99,7 +100,7 @@ class RageEngine:
             # =================================================
             # ROOT REQUEST SPAN
             # =================================================
-            with ProfileBlock("REQUEST_TOTAL"):
+            with tracing.trace_request(query), ProfileBlock("REQUEST_TOTAL"):
 
                 # ------------------------------------------------
                 # STEP 1: ROUTING (EXPLICIT VERSIONING)
@@ -169,6 +170,13 @@ class RageEngine:
 
                 agent_decisions["answer_capability"] = capability.value
 
+                tracing.set_trace_attributes(
+                    task=decision.task.value,
+                    answer_capability=capability.value,
+                    quality_status=quality_status,
+                    merge_state=merge_state,
+                )
+
                 # ------------------------------------------------
                 # STEP 5: CONTEXT ASSEMBLY
                 # ------------------------------------------------
@@ -203,6 +211,16 @@ class RageEngine:
                         final_answer = response.strip()
                         llm_ran = True
 
+                        tracing.record_generation(
+                            model="llama-3.1-8b-instant",
+                            prompt=prompt,
+                            output=final_answer,
+                            prompt_tokens=int(MetricsRegistry.get().last("llm_prompt_tokens") or 0),
+                            completion_tokens=int(MetricsRegistry.get().last("llm_completion_tokens") or 0),
+                            cost_usd=MetricsRegistry.get().last("llm_cost_usd") or 0.0,
+                            latency_ms=llm_latency_ms,
+                        )
+
                         validation = validate_answer(
                             final_answer,
                             capability,
@@ -233,6 +251,11 @@ class RageEngine:
                         "to answer this request safely."
                     )
 
+                tracing.set_trace_attributes(
+                    llm_ran=llm_ran,
+                    output_validation=(agent_decisions.get("output_validation") or {}).get("is_valid"),
+                )
+
         except Exception:
             logger.exception("Fatal execution error")
             final_answer = (
@@ -262,6 +285,13 @@ class RageEngine:
         }
 
         raw_metrics = registry.generate_report()
+
+        prompt_tokens_dist = raw_metrics["distributions"].get("llm_prompt_tokens")
+        completion_tokens_dist = raw_metrics["distributions"].get("llm_completion_tokens")
+        cost_dist = raw_metrics["distributions"].get("llm_cost_usd")
+        kpis["prompt_tokens"] = int(prompt_tokens_dist["avg"] * prompt_tokens_dist["count"]) if prompt_tokens_dist else None
+        kpis["completion_tokens"] = int(completion_tokens_dist["avg"] * completion_tokens_dist["count"]) if completion_tokens_dist else None
+        kpis["cost_usd"] = round(cost_dist["avg"] * cost_dist["count"], 8) if cost_dist else None
 
         return ExecutionResult(
             final_answer=final_answer,

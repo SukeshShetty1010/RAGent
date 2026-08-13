@@ -36,3 +36,10 @@ services:
         sync: false
       - key: TWITCH_CLIENT_SECRET
         sync: false
+      # Tracing (Langfuse, optional — no-op if unset)
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        sync: false

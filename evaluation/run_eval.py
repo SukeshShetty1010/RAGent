@@ -103,6 +103,14 @@ def run_eval(
                     "output_validation": agent.get("output_validation"),
                     "engine_latency_ms": kpis.get("engine_latency_ms"),
                     "llm_latency_ms": kpis.get("llm_latency_ms"),
+                    "prompt_tokens": kpis.get("prompt_tokens"),
+                    "completion_tokens": kpis.get("completion_tokens"),
+                    "cost_usd": kpis.get("cost_usd"),
+                    "stage_latency_ms": {
+                        k.replace("latency::", "", 1): v["avg"]
+                        for k, v in execution["raw_metrics"]["distributions"].items()
+                        if k.startswith("latency::")
+                    },
                 }
             )
     finally:

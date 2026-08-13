@@ -7,7 +7,7 @@ import os
 from typing import Any, Generator, Optional, Callable
 from groq import Groq
 from utils.observability import ProfileBlock, MetricsRegistry
-from llm.ragent_client import _get_groq_client
+from llm.ragent_client import _get_groq_client, _record_usage, _GROQ_MODEL
 
 def chat_completion_streaming(
     prompt: str,
@@ -25,22 +25,31 @@ def chat_completion_streaming(
 
     with ProfileBlock("LLMGenerationStreaming"):
         stream = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=_GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
             temperature=temperature,
             stream=True,
+            # See ragent_client.py's chat_completion_remote for why
+            # extra_body is used instead of a typed stream_options kwarg.
+            extra_body={"stream_options": {"include_usage": True}},
             **kwargs,
         )
-        
+
         for chunk in stream:
+            # Final usage-only chunk has an empty choices list — must not
+            # be yielded into the SSE stream, and [0] on it would raise.
+            if not chunk.choices:
+                usage = chunk.usage or (chunk.x_groq.usage if chunk.x_groq else None)
+                _record_usage(usage)
+                continue
             text = chunk.choices[0].delta.content
             if text:
                 accumulated.append(text)
                 if on_chunk:
                     on_chunk(text)
                 yield text
-                
+
     full_response = "".join(accumulated)
     MetricsRegistry.get().observe("llm_output_chars", len(full_response))
     return full_response

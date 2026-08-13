@@ -280,8 +280,8 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/RAGent.git
-cd RAGent
+git clone https://github.com/SukeshShetty1010/RAG_ent.git
+cd RAG_ent
 
 # Create and activate virtual environment
 python -m venv RAG_env

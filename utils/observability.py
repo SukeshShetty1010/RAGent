@@ -18,7 +18,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Any
+from typing import Callable, Dict, List, Any, Optional
 from contextlib import ContextDecorator
 
 
@@ -109,6 +109,17 @@ class MetricsRegistry:
             metric.values[label] = metric.values.get(label, 0) + 1
 
     # --------------------------------------------------------
+    # Point lookups
+    # --------------------------------------------------------
+    def last(self, name: str) -> float | None:
+        """Most recently observed value for a distribution metric, or None."""
+        with self._registry_lock:
+            dist = self._distributions.get(name)
+            if dist is None or not dist.values:
+                return None
+            return dist.values[-1]
+
+    # --------------------------------------------------------
     # Reporting
     # --------------------------------------------------------
     def generate_report(self) -> Dict[str, Any]:
@@ -136,6 +147,33 @@ class MetricsRegistry:
 
 
 # ============================================================
+# Optional external span hooks (e.g. a tracing backend)
+# ============================================================
+#
+# ProfileBlock stays free of any external dependency by construction —
+# a caller (e.g. utils/tracing.py) can register a pair of callables here
+# to mirror every ProfileBlock into an external span, without this
+# module importing anything beyond the standard library.
+_span_enter_hook: Optional[Callable[[str], Any]] = None
+_span_exit_hook: Optional[Callable[[str, Any], None]] = None
+
+
+def set_span_hooks(
+    enter_hook: Optional[Callable[[str], Any]],
+    exit_hook: Optional[Callable[[str, Any], None]],
+) -> None:
+    """Register enter/exit callables invoked around every ProfileBlock.
+
+    enter_hook(name) -> token (opaque, passed back to exit_hook).
+    exit_hook(name, token) -> None.
+    Pass (None, None) to clear.
+    """
+    global _span_enter_hook, _span_exit_hook
+    _span_enter_hook = enter_hook
+    _span_exit_hook = exit_hook
+
+
+# ============================================================
 # ProfileBlock (Nested Timing)
 # ============================================================
 
@@ -153,6 +191,7 @@ class ProfileBlock(ContextDecorator):
     def __init__(self, name: str) -> None:
         self.name = name
         self.start: float | None = None
+        self._span_token: Any = None
 
     def __enter__(self) -> "ProfileBlock":
         self.start = time.perf_counter()
@@ -163,6 +202,10 @@ class ProfileBlock(ContextDecorator):
             self._thread_local.stack = stack
 
         stack.append(self.name)
+
+        if _span_enter_hook is not None:
+            self._span_token = _span_enter_hook(self.name)
+
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -176,3 +219,6 @@ class ProfileBlock(ContextDecorator):
         )
 
         self._thread_local.stack.pop()
+
+        if _span_exit_hook is not None:
+            _span_exit_hook(self.name, self._span_token)
