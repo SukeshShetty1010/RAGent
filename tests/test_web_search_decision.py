@@ -72,3 +72,38 @@ def test_decide_web_search_fallback_on_failure(monkeypatch, broken_return):
 
     assert result.source == "deterministic_fallback"
     assert result.should_search_web is True  # matches old deterministic logic for QUALITY_WEAK
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad_confidence", [7.88, -2.0, 1.0001])
+def test_decide_web_search_clamps_out_of_range_confidence(monkeypatch, bad_confidence):
+    # Regression test: an unbounded cross-encoder-scale confidence leaking into
+    # the LLM's own JSON output used to raise a pydantic ValidationError here,
+    # silently degrading every call to the deterministic fallback since
+    # 2026-08-12. Out-of-range values must be clamped, not treated as a failure.
+    monkeypatch.setattr(
+        web_search_decision_mod,
+        "chat_completion_decision",
+        lambda *args, **kwargs: (
+            '{"should_search_web": true, "reason": "test", '
+            f'"confidence": {bad_confidence}}}'
+        ),
+    )
+
+    report = QualityReport(
+        status=QualityStatus.QUALITY_WEAK,
+        reason="Only noise content detected",
+        confidence_score=7.88,  # unbounded cross-encoder logit scale
+        has_temporal_signal=False,
+    )
+
+    result = decide_web_search(
+        query="anything",
+        task=TaskType.FACTUAL,
+        quality_report=report,
+        allow_web_fallback=True,
+        evidence_summary=[],
+    )
+
+    assert result.source == "llm"
+    assert 0.0 <= result.confidence <= 1.0

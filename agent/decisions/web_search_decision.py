@@ -44,7 +44,7 @@ Decide whether the system should attempt a WEB SEARCH to supplement local eviden
 Query: {query}
 Task type: {task}
 Local evidence quality: {quality_status} (reason: {quality_reason})
-Local evidence confidence score (0-1): {confidence_score}
+Local evidence relevance score (cross-encoder logit, unbounded — higher is better, roughly: <0 weak, >3 strong): {confidence_score}
 Query has temporal signal (asks about recent/dated info): {has_temporal_signal}
 Web fallback allowed by routing policy: {allow_web_fallback}
 Top local evidence (titles + relevance scores):
@@ -118,10 +118,18 @@ def decide_web_search(
 
         parsed = json.loads(raw)
 
+        raw_confidence = float(parsed.get("confidence", 0.5))
+        clamped_confidence = max(0.0, min(1.0, raw_confidence))
+        if clamped_confidence != raw_confidence:
+            logger.warning(
+                f"WebSearchDecision LLM returned out-of-range confidence "
+                f"{raw_confidence!r}, clamped to {clamped_confidence}"
+            )
+
         return WebSearchDecision(
             should_search_web=bool(parsed["should_search_web"]),
             reason=str(parsed.get("reason", ""))[:300],
-            confidence=float(parsed.get("confidence", 0.5)),
+            confidence=clamped_confidence,
             source="llm",
         )
 
