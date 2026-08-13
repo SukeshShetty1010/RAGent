@@ -34,9 +34,10 @@ README's claims; the README is treated as an assertion to be checked, not as evi
 | Refusal path | `CapabilityAssessor.assess()` returns `INSUFFICIENT` on empty evidence or `QUALITY_EMPTY`; engine hard-guards generation behind `if capability != AnswerCapability.INSUFFICIENT:` | `agent/capability/capability_assessor.py:58-59`; `engine/execution_engine.py:185` |
 | Citation attribution | Context blocks injected as `[Source: {title} | Type: {type}]`; every task template instructs "Cite sources"; frontend renders a "Sources (Evidence)" panel with `source_title` + snippet | `agent/prompt_templates.py:52-55, 105/121/138/152/167`; `frontend/src/app/page.tsx:257-267` |
 | Evaluation | **RAGAS + a 50-query golden set complete** (`evaluation/`): 20 factual, 10 comparison, 10 listicle, 10 deliberately unanswerable, drafted from live corpus payloads. Two full production-path runs completed (web-enabled and corpus-only). Refusal precision/recall, RAGAS context precision/faithfulness/answer relevancy (40/40 answerable queries, Modal-judged), and a 4-mode retrieval ablation (both precision@k and RAGAS context precision per mode) are all committed under `evaluation/results/`. See Phase 3 results below — the homegrown metrics in `tests/evaluation_metrics.py` remain as a separate, smaller diagnostic layer | `evaluation/build_golden_set.py`, `evaluation/run_eval.py`, `evaluation/refusal_metrics.py`, `evaluation/ragas_eval.py`, `evaluation/ablation.py`, `evaluation/modal_judge_llm.py`; `evaluation/results/*` |
-| Observability | Homegrown `MetricsRegistry` + `ProfileBlock` (thread-safe, nested wall-clock). **In-process only** — no export, no persistence, no token/cost capture | `utils/observability.py`; no `token`/`cost`/`usage` match in `engine/execution_engine.py` |
-| Containerization | Multi-stage Dockerfile (Node 20 static export → python:3.11-slim), `HEALTHCHECK`, `PORT`-aware CMD | `Dockerfile` |
-| Deployment | `render.yaml` now declares `healthCheckPath: /health` and `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` (`sync: false`). Render service reported **live but broken** *[candidate]* — consistent with defect #3 (Modal creds were never set). Real values still need to be set in the Render dashboard and the service redeployed; not yet re-verified live | `render.yaml`; `git remote -v` confirms public repo `SukeshShetty1010/RAG_ent` |
+| Observability | Homegrown `MetricsRegistry` + `ProfileBlock` (thread-safe, nested wall-clock), **plus (2026-08-14) real Groq token/cost capture and an optional Langfuse trace layer mirroring every `ProfileBlock` span** — hard no-op with zero import cost unless both `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` are set. Verified live in production with a screenshot of a full trace | `utils/observability.py`, `utils/tracing.py`, `llm/pricing.py` |
+| Containerization | Multi-stage Dockerfile (Node 20 static export → python:3.11-slim), `HEALTHCHECK`, `PORT`-aware CMD. **Verified booting locally under Render's 512MB cap (2026-08-14)** — 124-135MB resident | `Dockerfile` |
+| Deployment | **Live** (2026-08-14): `https://rag-ent.onrender.com`. `render.yaml` declares `healthCheckPath: /health`, Modal token keys, and (optional) Langfuse keys; all set in the Render dashboard, redeployed, and verified — `/health` 200, a real sourced query, and the GTA VI refusal path all confirmed against the live URL. Keepalive via `.github/workflows/render-keepalive.yml` (10-min `/ping`, no secrets needed) | `render.yaml`; `git remote -v` confirms public repo `SukeshShetty1010/RAG_ent` |
+| LLM fallback | **New (2026-08-14).** `llm/modal_llm.py` (Gemma 3 12B on Modal L40S) was deployed but had zero call sites anywhere else in the codebase. Now wired as a live fallback: `chat_completion_remote()`/`chat_completion_streaming()` catch `groq.RateLimitError` and reroute to it. `.github/workflows/modal-keepalive.yml` pings all three Modal services (embedder, reranker, Gemma) every 5 minutes to bound cold-start | `llm/ragent_client.py`, `llm/ragent_client_streaming.py` |
 | README | Value prop, two Mermaid diagrams, five metrics tables, quick-start, deployment notes. **No live demo link** (`YOUR_USERNAME` placeholder at line 278). **No "what I rejected" section** | `README.md` |
 
 ### Defects found during inspection (not rubric items, but blocking)
@@ -142,7 +143,31 @@ from "instructed" into "enforced" — a real differentiator.
 
 **0.3 Fix `KPI/Unified_KPI_Runner.py:16`** `parents[2]` → `parents[1]`. *(2 min)*
 
-### Phase 1 — Get it live (3–5 h) — ⚠️ 1.1/1.2 COMPLETE, 1.3/1.4 OUTSTANDING
+### Phase 1 — Get it live (3–5 h) — ✅ LANDED (2026-08-14)
+
+**Results.** Live at `https://rag-ent.onrender.com`. Docker verified locally under Render's
+512MB cap (`docker run -m 512m --env-file .env ragent`) before pushing — booted at 124-135MB
+resident, `/health`/`/ping` 200, a real sourced query, and the GTA VI refusal path all confirmed
+both inside the container and against the deployed URL. Two real, previously-undiagnosed bugs
+were found and fixed getting there, neither of which was on the original punch list:
+
+- **`.env` wrapped every value in literal quotes** (`QDRANT_URL="https://...io"`). `docker run
+  --env-file` doesn't strip quotes the way `python-dotenv` does, so the hostname arrived mangled
+  and DNS resolution failed inside the container — 100% reproducible, not the flaky Docker
+  networking it initially looked like. Fixed by stripping quotes from all 15 quoted `.env`
+  values. Local `python`/pytest runs were never affected (dotenv strips quotes fine); this was a
+  Docker-only landmine.
+- **Live secrets exposure, mid-session.** An overly broad `grep '="'  .env` (chasing the quote
+  bug above) printed every quoted secret in `.env` directly into the conversation transcript —
+  Groq, Tavily, Qdrant, RAWG, GameSpot, Twitch, HF, APITube, GNews, MediaStack, NewsAPI. Flagged
+  immediately; all keys rotated by the candidate. Fresh Modal credentials were minted the same
+  way (`modal token new`) and written to `.env`/Render/GitHub Actions secrets without ever being
+  printed. Worth recording as a lesson: broad greps over files known to hold secrets are exactly
+  the kind of action that needs a length/prefix-only check instead of a raw content dump.
+
+Keep-alive: `.github/workflows/render-keepalive.yml` (10-min `/ping`, no secrets needed) rather
+than a third-party cron-job.org account, per the candidate's preference for keeping everything in
+GitHub Actions alongside the existing `qdrant-keepalive.yml`.
 
 **1.1 Version control** *(~30 min)* — `git init` here, reconcile against the repo on the other
 machine, push to a public GitHub repo. Note: `git` is **not on PATH in this shell** and must be
@@ -168,7 +193,25 @@ point a free cron-job.org job at the already-built `/ping` endpoint (`api/main.p
 brutal first-request latency. Before putting this link in front of recruiters, measure it; if
 it exceeds ~15 s, add a warming call to the Modal services from the `/ping` handler.
 
-### Phase 2 — Real observability (4–6 h)
+### Phase 2 — Real observability (4–6 h) — ✅ LANDED (2026-08-14)
+
+**Results.** Groq's `usage` field is no longer discarded — `stream_options: {"include_usage":
+true}` (passed via `extra_body`, since the installed Groq SDK 0.37.1 has no typed param for it)
+puts prompt/completion tokens on the final streamed chunk, read in both `chat_completion_remote`
+and `chat_completion_streaming`, converted to USD via the new `llm/pricing.py`, and surfaced in
+both engines' `kpis` dict. A real request now reports e.g. `prompt_tokens: 1455,
+completion_tokens: 82, cost_usd: 7.931e-05`.
+
+Langfuse wired as an optional trace layer: `utils/observability.py` gained a generic span-hook
+mechanism (`set_span_hooks`) so `ProfileBlock` stays free of any external dependency by
+construction; `utils/tracing.py` is the only module that imports `langfuse`, and it's a hard
+no-op — no import attempted — unless both `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` are set. Verified
+end-to-end in production: a live query produced a `chat_request` trace with nested spans mirroring
+every `ProfileBlock` name 1:1 (`TaskRouting`, `Retrieval → LocalVectorSearch →
+EmbeddingGeneration/VectorQuery/CrossEncoderRerank`, `ContextAssembly → Ordering/Deduplication`,
+etc.) plus a separate `LLMGeneration` generation-type node showing real token usage (942→512,
+Σ1,454) and cost ($0.000088) — screenshot on file. `MetricsRegistry` was kept exactly as planned;
+Langfuse is a second layer, not a replacement.
 
 **2.1 Langfuse** *(~4 h)* — Free-tier Langfuse Cloud; `pip install langfuse` (thin SDK, safe
 for the 512 MB cap — **do not** add `torch`/`sentence-transformers`, per the deployment
@@ -424,23 +467,26 @@ the system it measures is wrong.
 | 3 | "Insufficient information" refusal | ✅ WORKING (one accepted miss) | Phase 3.5 (2026-08-12): refusal recall **0.0 → 0.9** corpus-only, `over_refusal_rate = 0.0` on all 40 answerable queries — see Phase 3.5 results and resolved row 21 below |
 | 4 | Source/citation attribution | ✅ ENFORCED (compliance not 100%) | Citation format specified + `validate_answer()` checks against context (0.2); live runs show the LLM doesn't always comply — validator correctly flags it |
 | 5 | RAGAS: context precision, faithfulness, answer relevancy | ✅ COMPLETE | 40/40 answerable queries scored (Modal-judged, 2026-08-09): context_precision 0.5722, faithfulness 0.9077, answer_relevancy 0.7306. Groq track partial (5/40, quota-exhausted) and preserved separately, not mixed |
-| 6 | Live public deployment | ❌ ABSENT | Fix Modal lazy-binding, deploy to Render, cron keep-alive (1.2–1.4) |
-| 7 | Containerized / one-command | ⚠️ UNVERIFIED | Actually build and boot the image locally (1.3) |
+| 6 | Live public deployment | ✅ RESOLVED (2026-08-14) | `https://rag-ent.onrender.com` — `/health` 200, a real sourced query, and the GTA VI refusal path all verified against the live URL |
+| 7 | Containerized / one-command | ✅ RESOLVED (2026-08-14) | `docker build -t ragent . && docker run -m 512m --env-file .env ragent` — booted at 124-135MB resident, well under the cap; `/health`/`/ping`/a real query/the refusal path all verified inside the container |
 | 8 | Observability: latency | ✅ PRESENT | `ProfileBlock` — keep |
-| 9 | Observability: token cost | ❌ ABSENT | Capture Groq `usage`, send to Langfuse (2.1) |
-| 10 | Observability: tracing layer | ❌ ABSENT | Langfuse spans over the 7 engine steps (2.1) |
+| 9 | Observability: token cost | ✅ RESOLVED (2026-08-14) | `llm/ragent_client.py`/`ragent_client_streaming.py` read `prompt_tokens`/`completion_tokens` off Groq's `usage` (via `extra_body`'s `stream_options`, since the installed SDK has no typed param) and `llm/pricing.py` estimates USD cost; surfaced in both engines' `kpis` |
+| 10 | Observability: tracing layer | ✅ RESOLVED (2026-08-14) | `utils/tracing.py` (Langfuse) mirrors every `ProfileBlock` span via a new hook in `utils/observability.py`; hard no-op with zero import cost unless both `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` are set. Verified live in production — screenshot showing a full `chat_request` trace with nested spans and a `LLMGeneration` node (942→512 tokens, $0.000088) |
 | 11 | README value prop | ✅ PRESENT | Already complete |
 | 12 | README architecture diagram | ✅ PRESENT | Already complete |
-| 13 | README metrics table | 🚨 NOT CREDIBLE | Delete fake safety table now (0.1); replace with real numbers (4.1) |
-| 14 | README live demo link | ❌ ABSENT | Replace `YOUR_USERNAME` placeholder after 1.1 |
+| 13 | README metrics table | 🚨 NOT CREDIBLE | Delete fake safety table now (0.1); replace with real numbers (4.1) — **still Phase 4's job, untouched this session by design** |
+| 14 | README live demo link | ✅ RESOLVED (2026-08-14) | `https://rag-ent.onrender.com`, verified live |
 | 15 | "Why this approach / what I rejected" | ❌ ABSENT | Write it from existing code comments + ablation (4.2) |
 | 16 | Depth signal, not checklist | ⚠️ AT RISK | Collapse 5 KPI tables → 1; purge "resume-grade" strings (4.1, 4.3) |
 | 17 | Version control / public repo | ✅ PRESENT | Public repo `SukeshShetty1010/RAG_ent`, history preserved via merge commit `a78e73f` |
-| 18 | *(defect)* Modal creds missing from Render | ⚠️ PARTIALLY RESOLVED | Lazy binding done; `render.yaml` now declares the token keys (1.2) — real values + redeploy still needed |
+| 18 | *(defect)* Modal creds missing from Render | ✅ RESOLVED (2026-08-14) | Fresh token pair minted (`modal token new`), set in Render dashboard, redeployed and verified live |
 | 19 | *(defect)* `healthCheckPath` missing | ✅ RESOLVED | Added to `render.yaml` (2026-08-09) |
 | 20 | *(defect)* `Unified_KPI_Runner` path bug | ✅ RESOLVED | `parents[1]`; confirmed clean run this session |
 | 21 | *(found by 3.3)* Honesty gate never returns `INSUFFICIENT` on off-corpus queries | ✅ RESOLVED (Phase 3.5, 2026-08-12) | Replaced the RRF-score threshold with a calibrated cross-encoder relevance floor + a new corpus entity-grounding check (`retriever/corpus_index.py`); re-gates on merged evidence after web search. Refusal recall 0.0 → 0.9, `over_refusal_rate = 0.0`. One accepted miss (`g047`) documented as a genuine single-signal limit, not hidden |
 | 22 | *(new, found while wiring the Modal RAGAS judge)* Production `llm/modal_llm.py` had a concurrency-corrupting event-loop race | ✅ RESOLVED | See defect #6. Real bug in the live generation service, not eval-only; fixed and redeployed (2026-08-09), validated via ephemeral concurrent smoke test before deploy |
+| 23 | *(new, found verifying Docker locally)* `.env` wrapped every value in literal quotes | ✅ RESOLVED (2026-08-14) | `docker run --env-file` doesn't strip quotes the way `python-dotenv` does — `QDRANT_URL` arrived as `"https://...io"` and DNS resolution failed inside the container. Local-only issue (never affected `python-dotenv`-based runs); fixed by stripping quotes from all 15 quoted `.env` values |
+| 24 | *(new)* `llm/modal_llm.py` (Gemma 3 12B) had zero call sites anywhere outside its own file | ✅ RESOLVED (2026-08-14) | Wired in as a live Groq-rate-limit fallback: `chat_completion_remote()`/`chat_completion_streaming()` catch `groq.RateLimitError` and reroute to `Gemma312BVLLM.generate()`. Verified with real generation, a simulated 429 in both blocking/streaming clients, and an organic trigger during this session's regression suite (Groq genuinely rate-limited from heavy testing). No token/cost tracking on this path — Modal bills by GPU-second, not per-token, and `generate()` has no usage payload; `llm_fallback_modal` counter tracks frequency instead. **Caveat found in the same organic trigger: cold-container fallback latency was ~9.2 minutes** (vLLM engine cold-boot on the L40S) vs. seconds once warm — a `.github/workflows/modal-keepalive.yml` now pings all three Modal services (embedder, reranker, Gemma) every 5 minutes to keep this bounded, but a live user hitting a genuinely cold fallback before the first ping lands would still see the multi-minute wait |
+| 25 | *(new, found during final KPI verification)* `WebSearchDecision` pydantic model still constrains `confidence <= 1` | ⚠️ FOUND, NOT FIXED (out of this session's scope) | Phase 3.5's calibrated `confidence_score` runs on an unbounded cross-encoder logit scale (e.g. 7.88), so every LLM-based web-search decision call has been failing pydantic validation and silently degrading to the deterministic fallback rule since 2026-08-12. Fails soft (no crash, no honesty-gate risk — matches the project's graceful-degradation rule), but the "bounded LLM decision" feature (`agent/decisions/web_search_decision.py`) has been effectively dead for two sessions. Flagged, not fixed — orthogonal to this session's deploy/observability scope |
 
 ---
 
@@ -448,11 +494,41 @@ the system it measures is wrong.
 
 - **Phase 0:** `python -m KPI.Unified_KPI_Runner` runs clean from the project root; grep the
   repo for `resume-grade` and `hallucinated_claims` returns nothing in reporting paths.
-- **Phase 1:** `docker build -t ragent . && docker run -p 10000:10000 --env-file .env ragent`;
-  `curl localhost:10000/health` → 200; a real query returns sources in the UI. Then the same
-  two checks against the public Render URL.
-- **Phase 2:** One query produces one Langfuse trace with 7 nested spans and non-zero token
-  counts.
+- **Phase 1:** ✅ Done, 2026-08-14. `docker build -t ragent . && docker run -m 512m --env-file
+  .env ragent` — booted at 124-135MB resident; `/health`/`/ping` → 200; a real query returned
+  sources; the GTA VI refusal path returned `INSUFFICIENT`. All four checks repeated against
+  `https://rag-ent.onrender.com` and passed.
+- **Phase 2:** ✅ Done, 2026-08-14. One live query produced one Langfuse trace with nested spans
+  matching every `ProfileBlock` name 1:1, plus a `LLMGeneration` node with non-zero token counts
+  (942→512) and cost ($0.000088) — screenshot on file. `python -m pytest tests/ -m unit -q` — 80
+  hermetic tests pass, including the new `tests/test_tracing.py` (12 tests: hard no-op without
+  keys, `estimate_cost` math, the generic `ProfileBlock` span-hook mechanism).
+- **Cost/latency artifacts (Step E of the 2026-08-14 session):** `python -m evaluation.run_eval`
+  re-run against the token/cost-instrumented engine (50/50 scored, 0 errors) →
+  `evaluation/results/runs_2026-08-14_default.jsonl`; scored by the new
+  `evaluation/cost_latency_metrics.py` → `evaluation/results/cost_latency_2026-08-14_default.json`
+  — p50 727ms / p95 10.8s / p99 15.1s engine latency, mean cost $0.0000492/query ($0.000738 total
+  for the run), stage-level latency attribution (`CrossEncoderRerank` and `EmbeddingGeneration`
+  dominate the retrieval side). Both committed for Phase 4 to cite.
+- **Modal Gemma fallback (new, 2026-08-14, not in the original plan):** `llm/modal_llm.py`
+  (deployed, previously zero call sites) wired in as a live Groq-`RateLimitError` fallback in both
+  `chat_completion_remote()` and `chat_completion_streaming()`. Verified with real Modal
+  generation, a simulated 429 in both clients, and — separately — an organic trigger during this
+  session's `tests/regression_suite.py` run (Groq genuinely rate-limited from the session's
+  volume of testing): fallback correctly fired and returned a coherent answer, but took **~9.2
+  minutes** on a cold Modal container. `.github/workflows/modal-keepalive.yml` now pings all
+  three Modal services every 5 minutes to bound this; the embedder/reranker pings are cheap
+  (CPU-only), the Gemma ping bills real GPU-second cost continuously for what's meant to be a
+  rare path — an explicit, accepted tradeoff, not an oversight.
+- **Final regression pass (2026-08-14, after all of the above):**
+  `python -m pytest tests/ -m unit -q` — 80/80 pass. `python -m KPI.Unified_KPI_Runner` — exit 0,
+  full dashboard, regression guard 3/3, latency profile reflects the new `ModalLLMFallback` span
+  from the organic trigger above. `python tests/regression_suite.py` (via `PYTHONPATH=.`) — 3/3
+  pass, "ALL REGRESSIONS PASSED — SYSTEM STABLE". One new finding surfaced by this pass, not
+  fixed (see checklist row 25): `WebSearchDecision`'s pydantic model still constrains
+  `confidence <= 1`, but Phase 3.5's calibrated confidence score is unbounded — every LLM-based
+  web-search decision has been silently failing validation and degrading to the deterministic
+  rule since 2026-08-12. Fails soft, no honesty-gate impact, out of this session's scope.
 - **Phase 3:** ✅ Done, 2026-08-09. `evaluation/results/runs_2026-08-09_default.jsonl` and
   `_corpusonly.jsonl` (50 records each), `refusal_2026-08-09_default.json` /
   `_corpusonly.json`, `ablation_2026-08-09.json`, and `ragas_2026-08-09_default_modal.json`

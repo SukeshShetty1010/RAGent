@@ -229,13 +229,13 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 
 ### LLM Infrastructure
 
-LLM serving uses **Groq** (`llama-3.1-8b-instant`) for ultra-low latency streaming by default, with an optional **serverless via Modal** deployment using **Gemma 3 12B** (`google/gemma-3-12b-it`) on L40S. GPU-accelerated embeddings use **intfloat/e5-base-v2** on T4. The lazy binding pattern ensures environment variables are loaded before client initialization, enabling seamless CI/Docker/Render deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
+LLM serving uses **Groq** (`llama-3.1-8b-instant`) as the primary generator for ultra-low latency streaming, with **Gemma 3 12B** (`google/gemma-3-12b-it`) on Modal L40S wired in as a live fallback — every generation call catches `groq.RateLimitError` and, on a 429, reroutes to the Modal-hosted vLLM engine instead of failing the request. GPU-accelerated embeddings and cross-encoder reranking also run on Modal (T4 and CPU respectively) on every request, not just as a fallback. The lazy binding pattern ensures environment variables are loaded before client initialization, enabling seamless CI/Docker/Render deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Streaming LLM Client | `llm/ragent_client_streaming.py` | `chat_completion_streaming()` via Groq API |
-| Serverless GPU Deployment | `llm/modal_llm.py` | `Gemma312BVLLM.generate()` with `google/gemma-3-12b-it` on L40S GPU via vLLM |
-| Lazy Client Binding | `llm/ragent_client.py` | `_get_groq_client()` for CI/Docker compatibility |
+| Streaming LLM Client | `llm/ragent_client_streaming.py` | `chat_completion_streaming()` via Groq API, falls back to Modal on `RateLimitError` |
+| Rate-Limit Fallback to Modal | `llm/ragent_client.py` | `_get_modal_llm()`, `_generate_via_modal_fallback()` — `Gemma312BVLLM.generate()` on L40S GPU via vLLM |
+| Lazy Client Binding | `llm/ragent_client.py` | `_get_groq_client()`, `_get_modal_llm()` for CI/Docker compatibility |
 | GPU Embedding Infrastructure | `llm/modal_embed.py` | `E5Embedder` with `intfloat/e5-base-v2` on T4 GPU |
 
 
@@ -273,7 +273,7 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 
 - Python 3.10+
 - [Groq](https://groq.com) account for default ultra-fast inference
-- [Modal](https://modal.com) account (serverless GPU for embeddings & optional LLM self-hosting)
+- [Modal](https://modal.com) account (serverless GPU for embeddings, reranking, and the Gemma 3 12B rate-limit fallback)
 - [Qdrant Cloud](https://cloud.qdrant.io) cluster (free tier works)
 - [HuggingFace](https://huggingface.co) account with access to `google/gemma-3-12b-it` (if using Modal LLM)
 - API keys: RAWG, IGDB (Twitch OAuth), GameSpot, Tavily, Groq
@@ -374,7 +374,7 @@ docker run -p 10000:10000 --env-file .env ragent
 | 7 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
 | 8 | `ContextAssembler` | Deduplicates, orders by entity balance |
 | 9 | `PromptManager` | Applies `comparison_verbose` template |
-| 10 | `RageEngine` | Generates via Modal LLM (`Gemma 3 12B`) |
+| 10 | `RageEngine` | Generates via Groq (`llama-3.1-8b-instant`); falls back to Modal (`Gemma 3 12B`) on a Groq rate-limit |
 | 11 | `OutputValidator` | Checks balanced Markdown + required PARTIAL section, annotates result (fail-soft) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.
