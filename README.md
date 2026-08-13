@@ -7,6 +7,8 @@
 [![Modal](https://img.shields.io/badge/LLM_Infra-Modal-orange.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)]()
 
+**🔗 Live demo:** [rag-ent.onrender.com](https://rag-ent.onrender.com) — try a real query, then try `Grand Theft Auto VI` to see the honesty gate refuse instead of hallucinate (Render free tier — first request after idle may take a few seconds to cold-start).
+
 ---
 
 ## 🎯 What is RAGent?
