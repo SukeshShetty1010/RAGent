@@ -486,7 +486,8 @@ the system it measures is wrong.
 | 22 | *(new, found while wiring the Modal RAGAS judge)* Production `llm/modal_llm.py` had a concurrency-corrupting event-loop race | ✅ RESOLVED | See defect #6. Real bug in the live generation service, not eval-only; fixed and redeployed (2026-08-09), validated via ephemeral concurrent smoke test before deploy |
 | 23 | *(new, found verifying Docker locally)* `.env` wrapped every value in literal quotes | ✅ RESOLVED (2026-08-14) | `docker run --env-file` doesn't strip quotes the way `python-dotenv` does — `QDRANT_URL` arrived as `"https://...io"` and DNS resolution failed inside the container. Local-only issue (never affected `python-dotenv`-based runs); fixed by stripping quotes from all 15 quoted `.env` values |
 | 24 | *(new)* `llm/modal_llm.py` (Gemma 3 12B) had zero call sites anywhere outside its own file | ✅ RESOLVED (2026-08-14) | Wired in as a live Groq-rate-limit fallback: `chat_completion_remote()`/`chat_completion_streaming()` catch `groq.RateLimitError` and reroute to `Gemma312BVLLM.generate()`. Verified with real generation, a simulated 429 in both blocking/streaming clients, and an organic trigger during this session's regression suite (Groq genuinely rate-limited from heavy testing). No token/cost tracking on this path — Modal bills by GPU-second, not per-token, and `generate()` has no usage payload; `llm_fallback_modal` counter tracks frequency instead. **Caveat found in the same organic trigger: cold-container fallback latency was ~9.2 minutes** (vLLM engine cold-boot on the L40S) vs. seconds once warm — a `.github/workflows/modal-keepalive.yml` now pings all three Modal services (embedder, reranker, Gemma) every 5 minutes to keep this bounded, but a live user hitting a genuinely cold fallback before the first ping lands would still see the multi-minute wait |
-| 25 | *(new, found during final KPI verification)* `WebSearchDecision` pydantic model still constrains `confidence <= 1` | ⚠️ FOUND, NOT FIXED (out of this session's scope) | Phase 3.5's calibrated `confidence_score` runs on an unbounded cross-encoder logit scale (e.g. 7.88), so every LLM-based web-search decision call has been failing pydantic validation and silently degrading to the deterministic fallback rule since 2026-08-12. Fails soft (no crash, no honesty-gate risk — matches the project's graceful-degradation rule), but the "bounded LLM decision" feature (`agent/decisions/web_search_decision.py`) has been effectively dead for two sessions. Flagged, not fixed — orthogonal to this session's deploy/observability scope |
+| 25 | *(found during final KPI verification)* `WebSearchDecision` pydantic model constrained `confidence <= 1` | ✅ RESOLVED (2026-08-14) | Root cause: the prompt mislabeled `quality_report.confidence_score` — an unbounded cross-encoder logit (e.g. 7.88) — as `(0-1)`, leading the LLM to occasionally echo an out-of-range value into its own `confidence` field and fail `Field(ge=0, le=1)` on every call, silently degrading to the deterministic fallback since 2026-08-12. Fixed the prompt's scale description and clamp the LLM's reported confidence into `[0,1]` instead of hard-failing. New regression test (`tests/test_web_search_decision.py`, 3 out-of-range cases: 7.88, -2.0, 1.0001) confirms `source="llm"` with a clamped value instead of a fallback. 83/83 unit tests pass |
+| 26 | Keepalive coverage (Render / Modal / Qdrant) | ✅ VERIFIED (2026-08-14) | All three `.github/workflows/*-keepalive.yml` manually triggered and confirmed green. `qdrant-keepalive.yml` had been failing every run (curl exit 3, malformed URL) — its `QDRANT_URL`/`QDRANT_API_KEY` GitHub secrets were last set 2026-08-09, predating both this session's key rotation and the `.env` quote-strip fix, so they still held stale quote-wrapped values. Resynced from current `.env`; re-run passed |
 
 ---
 
@@ -524,11 +525,15 @@ the system it measures is wrong.
   `python -m pytest tests/ -m unit -q` — 80/80 pass. `python -m KPI.Unified_KPI_Runner` — exit 0,
   full dashboard, regression guard 3/3, latency profile reflects the new `ModalLLMFallback` span
   from the organic trigger above. `python tests/regression_suite.py` (via `PYTHONPATH=.`) — 3/3
-  pass, "ALL REGRESSIONS PASSED — SYSTEM STABLE". One new finding surfaced by this pass, not
-  fixed (see checklist row 25): `WebSearchDecision`'s pydantic model still constrains
-  `confidence <= 1`, but Phase 3.5's calibrated confidence score is unbounded — every LLM-based
-  web-search decision has been silently failing validation and degrading to the deterministic
-  rule since 2026-08-12. Fails soft, no honesty-gate impact, out of this session's scope.
+  pass, "ALL REGRESSIONS PASSED — SYSTEM STABLE". One new finding surfaced by this pass, fixed in
+  a follow-up pass the same day (see checklist row 25): `WebSearchDecision`'s pydantic model
+  constrained `confidence <= 1` while Phase 3.5's confidence score is unbounded — fixed by
+  correcting the misleading prompt label and clamping the LLM's confidence into `[0,1]`.
+- **Keepalive verification + pydantic fix (2026-08-14, follow-up pass):** all three keepalive
+  workflows manually triggered and confirmed green (Render, Modal — including a real cold-boot of
+  all 3 services, Qdrant after resyncing its stale GitHub secrets). `WebSearchDecision`'s
+  `confidence` validation bug fixed and regression-tested (see checklist row 25). Full unit suite:
+  83/83 pass.
 - **Phase 3:** ✅ Done, 2026-08-09. `evaluation/results/runs_2026-08-09_default.jsonl` and
   `_corpusonly.jsonl` (50 records each), `refusal_2026-08-09_default.json` /
   `_corpusonly.json`, `ablation_2026-08-09.json`, and `ragas_2026-08-09_default_modal.json`
