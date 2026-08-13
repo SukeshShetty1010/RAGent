@@ -1,0 +1,53 @@
+name: Modal keepalive
+
+# Keeps all three Modal services warm (scaledown_window=300s on each):
+# - editorial-embedding-service / E5Embedder      (CPU, every request)
+# - cross-encoder-rerank-service / CrossEncoderReranker (CPU, every request)
+# - gemma-3-12b-it-vllm / Gemma312BVLLM           (L40S GPU, Groq-rate-limit fallback)
+#
+# Cost note: the embedder/reranker are cheap to keep warm (CPU-only).
+# The Gemma service is GPU-backed — pinging it on the same 5-minute
+# schedule bills real GPU-second cost continuously even though it's a
+# rare fallback path, not the primary generator. Kept warm anyway per
+# explicit decision (2026-08-14) since the fallback matters more than
+# the extra cost here. Revisit this tradeoff if idle Modal spend grows.
+#
+# Note: GitHub disables scheduled workflows after 60 days with no
+# commits to the repo — a push resets that clock.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal client
+        run: pip install modal
+
+      - name: Warm embedder, reranker, and Gemma LLM
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          python - <<'PY'
+          import modal
+
+          E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
+          E5Embedder().embed_texts.remote(["keepalive ping"])
+          print("embedder warmed")
+
+          CrossEncoderReranker = modal.Cls.from_name("cross-encoder-rerank-service", "CrossEncoderReranker")
+          CrossEncoderReranker().rerank.remote("ping", ["ping"])
+          print("reranker warmed")
+
+          Gemma312BVLLM = modal.Cls.from_name("gemma-3-12b-it-vllm", "Gemma312BVLLM")
+          list(Gemma312BVLLM().generate.remote_gen("ping", max_new_tokens=1))
+          print("gemma warmed")
+          PY
