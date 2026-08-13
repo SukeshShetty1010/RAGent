@@ -1,0 +1,29 @@
+name: Render keepalive
+
+# Render's free tier spins the web service down after ~15 min idle,
+# so the next real request eats a cold-start. This pings the public
+# /ping endpoint (api/main.py) every 10 minutes to keep it warm.
+# No secrets needed — /ping is unauthenticated by design.
+#
+# Note: GitHub disables scheduled workflows after 60 days with no
+# commits to the repo — a push resets that clock.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping RAGent /ping endpoint
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 30 \
+            "https://rag-ent.onrender.com/ping")
+          echo "RAGent responded with HTTP $status"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Render keepalive ping failed (HTTP $status)"
+            exit 1
+          fi
