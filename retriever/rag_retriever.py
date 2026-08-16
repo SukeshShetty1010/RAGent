@@ -54,6 +54,16 @@ bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 # different reranker without re-running that calibration.
 reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2")
 
+# ONNX Runtime's per-call memory scales with rerank() batch_size, not just
+# candidate count — confirmed live: 20 real-length (~500-token) candidates
+# at the fastembed default batch_size=64 (i.e. one batch) peaked around
+# 900MB RSS and OOM-killed the Render container on the very first live
+# query. batch_size=1 processes candidates sequentially instead, measured
+# flat at ~305MB RSS (reranker + one full rerank call) with no measurable
+# latency cost on this CPU-bound workload. Do not raise this without
+# re-measuring peak RSS under Render's 512MB cap.
+_RERANK_BATCH_SIZE = 1
+
 # ---------------------------------------------------------------------
 # RAG Retriever
 # ---------------------------------------------------------------------
@@ -262,7 +272,7 @@ class RAGRetriever:
             return []
 
         try:
-            return [float(s) for s in reranker.rerank(query, contents)]
+            return [float(s) for s in reranker.rerank(query, contents, batch_size=_RERANK_BATCH_SIZE)]
         except Exception as exc:
             logger.warning(
                 f"Cross-encoder rerank unavailable (fail-soft): {exc}"
@@ -292,7 +302,7 @@ class RAGRetriever:
 
         try:
             contents = [c.get("content") or "" for c in candidates]
-            rerank_scores = list(reranker.rerank(query, contents))
+            rerank_scores = list(reranker.rerank(query, contents, batch_size=_RERANK_BATCH_SIZE))
 
             for c, s in zip(candidates, rerank_scores):
                 c["rerank_score"] = float(s)
