@@ -1,71 +1,49 @@
 """
 tests/test_llm_config.py
 
-Unit tests for LLM configuration consistency.
-These tests are fully local — no Modal calls, no GPU required.
+Unit tests for LLM configuration consistency (Gemini primary, Groq
+fallback). Fully local — no network calls, no API keys required.
 """
 
-import importlib
-import types
+import pathlib
 import pytest
 
 pytestmark = pytest.mark.unit
 
-
-def _load_modal_llm_constants() -> dict:
-    """
-    Extract constants from modal_llm.py without executing Modal decorators.
-    We read the module source and exec only the top-level constant assignments.
-    """
-    import ast, pathlib
-
-    src = pathlib.Path("llm/modal_llm.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-
-    constants: dict = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
-                    constants[target.id] = node.value.value
-    return constants
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
-def test_model_id_is_gemma3():
-    """modal_llm.py must target the Gemma 3 12B model."""
-    constants = _load_modal_llm_constants()
-    assert "MODEL_ID" in constants, "MODEL_ID constant missing from modal_llm.py"
-    assert constants["MODEL_ID"] == "google/gemma-3-12b-it", (
-        f"Expected MODEL_ID='google/gemma-3-12b-it', got {constants['MODEL_ID']!r}"
-    )
+def test_gemini_model_default():
+    from llm.gemini_client import GEMINI_MODEL
+    assert GEMINI_MODEL == "gemini-flash-latest"
 
 
-def test_app_name_in_modal_llm():
-    """The Modal App name in modal_llm.py must be the Gemma 3 app slug."""
-    import pathlib, re
-    src = pathlib.Path("llm/modal_llm.py").read_text(encoding="utf-8")
-    match = re.search(r'modal\.App\("([^"]+)"\)', src)
-    assert match, "Could not find modal.App(...) call in modal_llm.py"
-    assert match.group(1) == "gemma-3-12b-it-vllm", (
-        f"Expected app name 'gemma-3-12b-it-vllm', got {match.group(1)!r}"
-    )
+def test_gemini_embed_model_and_dim():
+    from llm.gemini_client import GEMINI_EMBED_MODEL, GEMINI_EMBED_DIM
+    assert GEMINI_EMBED_MODEL == "gemini-embedding-001"
+    assert GEMINI_EMBED_DIM == 768
 
 
-def test_class_name_in_modal_llm():
-    """The inference class in modal_llm.py must be named Gemma312BVLLM."""
-    import pathlib, re
-    src = pathlib.Path("llm/modal_llm.py").read_text(encoding="utf-8")
-    assert "class Gemma312BVLLM" in src, (
-        "Expected class name 'Gemma312BVLLM' not found in modal_llm.py"
-    )
+def test_pricing_has_gemini_row():
+    from llm.pricing import MODEL_PRICING
+    assert "gemini-flash-latest" in MODEL_PRICING
+    assert MODEL_PRICING["gemini-flash-latest"] == (0.0, 0.0)
 
 
+def test_requirements_has_openai_no_modal():
+    src = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert "openai" in src
+    assert "\nmodal" not in src and not src.startswith("modal")
 
 
-def test_fast_boot_is_bool():
-    """FAST_BOOT constant must remain a boolean."""
-    constants = _load_modal_llm_constants()
-    assert "FAST_BOOT" in constants, "FAST_BOOT constant missing from modal_llm.py"
-    assert isinstance(constants["FAST_BOOT"], bool), (
-        f"FAST_BOOT must be a bool, got {type(constants['FAST_BOOT'])}"
-    )
+def test_modal_service_files_removed():
+    for path in ("llm/modal_llm.py", "llm/modal_embed.py", "llm/modal_rerank.py"):
+        assert not (REPO_ROOT / path).exists(), f"{path} should have been deleted"
+
+
+def test_reranker_model_matches_calibration():
+    """retriever/quality_gate.py's REFUSE_FLOOR/WEAK_FLOOR are calibrated on
+    Xenova/ms-marco-MiniLM-L-6-v2's raw logits — the in-process reranker
+    must use that exact model, not a substitute."""
+    from retriever.rag_retriever import reranker
+    assert reranker.model_name == "Xenova/ms-marco-MiniLM-L-6-v2"

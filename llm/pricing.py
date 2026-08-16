@@ -17,6 +17,8 @@ from __future__ import annotations
 # pipeline, not for financial reconciliation.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "llama-3.1-8b-instant": (0.05, 0.08),
+    # Deliberate 0.0 — Gemini free tier, not a missing-model default.
+    "gemini-flash-latest": (0.0, 0.0),
 }
 
 

@@ -89,6 +89,135 @@ const markdownComponents = {
   ),
 };
 
+/* ── Usage Dashboard ──────────────────────────────────── */
+
+type ProviderUsage = {
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  fallback_events: number;
+  limits?: { rpd?: number; rpm?: number };
+  percent_of_rpd?: number | null;
+};
+
+type SurfaceUsage = {
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+};
+
+type UsageData = {
+  date: string;
+  degraded: boolean;
+  by_provider: Record<string, ProviderUsage>;
+  by_surface: Record<string, SurfaceUsage>;
+};
+
+function UsageCard({ name, usage }: { name: string; usage?: ProviderUsage }) {
+  const pct = usage?.percent_of_rpd ?? 0;
+  const barColor = pct >= 90 ? 'bg-red-500' : pct >= 60 ? 'bg-amber-500' : 'bg-cyan-500';
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4">
+      <p className="text-sm font-semibold text-slate-200 uppercase tracking-wider">{name}</p>
+      <p className="text-2xl font-bold text-slate-100 mt-1">
+        {usage?.requests ?? 0}
+        {usage?.limits?.rpd ? (
+          <span className="text-sm font-normal text-slate-500"> / {usage.limits.rpd} req/day</span>
+        ) : null}
+      </p>
+      {usage?.limits?.rpd ? (
+        <div className="w-full h-2 bg-slate-800 rounded-full mt-2 overflow-hidden">
+          <div
+            className={`h-full ${barColor} transition-all`}
+            style={{ width: `${Math.min(100, pct)}%` }}
+          />
+        </div>
+      ) : null}
+      <p className="text-xs text-slate-500 mt-2">
+        {usage?.fallback_events ?? 0} fallback event(s)
+      </p>
+    </div>
+  );
+}
+
+function UsageDashboard({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<UsageData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+    fetch(`${apiUrl}/api/usage`)
+      .then((res) => res.json())
+      .then((json) => setData(json))
+      .catch(() => setError('Could not load usage data.'));
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+      <div className="bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-slate-100">Usage Today{data ? ` — ${data.date}` : ''}</h2>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition-colors"
+          >
+            Close
+          </button>
+        </div>
+
+        {error && <p className="text-red-400 text-sm">{error}</p>}
+        {!data && !error && <p className="text-slate-500 text-sm">Loading...</p>}
+
+        {data && (
+          <>
+            {data.degraded && (
+              <p className="text-amber-400 text-xs mb-3">
+                Degraded: showing in-process counts only (Qdrant unreachable).
+              </p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <UsageCard name="Gemini" usage={data.by_provider?.gemini} />
+              <UsageCard name="Groq" usage={data.by_provider?.groq} />
+            </div>
+
+            {Object.keys(data.by_surface || {}).length > 0 && (
+              <div className="mt-6">
+                <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">By surface</p>
+                <table className="w-full text-sm text-left">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-slate-800">
+                      <th className="py-1 font-medium">Surface</th>
+                      <th className="py-1 font-medium text-right">Requests</th>
+                      <th className="py-1 font-medium text-right">Prompt tok</th>
+                      <th className="py-1 font-medium text-right">Completion tok</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(data.by_surface).map(([surface, s]) => (
+                      <tr key={surface} className="border-b border-slate-900 text-slate-300">
+                        <td className="py-1.5">{surface}</td>
+                        <td className="py-1.5 text-right">{s.requests}</td>
+                        <td className="py-1.5 text-right">{s.prompt_tokens}</td>
+                        <td className="py-1.5 text-right">{s.completion_tokens}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ── Main Chat App ────────────────────────────────────── */
 
 export default function ChatApp() {
@@ -96,6 +225,7 @@ export default function ChatApp() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
+  const [showUsage, setShowUsage] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -191,12 +321,22 @@ export default function ChatApp() {
       {/* Main Chat Area — now max-w-7xl for much wider layout */}
       <div className="flex-1 flex flex-col max-w-7xl w-full mx-auto h-full px-6 md:px-10 py-4">
 
-        <header className="mb-6 py-4 border-b border-slate-800/50">
-          <h1 className="text-4xl font-extrabold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent tracking-tight">
-            RAGent AI
-          </h1>
-          <p className="text-slate-400 text-base mt-1">High-performance Retrieval-Augmented Generation</p>
+        <header className="mb-6 py-4 border-b border-slate-800/50 flex items-start justify-between">
+          <div>
+            <h1 className="text-4xl font-extrabold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent tracking-tight">
+              RAGent AI
+            </h1>
+            <p className="text-slate-400 text-base mt-1">High-performance Retrieval-Augmented Generation</p>
+          </div>
+          <button
+            onClick={() => setShowUsage(true)}
+            className="px-4 py-2 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-sm font-medium transition-colors mt-2"
+          >
+            Usage
+          </button>
         </header>
+
+        {showUsage && <UsageDashboard onClose={() => setShowUsage(false)} />}
 
         <div className="flex-1 overflow-y-auto space-y-6 pb-32" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           {messages.length === 0 && !isWaitingForFirstToken && (

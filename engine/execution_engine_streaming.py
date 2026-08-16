@@ -319,7 +319,7 @@ class StreamingRageEngine:
 
                     except ImportError:
                         # Fall back to blocking generation
-                        from llm.ragent_client import chat_completion_remote
+                        from llm.ragent_client import chat_completion_remote, last_used_model
                         
                         llm_start = time.perf_counter()
                         response = chat_completion_remote(prompt)
@@ -343,8 +343,10 @@ class StreamingRageEngine:
                     llm_latency_ms = (time.perf_counter() - step_start) * 1000.0
 
                     if llm_ran:
+                        from llm.ragent_client import last_used_model
+
                         tracing.record_generation(
-                            model="llama-3.1-8b-instant",
+                            model=last_used_model(),
                             prompt=prompt,
                             output=final_answer,
                             prompt_tokens=int(MetricsRegistry.get().last("llm_prompt_tokens") or 0),

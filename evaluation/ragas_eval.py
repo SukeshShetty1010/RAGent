@@ -13,7 +13,7 @@ tool (see requirements-dev.txt).
 - Judge: Groq llama-3.3-70b-versatile via langchain-groq, deliberately
   NOT the llama-3.1-8b-instant generator — a model shouldn't grade its
   own output, and 8B is a weak judge.
-- Embeddings: evaluation/ragas_embeddings.py's ModalE5Embeddings, so
+- Embeddings: evaluation/ragas_embeddings.py's GeminiEmbeddings, so
   no torch/sentence-transformers lands locally.
 - Rate limits: RunConfig(max_workers=2), scored in batches, each batch
   checkpointed to evaluation/results/.ragas_checkpoint_<date>.jsonl —
@@ -51,7 +51,7 @@ from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
 from ragas.metrics import context_precision, faithfulness, answer_relevancy
 from langchain_groq import ChatGroq
 
-from evaluation.ragas_embeddings import ModalE5Embeddings
+from evaluation.ragas_embeddings import GeminiEmbeddings
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 GOLDEN_SET_PATH = Path(__file__).resolve().parent / "data" / "golden_set.jsonl"
@@ -63,10 +63,10 @@ def _build_judge(backend: str):
     """Returns (llm, judge_model_id). Independent judge backends never
     share a checkpoint/tag -- see _run_tag's backend suffix -- so a
     single results file is never scored by two different judges."""
-    if backend == "modal":
-        from evaluation.modal_judge_llm import ModalGemmaLLM
+    if backend == "gemini":
+        from evaluation.gemini_judge_llm import build_gemini_judge, JUDGE_MODEL_ID
 
-        return ModalGemmaLLM(), "modal:google/gemma-3-12b-it"
+        return build_gemini_judge(), JUDGE_MODEL_ID
     return (
         LangchainLLMWrapper(
             ChatGroq(
@@ -145,7 +145,7 @@ def _score_batch(
     batch: List[Dict[str, Any]],
     ref_map: Dict[str, Dict[str, Any]],
     llm: LangchainLLMWrapper,
-    embeddings: ModalE5Embeddings,
+    embeddings: GeminiEmbeddings,
     run_config: RunConfig,
 ) -> List[Dict[str, Any]]:
     samples = [
@@ -210,10 +210,10 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument(
         "--judge-backend",
-        choices=["groq", "modal"],
+        choices=["groq", "gemini"],
         default="groq",
         help="groq: llama/qwen via Groq API (daily token quota). "
-        "modal: gemma-3-12b-it on the existing Modal deployment (GPU-seconds, no daily cap).",
+        "gemini: gemini-flash-latest via Gemini's OpenAI-compat endpoint (free tier).",
     )
     args = parser.parse_args()
 
@@ -252,17 +252,19 @@ def main() -> None:
     llm, judge_model_id = _build_judge(args.judge_backend)
 
     if pending:
-        embeddings = ModalE5Embeddings()
-        # modal backend: llm/modal_llm.py's generate() drives a single
-        # shared event loop per warm container (self._loop.run_until_complete);
-        # concurrent judge calls race on that loop and raise "event loop is
-        # already running". Serialize to avoid it -- see modal_judge_llm.py.
-        run_config = RunConfig(max_workers=1 if args.judge_backend == "modal" else 2)
+        from utils.usage_counter import UsageCounter
+
+        embeddings = GeminiEmbeddings()
+        run_config = RunConfig(max_workers=2)
 
         for start in range(0, len(pending), args.batch_size):
             batch = pending[start : start + args.batch_size]
             print(f"Scoring batch {start}-{start + len(batch)} / {len(pending)}...")
             rows = _score_batch(batch, ref_map, llm, embeddings, run_config)
+            # Approximate: 3 metrics scored per record, each a judge call.
+            UsageCounter.get().record(
+                args.judge_backend, "ragas_judge", count=len(batch) * 3
+            )
             good_rows, failed_rows = _split_scored_and_failed(rows)
             _append_checkpoint(checkpoint_path, good_rows)
             for row in good_rows:
@@ -283,7 +285,7 @@ def main() -> None:
 
     output = {
         "judge_model": judge_model_id,
-        "embeddings_model": "Modal E5Embedder (intfloat/e5-base-v2)",
+        "embeddings_model": "Gemini gemini-embedding-001 (768-dim)",
         "runs_source": str(runs_path),
         "scored_count": len(all_scored),
         "excluded_unanswerable_count": sum(
@@ -302,6 +304,9 @@ def main() -> None:
 
     print(f"\nWrote {len(all_scored)} scored records -> {out_path}")
     print(json.dumps(aggregates, indent=2))
+
+    from utils.usage_counter import UsageCounter
+    UsageCounter.get().flush()
 
 
 if __name__ == "__main__":

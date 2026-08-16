@@ -3,13 +3,13 @@
 # ============================================================
 # Core: Python 3.11+
 # Vector DB: Qdrant Cloud
-# LLM: Groq (Llama 3.1 8B Instant)
+# LLM: Gemini 2.5 Flash (primary) + Groq Llama 3.1 8B Instant (fallback)
 # Backend: FastAPI + SSE
 # ============================================================
 
 # ---------- Vector Database ----------
 qdrant-client>=1.17.0
-fastembed                       # BM25 sparse vector generation (CPU)
+fastembed                       # BM25 sparse vector generation + in-process cross-encoder reranking (CPU, ONNX)
 
 # ---------- Caching ----------
 diskcache
@@ -20,8 +20,9 @@ python-dotenv
 
 # ---------- NLP / Text Processing ----------
 transformers                    # Tokenizers for chunking
-# sentence-transformers/torch removed — cross-encoder reranking now runs
-# on Modal (llm/modal_rerank.py), keeping them off Render's 512MB process.
+# sentence-transformers/torch intentionally absent — cross-encoder
+# reranking runs via fastembed's ONNX TextCrossEncoder instead, to stay
+# under Render's 512MB free-tier RAM limit.
 
 # ---------- Search / Agent Tools ----------
 tavily-python                   # Tavily web search API
@@ -31,8 +32,8 @@ fastapi
 uvicorn
 sse-starlette
 groq
+openai                          # OpenAI-compatible client, points at Gemini's endpoint
 httpx<0.28.0                    # Pin to avoid 'proxies' breaking change
-modal
 aiofiles
 
 # ---------- Tracing (optional) ----------

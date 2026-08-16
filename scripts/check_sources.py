@@ -176,6 +176,7 @@ def main() -> None:
         "GAMESPOT_API_KEY",
         "TAVILY_API_KEY",
         "GROQ_API_KEY",
+        "GEMINI_API_KEY",
     ):
         print(f"  {env_var}: {_key_status(env_var)}")
 

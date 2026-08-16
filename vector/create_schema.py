@@ -3,8 +3,10 @@
 Qdrant Collection Schema Creator
 
 Creates all required collections in Qdrant:
-- EditorialChunk: dual vectors (dense E5-768 + BM25 sparse with IDF)
+- EditorialChunk: dual vectors (dense Gemini gemini-embedding-001 @ 768 + BM25 sparse with IDF)
 - Game, PlatformSpec, IGDB_Game, GameSpot_Game, EditorialSource: metadata-only (1-dim dummy)
+- UsageCounter: metadata-only (1-dim dummy), tracks Gemini/Groq request volume across
+  chat and RAGAS traffic
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ except Exception:
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 
-# Dense vector size (must match E5-base-v2 embedding service)
+# Dense vector size (must match Gemini gemini-embedding-001 outputDimensionality)
 E5_VECTOR_SIZE = 768
 
 
@@ -87,6 +89,7 @@ def create_all_collections(client: QdrantClient) -> None:
         "IGDB_Game",
         "GameSpot_Game",
         "EditorialSource",  # Wikipedia / Steam editorial containers
+        "UsageCounter",  # Gemini/Groq request counts, chat + RAGAS
     ]
 
     for name in metadata_collections:
@@ -101,6 +104,15 @@ def create_all_collections(client: QdrantClient) -> None:
             print(f"✅ Created collection: {name} (metadata-only)")
         else:
             print(f"⚠️  Collection already exists: {name}")
+
+    # UsageCounter's /api/usage read path filters on payload "date" —
+    # Qdrant Cloud requires an explicit payload index for filtered scroll.
+    client.create_payload_index(
+        collection_name="UsageCounter",
+        field_name="date",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    print("✅ Ensured payload index: UsageCounter.date")
 
 
 # -------------------------------------------------------------------

@@ -10,6 +10,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, SparseVector
 from fastembed import SparseTextEmbedding
 
+from llm.gemini_client import embed_texts
+
 # ------------------------------------------------------------------------------
 # Logging
 # ------------------------------------------------------------------------------
@@ -18,24 +20,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# ------------------------------------------------------------------------------
-# Modal class lookup — resolved lazily on first use, not at import time,
-# so importing this module (e.g. for test collection) never requires
-# Modal credentials or network access. Mirrors retriever/rag_retriever.py.
-# ------------------------------------------------------------------------------
-_embedder_app = None
-
-
-def _get_embedder():
-    global _embedder_app
-    if _embedder_app is None:
-        import modal
-
-        E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
-        _embedder_app = E5Embedder()
-    return _embedder_app
-
 
 # BM25 sparse encoder (lightweight, CPU-only)
 bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
@@ -86,7 +70,7 @@ def upsert_chunk_batch(
 ) -> int:
     """
     Stage 5:
-    - Embed editorial chunks via Modal (E5 on T4) + BM25 sparse
+    - Embed editorial chunks via Gemini + BM25 sparse
     - Upsert dual vectors into Qdrant
 
     Returns the number of chunks actually upserted (0 if none were
@@ -115,10 +99,8 @@ def upsert_chunk_batch(
     logger.info("Validated %d editorial chunks", len(valid_objects))
 
     # --------------------------------------------------
-    # 2. Dense embedding via Modal (E5)
+    # 2. Dense embedding via Gemini
     # --------------------------------------------------
-    embedder = _get_embedder()
-
     dense_vectors: List[List[float]] = []
     total_batches = (len(texts) - 1) // batch_size + 1
 
@@ -131,7 +113,7 @@ def upsert_chunk_batch(
             total_batches,
         )
 
-        batch_vectors = embedder.embed_texts.remote(batch_texts)
+        batch_vectors = embed_texts(batch_texts, task_type="RETRIEVAL_DOCUMENT")
         dense_vectors.extend(batch_vectors)
 
     if len(dense_vectors) != len(valid_objects):
@@ -206,6 +188,9 @@ def upsert_chunk_batch(
 
     client.close()
 
+    from utils.usage_counter import UsageCounter
+    UsageCounter.get().flush()
+
     logger.info(
         "✅ Stage 5 complete — %d editorial chunks embedded & upserted",
         len(valid_objects),
@@ -220,7 +205,7 @@ def upsert_chunk_batch(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Stage 5: Embed + Upsert Editorial Chunks (Modal + Qdrant)"
+        description="Stage 5: Embed + Upsert Editorial Chunks (Gemini + Qdrant)"
     )
     parser.add_argument(
         "--file",

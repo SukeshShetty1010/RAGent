@@ -24,9 +24,11 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from qdrant_client import QdrantClient, models
-from fastembed import SparseTextEmbedding, TextEmbedding
+from fastembed import SparseTextEmbedding
+from fastembed.rerank.cross_encoder import TextCrossEncoder
 
 from utils.observability import ProfileBlock, MetricsRegistry
+from llm.gemini_client import embed_text
 
 logger = logging.getLogger("RAG_RETRIEVER")
 if not logger.handlers:
@@ -36,41 +38,21 @@ if not logger.handlers:
 # ---------------------------------------------------------------------
 # Embedding Models
 # ---------------------------------------------------------------------
-# BM25 sparse encoding runs locally (CPU-only, no Modal dependency).
-# Dense embedding and cross-encoder reranking are resolved lazily from
-# Modal on first use, not at import time — importing this module (e.g.
-# for test collection) must not require Modal credentials or network
-# access. Loading torch/sentence-transformers in-process instead was
-# rejected: alongside fastembed's BM25 encoder it exceeded Render's
-# 512MB free-tier RAM limit.
+# BM25 sparse encoding and cross-encoder reranking both run locally
+# (CPU-only, ONNX). Per CLAUDE.md, both are loaded eagerly at module
+# level rather than lazily: a failure to load must surface as a visible
+# boot-time error, not an unexplained hang on the first live request.
+# Dense embeddings call Gemini's API (llm/gemini_client.py) — no local
+# model, no Modal dependency.
 
 # BM25 sparse encoder (lightweight, CPU-only)
 bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 
-_dense_encoder_app = None
-_reranker_app = None
-
-
-def _get_dense_encoder():
-    global _dense_encoder_app
-    if _dense_encoder_app is None:
-        import modal
-
-        E5Embedder = modal.Cls.from_name("editorial-embedding-service", "E5Embedder")
-        _dense_encoder_app = E5Embedder()
-    return _dense_encoder_app
-
-
-def _get_reranker():
-    global _reranker_app
-    if _reranker_app is None:
-        import modal
-
-        CrossEncoderReranker = modal.Cls.from_name(
-            "cross-encoder-rerank-service", "CrossEncoderReranker"
-        )
-        _reranker_app = CrossEncoderReranker()
-    return _reranker_app
+# Cross-encoder reranker — identical model to the one formerly hosted on
+# Modal. retriever/quality_gate.py's REFUSE_FLOOR/WEAK_FLOOR are
+# calibrated on this exact model's raw logits; do not swap it for a
+# different reranker without re-running that calibration.
+reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2")
 
 # ---------------------------------------------------------------------
 # RAG Retriever
@@ -147,7 +129,7 @@ class RAGRetriever:
 
             with ProfileBlock("EmbeddingGeneration"):
                 dense_vec = (
-                    _get_dense_encoder().embed_texts.remote([query])[0]
+                    embed_text(query, task_type="RETRIEVAL_QUERY")
                     if needs_dense
                     else None
                 )
@@ -270,7 +252,7 @@ class RAGRetriever:
 
     def score_relevance(self, query: str, contents: List[str]) -> List[float]:
         """
-        Score `contents` against `query` with the same Modal-hosted
+        Score `contents` against `query` with the same in-process
         cross-encoder used by `_rerank`. Fail-soft: on any reranker
         error, returns 0.0 for every item rather than raising, so a
         caller merging these scores into evidence never crashes on a
@@ -280,7 +262,7 @@ class RAGRetriever:
             return []
 
         try:
-            return [float(s) for s in _get_reranker().rerank.remote(query, contents)]
+            return [float(s) for s in reranker.rerank(query, contents)]
         except Exception as exc:
             logger.warning(
                 f"Cross-encoder rerank unavailable (fail-soft): {exc}"
@@ -310,7 +292,7 @@ class RAGRetriever:
 
         try:
             contents = [c.get("content") or "" for c in candidates]
-            rerank_scores = _get_reranker().rerank.remote(query, contents)
+            rerank_scores = list(reranker.rerank(query, contents))
 
             for c, s in zip(candidates, rerank_scores):
                 c["rerank_score"] = float(s)

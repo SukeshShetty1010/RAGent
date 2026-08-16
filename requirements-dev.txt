@@ -16,3 +16,4 @@ colorama                        # used by tests/verify_engine.py
 ragas
 datasets
 langchain-groq
+langchain-openai                 # Gemini RAGAS judge backend (Gemini is OpenAI-compatible)

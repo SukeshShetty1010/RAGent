@@ -73,3 +73,6 @@ backups/
 # ---------- Evaluation (Phase 3) ----------
 # Checkpoint state only — evaluation/results/*.json(l) itself IS committed.
 evaluation/results/.ragas_checkpoint_*.jsonl
+
+# ---------- Migration checkpoint state (local, resumable, not repo content) ----------
+.migration_checkpoint_*.json

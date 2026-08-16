@@ -31,7 +31,7 @@ app.add_middleware(
 
 # Lazily-built, cached engine instance (owns connections like Qdrant).
 # Built on first request rather than at import time, so importing this
-# module (e.g. for test collection) never touches Qdrant/Modal.
+# module (e.g. for test collection) never touches Qdrant.
 _engine: StreamingRageEngine | None = None
 
 
@@ -57,6 +57,19 @@ def ping():
     """
     from datetime import datetime, timezone
     return {"pong": True, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+@app.get("/api/usage")
+def usage_dashboard():
+    """
+    Today's Gemini/Groq request counts, by provider and by surface
+    (chat, decision, embedding, ragas_judge, ablation), aggregated
+    across Render chat traffic and local RAGAS/eval runs via the
+    shared Qdrant-backed UsageCounter. Fail-soft: returns in-process
+    numbers with "degraded": true on any Qdrant error, never a 500.
+    """
+    from utils.usage_counter import UsageCounter
+    return UsageCounter.get().read_today()
+
 
 @app.post("/api/chat")
 async def chat_endpoint(request: Request, body: ChatRequest):
@@ -107,6 +120,9 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             # not silently drop the last trace's spans.
             from utils import tracing
             tracing.flush()
+
+            from utils.usage_counter import UsageCounter
+            UsageCounter.get().flush()
 
     threading.Thread(target=run_engine, daemon=True).start()
 

@@ -104,16 +104,13 @@ def ragas_context_precision_ablation(
     from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
     from ragas.metrics import context_precision
 
-    from evaluation.ragas_embeddings import ModalE5Embeddings
+    from evaluation.ragas_embeddings import GeminiEmbeddings
     from evaluation.ragas_eval import _build_judge
 
     retriever = RAGRetriever()
     llm, _judge_model_id = _build_judge(judge_backend)
-    embeddings = ModalE5Embeddings()
-    # modal backend: see evaluation/ragas_eval.py's identical note --
-    # llm/modal_llm.py's generate() shares one event loop per warm
-    # container, so concurrent judge calls race. Serialize to avoid it.
-    run_config = RunConfig(max_workers=1 if judge_backend == "modal" else 2)
+    embeddings = GeminiEmbeddings()
+    run_config = RunConfig(max_workers=2)
 
     summary: Dict[str, Any] = {}
 
@@ -146,6 +143,9 @@ def ragas_context_precision_ablation(
                 "mean_context_precision": round(sum(vals) / len(vals), 4) if vals else None,
                 "n": len(vals),
             }
+
+            from utils.usage_counter import UsageCounter
+            UsageCounter.get().record(judge_backend, "ablation", count=len(samples))
     finally:
         retriever.close()
 
@@ -177,9 +177,9 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Smoke-test on first N answerable records")
     parser.add_argument(
         "--judge-backend",
-        choices=["groq", "modal"],
+        choices=["groq", "gemini"],
         default="groq",
-        help="Same choice as ragas_eval.py -- groq (daily token quota) or modal (gemma-3-12b-it, GPU-seconds).",
+        help="Same choice as ragas_eval.py -- groq (daily token quota) or gemini (gemini-flash-latest, free tier).",
     )
     args = parser.parse_args()
 
@@ -225,6 +225,9 @@ def main() -> None:
             "\nNOTE: hybrid_rerank did NOT win on precision@k against the best single-mode "
             "baseline on this corpus. Report this as-is."
         )
+
+    from utils.usage_counter import UsageCounter
+    UsageCounter.get().flush()
 
 
 if __name__ == "__main__":

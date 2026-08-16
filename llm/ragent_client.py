@@ -1,6 +1,6 @@
 # ============================================================
 # llm/ragent_client.py
-# LLM Client Wrapper (Groq API Blocking)
+# LLM Client Wrapper — Gemini primary, Groq fallback (blocking)
 # ============================================================
 from __future__ import annotations
 import logging
@@ -9,16 +9,16 @@ from typing import Any
 import groq
 from groq import Groq
 from utils.observability import ProfileBlock, MetricsRegistry
+from utils.usage_counter import UsageCounter
 from llm.pricing import estimate_cost
+from llm.gemini_client import _get_gemini_client, GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
 _GROQ_MODEL = "llama-3.1-8b-instant"
-_MODAL_LLM_APP = "gemma-3-12b-it-vllm"
-_MODAL_LLM_CLASS = "Gemma312BVLLM"
 
 
-def _record_usage(usage: Any) -> None:
+def _record_usage(usage: Any, model: str) -> None:
     """Record prompt/completion tokens and estimated cost, if usage is present."""
     if usage is None:
         return
@@ -29,8 +29,21 @@ def _record_usage(usage: Any) -> None:
     registry.observe("llm_completion_tokens", completion_tokens)
     registry.observe(
         "llm_cost_usd",
-        estimate_cost(_GROQ_MODEL, prompt_tokens, completion_tokens),
+        estimate_cost(model, prompt_tokens, completion_tokens),
     )
+
+
+def last_used_model() -> str:
+    """Which model actually served the most recent generation call, per the
+    llm_provider_* counters incremented by chat_completion_remote/decision/
+    streaming. Used to report the real model to tracing instead of a
+    hardcoded string."""
+    counters = MetricsRegistry.get().generate_report()["counters"]
+    if counters.get("llm_provider_gemini", 0) > 0:
+        return GEMINI_MODEL
+    if counters.get("llm_provider_groq", 0) > 0:
+        return _GROQ_MODEL
+    return "unknown"
 
 _groq_client = None
 
@@ -46,79 +59,79 @@ def _get_groq_client() -> Groq:
     return _groq_client
 
 
-_modal_llm = None
-
-def _get_modal_llm() -> Any:
-    """Lazy Modal client for the Gemma-3-12B fallback, matching the
-    _get_embedder()/_get_reranker() lazy-binding pattern in
-    retriever/rag_retriever.py — a module-level modal.Cls.from_name()
-    call would make import fail without Modal credentials present."""
-    global _modal_llm
-    if _modal_llm is None:
-        import modal
-        Gemma312BVLLM = modal.Cls.from_name(_MODAL_LLM_APP, _MODAL_LLM_CLASS)
-        _modal_llm = Gemma312BVLLM()
-    return _modal_llm
-
-
-def _generate_via_modal_fallback(
-    prompt: str, max_tokens: int, temperature: float
-) -> str:
-    """Collect Gemma-3-12B's streamed chunks into one string.
-
-    No token-usage/cost tracking here: Modal bills by GPU-second, not
-    per-token, and generate() returns raw text with no usage payload —
-    fabricating a token count would be worse than reporting none.
-    """
-    llm = _get_modal_llm()
-    chunks = list(
-        llm.generate.remote_gen(
-            prompt, max_new_tokens=max_tokens, temperature=temperature
-        )
-    )
-    return "".join(chunks)
-
 def chat_completion_remote(
     prompt: str,
     max_tokens: int = 512,
     temperature: float = 0.1,
+    surface: str = "chat",
     **kwargs: Any,
 ) -> str:
     if not prompt:
         return ""
     MetricsRegistry.get().observe("llm_prompt_chars", len(prompt))
-    client = _get_groq_client()
     accumulated = []
-    
+
     with ProfileBlock("LLMGeneration"):
         try:
-            stream = client.chat.completions.create(
-                model=_GROQ_MODEL,
+            client = _get_gemini_client()
+            completion = client.chat.completions.create(
+                model=GEMINI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
-                stream=True,
-                # Groq SDK 0.37.1 has no typed stream_options param; the
-                # underlying API still honors it via extra_body (confirmed
-                # live: final chunk arrives with empty choices + populated
-                # usage only when this is set).
-                extra_body={"stream_options": {"include_usage": True}},
+                stream=False,
+                reasoning_effort="none",
                 **kwargs,
             )
-            for chunk in stream:
-                # The final usage-only chunk (stream_options.include_usage) has
-                # an empty choices list — indexing [0] on it raises IndexError.
-                if not chunk.choices:
-                    usage = chunk.usage or (chunk.x_groq.usage if chunk.x_groq else None)
-                    _record_usage(usage)
-                    continue
-                if chunk.choices[0].delta.content:
-                    accumulated.append(chunk.choices[0].delta.content)
-        except groq.RateLimitError as exc:
-            logger.warning(f"Groq rate-limited, falling back to Modal Gemma: {exc}")
-            MetricsRegistry.get().inc("llm_fallback_modal")
-            with ProfileBlock("ModalLLMFallback"):
-                accumulated = [_generate_via_modal_fallback(prompt, max_tokens, temperature)]
+            accumulated = [completion.choices[0].message.content or ""]
+            _record_usage(completion.usage, GEMINI_MODEL)
+            MetricsRegistry.get().inc("llm_provider_gemini")
+            usage = completion.usage
+            UsageCounter.get().record(
+                "gemini", surface,
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+            )
+        except Exception as exc:
+            logger.warning(f"Gemini unavailable, falling back to Groq: {exc}")
+            MetricsRegistry.get().inc("llm_provider_groq_fallback")
+            with ProfileBlock("GroqFallback"):
+                client = _get_groq_client()
+                try:
+                    stream = client.chat.completions.create(
+                        model=_GROQ_MODEL,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        stream=True,
+                        # Groq SDK 0.37.1 has no typed stream_options param; the
+                        # underlying API still honors it via extra_body (confirmed
+                        # live: final chunk arrives with empty choices + populated
+                        # usage only when this is set).
+                        extra_body={"stream_options": {"include_usage": True}},
+                        **kwargs,
+                    )
+                    accumulated = []
+                    groq_usage = None
+                    for chunk in stream:
+                        # The final usage-only chunk (stream_options.include_usage) has
+                        # an empty choices list — indexing [0] on it raises IndexError.
+                        if not chunk.choices:
+                            groq_usage = chunk.usage or (chunk.x_groq.usage if chunk.x_groq else None)
+                            _record_usage(groq_usage, _GROQ_MODEL)
+                            continue
+                        if chunk.choices[0].delta.content:
+                            accumulated.append(chunk.choices[0].delta.content)
+                    MetricsRegistry.get().inc("llm_provider_groq")
+                    UsageCounter.get().record(
+                        "groq", surface,
+                        prompt_tokens=getattr(groq_usage, "prompt_tokens", 0) or 0,
+                        completion_tokens=getattr(groq_usage, "completion_tokens", 0) or 0,
+                        fallback=True,
+                    )
+                except groq.RateLimitError as groq_exc:
+                    logger.warning(f"Groq also rate-limited: {groq_exc}")
+                    accumulated = []
 
     response = "".join(accumulated)
     MetricsRegistry.get().observe("llm_output_chars", len(response))
@@ -138,19 +151,48 @@ def chat_completion_decision(
     if not prompt:
         return ""
     MetricsRegistry.get().observe("llm_decision_prompt_chars", len(prompt))
-    client = _get_groq_client()
 
     with ProfileBlock("LLMDecision"):
-        completion = client.chat.completions.create(
-            model=_GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens,
-            temperature=temperature,
-            stream=False,
-            **kwargs,
-        )
-        response = completion.choices[0].message.content or ""
-        _record_usage(completion.usage)
+        try:
+            client = _get_gemini_client()
+            completion = client.chat.completions.create(
+                model=GEMINI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=False,
+                reasoning_effort="none",
+                **kwargs,
+            )
+            response = completion.choices[0].message.content or ""
+            _record_usage(completion.usage, GEMINI_MODEL)
+            MetricsRegistry.get().inc("llm_provider_gemini")
+            UsageCounter.get().record(
+                "gemini", "decision",
+                prompt_tokens=getattr(completion.usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(completion.usage, "completion_tokens", 0) or 0,
+            )
+        except Exception as exc:
+            logger.warning(f"Gemini unavailable, falling back to Groq: {exc}")
+            MetricsRegistry.get().inc("llm_provider_groq_fallback")
+            client = _get_groq_client()
+            completion = client.chat.completions.create(
+                model=_GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=False,
+                **kwargs,
+            )
+            response = completion.choices[0].message.content or ""
+            _record_usage(completion.usage, _GROQ_MODEL)
+            MetricsRegistry.get().inc("llm_provider_groq")
+            UsageCounter.get().record(
+                "groq", "decision",
+                prompt_tokens=getattr(completion.usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(completion.usage, "completion_tokens", 0) or 0,
+                fallback=True,
+            )
 
     MetricsRegistry.get().observe("llm_decision_output_chars", len(response))
     return response

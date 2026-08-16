@@ -200,7 +200,7 @@ class RageEngine:
                 # ------------------------------------------------
                 if capability != AnswerCapability.INSUFFICIENT:
                     try:
-                        from llm.ragent_client import chat_completion_remote
+                        from llm.ragent_client import chat_completion_remote, last_used_model
 
                         llm_start = time.perf_counter()
                         response = chat_completion_remote(prompt)
@@ -212,7 +212,7 @@ class RageEngine:
                         llm_ran = True
 
                         tracing.record_generation(
-                            model="llama-3.1-8b-instant",
+                            model=last_used_model(),
                             prompt=prompt,
                             output=final_answer,
                             prompt_tokens=int(MetricsRegistry.get().last("llm_prompt_tokens") or 0),

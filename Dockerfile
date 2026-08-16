@@ -30,6 +30,18 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download the BM25 and cross-encoder ONNX models into a fixed cache
+# path baked into the image, so a cold container start never triggers an
+# on-demand download (both models are loaded eagerly at module import in
+# retriever/rag_retriever.py — a failure here must surface as a build
+# error, not a runtime hang on the first live request).
+ENV FASTEMBED_CACHE_PATH=/app/.fastembed_cache
+RUN python -c "\
+from fastembed import SparseTextEmbedding; \
+from fastembed.rerank.cross_encoder import TextCrossEncoder; \
+SparseTextEmbedding(model_name='Qdrant/bm25'); \
+TextCrossEncoder(model_name='Xenova/ms-marco-MiniLM-L-6-v2')"
+
 # Copy backend application code
 COPY . .
 
