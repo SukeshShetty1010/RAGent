@@ -16,7 +16,16 @@ from __future__ import annotations
 # it is meant for relative cost-per-query reporting in the KPI/eval
 # pipeline, not for financial reconciliation.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
+    # Retired by Groq (404 as of 2026-08-17). Kept so historical eval
+    # runs and traces that recorded this model still price correctly.
     "llama-3.1-8b-instant": (0.05, 0.08),
+    # Current Groq fallback. $0.15/$0.60 per 1M is Groq's own rate
+    # (cloudzero.com and layer3labs.io, checked 2026-08-17); the $0.75
+    # output rate quoted around the web is a reseller's markup, not
+    # Groq's. Same caveat as above: relative cost reporting, not
+    # reconciliation. A GROQ_MODEL override with no entry here prices at
+    # 0.0 rather than guessing.
+    "openai/gpt-oss-120b": (0.15, 0.60),
     # Deliberate 0.0 — Gemini free tier, not a missing-model default.
     "gemini-flash-latest": (0.0, 0.0),
 }

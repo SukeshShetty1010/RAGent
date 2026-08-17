@@ -10,11 +10,30 @@ type Evidence = {
   content?: string;
 };
 
+// Mirrors the kpis dict built in engine/execution_engine_streaming.py.
+// Rendered as received -- nothing here is recomputed in the UI.
+type Kpis = {
+  engine_latency_ms: number;
+  llm_ran: boolean;
+  llm_latency_ms: number | null;
+  quality_status: string;
+  confidence_score: number;
+  answer_capability: string;
+  retrieved_chunks: number;
+  task_success: boolean;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  cost_usd: number | null;
+  finish_reason: string | null;
+  answer_truncated: boolean;
+};
+
 type Message = {
   role: 'user' | 'assistant';
   content: string;
-  kpis?: any;
+  kpis?: Kpis;
   evidence?: Evidence[];
+  failed?: boolean;
 };
 
 /* ── Avatar Components ────────────────────────────────── */
@@ -88,6 +107,72 @@ const markdownComponents = {
     <code className="bg-slate-800 text-cyan-300 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>{children}</code>
   ),
 };
+
+/* ── Per-answer KPI panel ─────────────────────────────── */
+
+function Metric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'good' | 'warn' | 'bad' | 'accent' }) {
+  const toneClass = {
+    default: 'text-slate-200',
+    accent: 'text-cyan-400',
+    good: 'text-emerald-400',
+    warn: 'text-amber-400',
+    bad: 'text-red-400',
+  }[tone];
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+      <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">{label}</p>
+      <p className={`text-lg font-bold ${toneClass}`}>{value}</p>
+    </div>
+  );
+}
+
+const ms = (v: number | null | undefined) => (v == null ? '—' : `${(v / 1000).toFixed(2)} s`);
+
+// Tone only -- the label itself is whatever the backend sent, so a new
+// capability or gate status still renders rather than vanishing.
+function capabilityTone(v: string): 'good' | 'warn' | 'bad' | 'default' {
+  if (v === 'full') return 'good';
+  if (v === 'partial') return 'warn';
+  if (v === 'insufficient') return 'bad';
+  return 'default';
+}
+
+function qualityTone(v: string): 'good' | 'warn' | 'bad' | 'default' {
+  if (v === 'quality_ok') return 'good';
+  if (v === 'quality_weak') return 'warn';
+  if (v === 'quality_empty') return 'bad';
+  return 'default';
+}
+
+function KpiPanel({ kpis }: { kpis: Kpis }) {
+  const tokens =
+    kpis.prompt_tokens == null && kpis.completion_tokens == null
+      ? '—'
+      : `${kpis.prompt_tokens ?? 0} → ${kpis.completion_tokens ?? 0}`;
+  const cost = kpis.cost_usd == null ? '—' : `$${kpis.cost_usd.toFixed(6)}`;
+
+  return (
+    <div className="mt-4 w-full">
+      {kpis.answer_truncated && (
+        <div className="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300">
+          {kpis.finish_reason === 'length'
+            ? 'This answer hit the model’s output limit and is incomplete.'
+            : 'The model closed the stream before finishing — this answer is incomplete.'}
+        </div>
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Metric label="Engine Latency" value={ms(kpis.engine_latency_ms)} />
+        <Metric label="LLM Latency" value={ms(kpis.llm_latency_ms)} />
+        <Metric label="Confidence" value={`${(kpis.confidence_score * 100).toFixed(1)}%`} tone="accent" />
+        <Metric label="Sources Used" value={String(kpis.retrieved_chunks)} />
+        <Metric label="Capability" value={kpis.answer_capability} tone={capabilityTone(kpis.answer_capability)} />
+        <Metric label="Quality Gate" value={kpis.quality_status} tone={qualityTone(kpis.quality_status)} />
+        <Metric label="Tokens (in → out)" value={tokens} />
+        <Metric label="Est. Cost" value={cost} />
+      </div>
+    </div>
+  );
+}
 
 /* ── Usage Dashboard ──────────────────────────────────── */
 
@@ -290,51 +375,84 @@ export default function ChatApp() {
       let assistantContent = '';
       let addedAssistant = false;
 
+      const ensureAssistant = () => {
+        if (addedAssistant) return;
+        setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent }]);
+        addedAssistant = true;
+        setIsWaitingForFirstToken(false);
+      };
+
+      // Mutate the assistant message in place without touching earlier
+      // ones -- the streamed message is always the last in the list.
+      const updateAssistant = (patch: Partial<Message>) => {
+        setMessages((prev) =>
+          prev.map((m, i) => (i === prev.length - 1 ? { ...m, ...patch } : m)),
+        );
+      };
+
+      const handleFrame = (frame: string) => {
+        let event = 'message';
+        const dataLines: string[] = [];
+        for (const rawLine of frame.split('\n')) {
+          const line = rawLine.replace(/\r$/, '');
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+        }
+        if (dataLines.length === 0) return;
+
+        let parsed;
+        try {
+          parsed = JSON.parse(dataLines.join('\n'));
+        } catch (err) {
+          console.error('Error parsing SSE data', err);
+          return;
+        }
+
+        if (event === 'token') {
+          ensureAssistant();
+          assistantContent += parsed.text;
+          updateAssistant({ content: assistantContent });
+        } else if (event === 'done') {
+          ensureAssistant();
+          // final_answer is the backend's authoritative copy of the
+          // answer. Preferring it over the locally accumulated tokens
+          // keeps the rendered text identical to what the engine
+          // validated and traced, instead of a reconstruction that a
+          // single dropped frame would leave subtly wrong.
+          updateAssistant({
+            content: parsed.final_answer ?? assistantContent,
+            kpis: parsed.kpis,
+            evidence: parsed.evidence,
+          });
+        } else if (event === 'error') {
+          ensureAssistant();
+          updateAssistant({
+            content: `Request failed: ${parsed.error}`,
+            failed: true,
+          });
+        }
+        // 'stage' events are progress only -- nothing to render yet.
+      };
+
+      let buffer = '';
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.replace('data: ', '').trim();
-            if (!dataStr) continue;
-
-            try {
-              const parsed = JSON.parse(dataStr);
-              if (parsed.text) {
-                if (!addedAssistant) {
-                  setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
-                  addedAssistant = true;
-                  setIsWaitingForFirstToken(false);
-                }
-                assistantContent += parsed.text;
-                setMessages((prev) => {
-                  const newMsgs = [...prev];
-                  newMsgs[newMsgs.length - 1].content = assistantContent;
-                  return newMsgs;
-                });
-              } else if (parsed.kpis) {
-                if (!addedAssistant) {
-                  setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent }]);
-                  addedAssistant = true;
-                  setIsWaitingForFirstToken(false);
-                }
-                setMessages((prev) => {
-                  const newMsgs = [...prev];
-                  newMsgs[newMsgs.length - 1].kpis = parsed.kpis;
-                  newMsgs[newMsgs.length - 1].evidence = parsed.evidence;
-                  return newMsgs;
-                });
-              }
-            } catch (err) {
-              console.error('Error parsing SSE data', err);
-            }
-          }
-        }
+        // SSE frames end at a blank line, and a network read can stop
+        // anywhere -- including the middle of one. Everything after the
+        // last separator is held back until the rest arrives. Parsing
+        // each read independently dropped every frame that straddled a
+        // boundary, which is why the ~5.6KB done event carrying the KPIs
+        // and evidence never rendered while the small token frames did.
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split(/\r?\n\r?\n/);
+        buffer = frames.pop() ?? '';
+        for (const frame of frames) handleFrame(frame);
       }
+      // A final frame with no trailing blank line still counts.
+      buffer += decoder.decode();
+      if (buffer.trim()) handleFrame(buffer);
     } catch (err) {
       console.error(err);
       setIsWaitingForFirstToken(false);
@@ -389,7 +507,9 @@ export default function ChatApp() {
                   className={`rounded-2xl px-6 py-4 ${
                     msg.role === 'user'
                       ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20'
-                      : 'bg-slate-900 border border-slate-800 shadow-xl'
+                      : msg.failed
+                        ? 'bg-slate-900 border border-red-500/40 shadow-xl'
+                        : 'bg-slate-900 border border-slate-800 shadow-xl'
                   }`}
                 >
                   {msg.role === 'assistant' ? (
@@ -403,29 +523,14 @@ export default function ChatApp() {
 
                 {/* KPIs & Evidence Display */}
                 {msg.role === 'assistant' && msg.kpis && (
-                  <div className="mt-4 w-full">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Engine Latency</p>
-                        <p className="text-lg font-bold text-slate-200">{(msg.kpis.engine_latency_ms / 1000).toFixed(2)} s</p>
-                      </div>
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">LLM Latency</p>
-                        <p className="text-lg font-bold text-slate-200">{msg.kpis.llm_latency_ms ? (msg.kpis.llm_latency_ms / 1000).toFixed(2) + ' s' : '-'}</p>
-                      </div>
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Confidence</p>
-                        <p className="text-lg font-bold text-cyan-400">{(msg.kpis.confidence_score * 100).toFixed(1)}%</p>
-                      </div>
-                      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
-                        <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Sources Used</p>
-                        <p className="text-lg font-bold text-slate-200">{msg.kpis.retrieved_chunks}</p>
-                      </div>
-                    </div>
+                  <>
+                    <KpiPanel kpis={msg.kpis} />
 
                     {msg.evidence && msg.evidence.length > 0 && (
                       <div className="mt-3 space-y-2">
-                        <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">Sources (Evidence)</p>
+                        <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">
+                          Sources (Evidence) — showing {Math.min(3, msg.evidence.length)} of {msg.evidence.length}
+                        </p>
                         {msg.evidence.slice(0, 3).map((ev, i) => (
                           <div key={i} className="text-sm bg-slate-900/30 border border-slate-800/80 rounded-lg p-3 flex flex-col hover:bg-slate-800/50 transition-colors">
                             <span className="font-semibold text-cyan-300/90 truncate">{ev.source_title || ev.source || "Unknown Source"}</span>
@@ -434,7 +539,7 @@ export default function ChatApp() {
                         ))}
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
               </div>
 

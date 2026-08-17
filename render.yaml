@@ -17,10 +17,16 @@ services:
         sync: false
       - key: QDRANT_API_KEY
         sync: false
-      # LLM (Gemini primary, Groq fallback)
+      # LLM (Gemini primary, Groq fallback). GEMINI_MODEL/GROQ_MODEL are
+      # optional overrides — set them here to swap a retired or
+      # quota-limited model without a redeploy of the code.
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false
+      - key: GROQ_MODEL
         sync: false
       # Reranker: "local" (in-process ONNX), "cloudflare" (Workers AI),
       # "hfspace" (HF Docker Space, same model as local), or "voyage"

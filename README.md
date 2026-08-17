@@ -231,7 +231,9 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 
 The entire stack runs on **free tiers with no payment method on file** — a hard constraint that drove every choice below.
 
-Generation is **Gemini-primary** (`gemini-flash-latest`) with **Groq** (`llama-3.1-8b-instant`) as a fail-soft fallback: any Gemini error, including an unset key, degrades to Groq rather than failing the request. Embeddings use Gemini's `gemini-embedding-001` at 768 dimensions.
+Generation is **Gemini-primary** (`gemini-flash-latest`) with **Groq** (`openai/gpt-oss-120b`) as a fail-soft fallback: any Gemini error, including an unset key, degrades to Groq rather than failing the request. Both are overridable via `GEMINI_MODEL` / `GROQ_MODEL` without a code change — worth knowing, because both providers have retired a model out from under this project already. Embeddings use Gemini's `gemini-embedding-001` at 768 dimensions.
+
+Free tiers move, and they move quietly. `gemini-flash-latest` is an alias that currently resolves to `gemini-3.7-flash`, which allows **20 requests/day** on the free tier; past that, Gemini sometimes closes the response stream mid-answer instead of returning an error. The pipeline detects this (an answer that ends with no `finish_reason` is reported as truncated rather than presented as complete) but cannot repair it, so a busy day needs either a lite model pinned via `GEMINI_MODEL` or a paid key.
 
 Reranking is **provider-dispatched** at import time via `RERANKER_PROVIDER`, because where it runs turned out to matter enormously. Running the ONNX cross-encoder in-process on Render's free tier (0.1 vCPU / 512MB) measured **~103s per query** and required `batch_size=1` to avoid an OOM kill. Moving it to **Cloudflare Workers AI** (`@cf/baai/bge-reranker-base`, 10,000 Neurons/day free, always warm) brought retrieval to **~6s** — a 16x improvement — and removed the ~300MB model from the request path entirely.
 
@@ -382,7 +384,7 @@ docker run -p 10000:10000 --env-file .env ragent
 | 7 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
 | 8 | `ContextAssembler` | Deduplicates, orders by entity balance |
 | 9 | `PromptManager` | Applies `comparison_verbose` template |
-| 10 | `RageEngine` | Generates via Gemini (`gemini-flash-latest`); falls back to Groq (`llama-3.1-8b-instant`) on any Gemini error |
+| 10 | `RageEngine` | Generates via Gemini (`gemini-flash-latest`); falls back to Groq (`openai/gpt-oss-120b`) on any Gemini error |
 | 11 | `OutputValidator` | Checks balanced Markdown + required PARTIAL section, annotates result (fail-soft) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.

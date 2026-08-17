@@ -293,6 +293,17 @@ class RageEngine:
         kpis["completion_tokens"] = int(completion_tokens_dist["avg"] * completion_tokens_dist["count"]) if completion_tokens_dist else None
         kpis["cost_usd"] = round(cost_dist["avg"] * cost_dist["count"], 8) if cost_dist else None
 
+        # See the streaming engine for the reasoning: an answer counts as
+        # complete only when generation ran and the provider said it
+        # stopped on its own. Kept identical here so both engines report
+        # the same KPI shape.
+        finish_reasons = raw_metrics["categoricals"].get("llm_finish_reason", {})
+        finish_reason = (
+            max(finish_reasons, key=finish_reasons.get) if finish_reasons else None
+        )
+        kpis["finish_reason"] = finish_reason
+        kpis["answer_truncated"] = bool(llm_ran and finish_reason != "stop")
+
         return ExecutionResult(
             final_answer=final_answer,
             agent_decisions=agent_decisions,

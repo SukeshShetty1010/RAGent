@@ -427,6 +427,25 @@ class StreamingRageEngine:
         kpis["completion_tokens"] = int(completion_tokens_dist["avg"] * completion_tokens_dist["count"]) if completion_tokens_dist else None
         kpis["cost_usd"] = round(cost_dist["avg"] * cost_dist["count"], 8) if cost_dist else None
 
+        # An answer is complete only if generation ran AND the provider
+        # said why it stopped AND that reason was "stop". Two distinct
+        # failures hide here, both observed live 2026-08-17:
+        #   - "length": hit max_tokens, answer cut mid-sentence.
+        #   - no finish_reason at all: the provider closed the SSE stream
+        #     mid-generation without terminating it. Gemini's free tier
+        #     does this when the request quota is exhausted, and because
+        #     tokens had already been yielded the client cannot fall back
+        #     to Groq without duplicating the prefix. The stream simply
+        #     ends and a half-sentence reaches the UI.
+        # Neither raises, so without this the pipeline reports
+        # task_success on a severed answer.
+        finish_reasons = raw_metrics["categoricals"].get("llm_finish_reason", {})
+        finish_reason = (
+            max(finish_reasons, key=finish_reasons.get) if finish_reasons else None
+        )
+        kpis["finish_reason"] = finish_reason
+        kpis["answer_truncated"] = bool(llm_ran and finish_reason != "stop")
+
         return StreamingResult(
             final_answer=final_answer,
             agent_decisions=agent_decisions,

@@ -11,6 +11,9 @@ from utils.usage_counter import UsageCounter
 from llm.ragent_client import (
     _get_groq_client,
     _record_usage,
+    _record_finish_reason,
+    _chunk_usage,
+    _ANSWER_MAX_TOKENS,
     _GROQ_MODEL,
 )
 from llm.gemini_client import _get_gemini_client, GEMINI_MODEL
@@ -19,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def chat_completion_streaming(
     prompt: str,
-    max_tokens: int = 512,
+    max_tokens: int = _ANSWER_MAX_TOKENS,
     temperature: float = 0.1,
     on_chunk: Optional[Callable[[str], None]] = None,
     **kwargs: Any,
@@ -46,10 +49,14 @@ def chat_completion_streaming(
                 **kwargs,
             )
             for chunk in stream:
+                # Usage is read off whatever chunk carries it rather than
+                # off a choice-less one: Gemini attaches it to the final
+                # chunk that still has choices, so the old check never
+                # fired and every Gemini answer reported zero tokens.
+                gemini_usage = _chunk_usage(chunk) or gemini_usage
                 if not chunk.choices:
-                    gemini_usage = chunk.usage
-                    _record_usage(gemini_usage, GEMINI_MODEL)
                     continue
+                _record_finish_reason(chunk.choices[0].finish_reason)
                 text = chunk.choices[0].delta.content
                 if text:
                     any_yielded = True
@@ -57,6 +64,7 @@ def chat_completion_streaming(
                     if on_chunk:
                         on_chunk(text)
                     yield text
+            _record_usage(gemini_usage, GEMINI_MODEL)
             MetricsRegistry.get().inc("llm_provider_gemini")
             UsageCounter.get().record(
                 "gemini", "chat",
@@ -90,16 +98,17 @@ def chat_completion_streaming(
                         )
                         groq_usage = None
                         for chunk in groq_stream:
+                            groq_usage = _chunk_usage(chunk) or groq_usage
                             if not chunk.choices:
-                                groq_usage = chunk.usage or (chunk.x_groq.usage if chunk.x_groq else None)
-                                _record_usage(groq_usage, _GROQ_MODEL)
                                 continue
+                            _record_finish_reason(chunk.choices[0].finish_reason)
                             text = chunk.choices[0].delta.content
                             if text:
                                 accumulated.append(text)
                                 if on_chunk:
                                     on_chunk(text)
                                 yield text
+                        _record_usage(groq_usage, _GROQ_MODEL)
                         MetricsRegistry.get().inc("llm_provider_groq")
                         UsageCounter.get().record(
                             "groq", "chat",
