@@ -123,6 +123,14 @@ class RetrievalQualityGate:
     #               Space's model or fastembed version ever diverges
     #               from hf_space/requirements.txt, this entry stops
     #               being valid and must go back to None.
+    #   "cloudflare" — @cf/baai/bge-reranker-base on Workers AI, which
+    #               applies the sigmoid server-side: 0..1, heavily
+    #               saturated (measured 0.99990 for a match, 3.7e-05 for
+    #               a miss). Same scale-collapse problem as Voyage — the
+    #               local floors would refuse everything — and its
+    #               saturation means calibration should expect the signal
+    #               in the tails rather than a smooth spread. Stays None
+    #               until calibrated.
     #   "voyage"  — a DIFFERENT model emitting normalized 0..1. Applying
     #               the local floors there would make the weak floor of
     #               2.0 unreachable (every query WEAK) and the refuse
@@ -138,7 +146,8 @@ class RetrievalQualityGate:
         # provider: (REFUSE_FLOOR, WEAK_FLOOR)
         "local": (-3.0, 2.0),    # ms-marco raw logits, calibrated 2026-08-12
         "hfspace": (-3.0, 2.0),  # same model, same scale — shares that calibration
-        "voyage": None,          # 0..1 normalized — set from its own calibration
+        "cloudflare": None,      # bge-reranker-base logits — needs its own calibration
+        "voyage": None,          # 0..1 normalized — needs its own calibration
     }
 
     # --------------------------------------------------------

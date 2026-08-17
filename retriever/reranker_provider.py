@@ -14,17 +14,22 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-RerankerProvider = Literal["local", "hfspace", "voyage"]
+RerankerProvider = Literal["local", "hfspace", "cloudflare", "voyage"]
 
-VALID_PROVIDERS = ("local", "hfspace", "voyage")
+VALID_PROVIDERS = ("local", "hfspace", "cloudflare", "voyage")
 
-# "local"   = in-process fastembed cross-encoder (Xenova/ms-marco-MiniLM-L-6-v2)
-# "hfspace" = the SAME model over HTTP, hosted on a free HF Docker Space
-#             (hf_space/) — identical raw-logit scale, so it shares
-#             "local"'s calibrated floors
-# "voyage"  = Voyage's rerank HTTP API — normalized 0..1, a different
-#             scale that needs its own calibration
-# See quality_gate.py's _FLOORS.
+# "local"      = in-process fastembed cross-encoder (Xenova/ms-marco-MiniLM-L-6-v2)
+# "hfspace"    = the SAME model over HTTP, hosted on an HF Docker Space
+#                (hf_space/) — identical raw-logit scale, so it shares
+#                "local"'s calibrated floors. NOT currently deployed:
+#                HF moved Docker Spaces behind PRO in July 2026.
+# "cloudflare" = @cf/baai/bge-reranker-base on Workers AI — free tier,
+#                always warm, but a DIFFERENT model and therefore a
+#                different scale
+# "voyage"     = Voyage's rerank HTTP API — also a different model,
+#                normalized 0..1
+# Only same-model providers may share floors. See quality_gate.py's
+# _FLOORS.
 DEFAULT_PROVIDER: RerankerProvider = "local"
 
 

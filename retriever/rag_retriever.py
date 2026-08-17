@@ -50,9 +50,10 @@ if not logger.handlers:
 # Gemini's API (llm/gemini_client.py) — no local model.
 #
 # Reranking is provider-dispatched via RERANKER_PROVIDER:
-#   "local"   — in-process fastembed cross-encoder (default)
-#   "hfspace" — same model over HTTP on a free HF Space (hf_space/)
-#   "voyage"  — Voyage's rerank HTTP API (llm/voyage_client.py)
+#   "local"      — in-process fastembed cross-encoder (default)
+#   "cloudflare" — Workers AI bge-reranker-base (llm/cloudflare_rerank_client.py)
+#   "hfspace"    — same model over HTTP on an HF Space (hf_space/)
+#   "voyage"     — Voyage's rerank HTTP API (llm/voyage_client.py)
 # The ONNX cross-encoder is constructed ONLY on the local path; that
 # conditional is the whole point of the flag, since it is what actually
 # keeps the ~300MB model out of the Render process.
@@ -82,6 +83,14 @@ reranker: Optional[TextCrossEncoder] = None
 
 if RERANKER_PROVIDER == "local":
     reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2")
+elif RERANKER_PROVIDER == "cloudflare":
+    # Validate credentials at boot rather than degrading every live query
+    # to "rerank unavailable" — same eager-error principle as the local
+    # model load. No request is made here.
+    from llm.cloudflare_rerank_client import CLOUDFLARE_RERANK_MODEL, _endpoint, _env
+    _endpoint()          # requires CLOUDFLARE_ACCOUNT_ID
+    _env("CLOUDFLARE_API_TOKEN")
+    logger.info(f"Reranker provider: cloudflare ({CLOUDFLARE_RERANK_MODEL})")
 elif RERANKER_PROVIDER == "hfspace":
     # Validate config at boot rather than degrading every live query to
     # "rerank unavailable" — same eager-error principle as the local
@@ -115,11 +124,16 @@ def _rerank_scores(query: str, contents: List[str]) -> List[float]:
     scale. Raises on failure; both callers are fail-soft around it.
 
     NOTE the scales differ by provider: local and hfspace both return
-    raw ms-marco logits (~-8..+11) from the same model; Voyage returns
-    normalized 0..1.
+    raw ms-marco logits (~-8..+11) from the same model, while cloudflare
+    and voyage both return normalized 0..1 from different models — so
+    each needs its own calibrated floors.
     """
     if not contents:
         return []
+
+    if RERANKER_PROVIDER == "cloudflare":
+        from llm.cloudflare_rerank_client import rerank as cf_rerank
+        return cf_rerank(query, contents)
 
     if RERANKER_PROVIDER == "hfspace":
         from llm.hf_rerank_client import rerank as hf_rerank

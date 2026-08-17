@@ -24,7 +24,7 @@ from typing import Dict, Tuple
 logger = logging.getLogger(__name__)
 
 COLLECTION = "UsageCounter"
-PROVIDERS = ("gemini", "groq", "voyage", "hfspace")
+PROVIDERS = ("gemini", "groq", "voyage", "hfspace", "cloudflare")
 SURFACES = ("chat", "decision", "embedding", "ragas_judge", "ablation", "rerank")
 
 # Configured from the actual AI Studio / Groq console quota pages, not a

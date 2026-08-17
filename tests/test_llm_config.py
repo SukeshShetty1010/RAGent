@@ -87,6 +87,15 @@ def test_voyage_floors_are_uncalibrated_placeholder():
     assert RetrievalQualityGate._FLOORS["voyage"] is None
 
 
+def test_cloudflare_floors_are_uncalibrated_placeholder():
+    """bge-reranker-base emits raw logits of a similar magnitude to
+    ms-marco's, which makes borrowing local's floors look reasonable and
+    be wrong. It must stay None until it has its own calibration run."""
+    from retriever.quality_gate import RetrievalQualityGate
+
+    assert RetrievalQualityGate._FLOORS["cloudflare"] is None
+
+
 def test_hfspace_shares_local_floors():
     """The HF Space runs the same model as the in-process path, so it
     inherits local's calibration by design. If these ever diverge, the

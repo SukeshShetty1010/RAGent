@@ -22,9 +22,13 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
-      # Reranker: "local" (in-process ONNX), "hfspace" (HF Docker Space,
-      # same model), or "voyage" (Voyage API, different score scale)
+      # Reranker: "local" (in-process ONNX), "cloudflare" (Workers AI),
+      # "hfspace" (HF Docker Space, same model as local), or "voyage"
       - key: RERANKER_PROVIDER
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
         sync: false
       - key: HF_RERANK_URL
         sync: false

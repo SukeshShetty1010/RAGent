@@ -2,8 +2,10 @@ import os
 import sys
 import json
 import asyncio
+import logging
 import queue
 import threading
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +21,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = FastAPI(title="RAGent API")
+logger = logging.getLogger("ragent.api")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Report which backends this process actually came up with.
+
+    The reranker config is already validated at import (the module-level
+    `from engine.execution_engine_streaming import ...` above transitively
+    imports retriever/rag_retriever.py, which resolves RERANKER_PROVIDER
+    eagerly), so a bad provider config fails the container at boot rather
+    than silently per request. What was missing was any way to tell from
+    the outside WHICH backend a running deploy chose — the difference
+    between a 3s query and a 110s one is invisible in /health. This logs
+    it once into the deploy log.
+
+    Deliberately does not touch Qdrant or build the engine: a transient
+    database blip should degrade one request, not refuse to start the
+    service.
+    """
+    from retriever.rag_retriever import RERANKER_PROVIDER
+    logger.info(f"RAGent up | reranker backend: {RERANKER_PROVIDER}")
+    yield
+
+
+app = FastAPI(title="RAGent API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
