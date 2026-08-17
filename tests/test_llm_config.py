@@ -85,3 +85,27 @@ def test_voyage_floors_are_uncalibrated_placeholder():
 
     assert RetrievalQualityGate._FLOORS["local"] == (-3.0, 2.0)
     assert RetrievalQualityGate._FLOORS["voyage"] is None
+
+
+def test_hfspace_shares_local_floors():
+    """The HF Space runs the same model as the in-process path, so it
+    inherits local's calibration by design. If these ever diverge, the
+    Space's model or pinned fastembed version has drifted from
+    hf_space/requirements.txt and the entry must go back to None."""
+    from retriever.quality_gate import RetrievalQualityGate
+
+    assert (
+        RetrievalQualityGate._FLOORS["hfspace"]
+        == RetrievalQualityGate._FLOORS["local"]
+    )
+
+
+def test_hf_space_pins_the_calibrated_model_and_fastembed():
+    """Score parity with the calibrated in-process path is the entire
+    reason the Space exists — the model name must match, and fastembed
+    must be pinned rather than floating."""
+    space_app = (REPO_ROOT / "hf_space" / "app.py").read_text(encoding="utf-8")
+    space_reqs = (REPO_ROOT / "hf_space" / "requirements.txt").read_text(encoding="utf-8")
+
+    assert 'MODEL_NAME = "Xenova/ms-marco-MiniLM-L-6-v2"' in space_app
+    assert "fastembed==" in space_reqs

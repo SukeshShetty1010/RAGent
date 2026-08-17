@@ -22,8 +22,15 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
-      # Reranker ("local" = in-process ONNX cross-encoder, "voyage" = HTTP API)
+      # Reranker: "local" (in-process ONNX), "hfspace" (HF Docker Space,
+      # same model), or "voyage" (Voyage API, different score scale)
       - key: RERANKER_PROVIDER
+        sync: false
+      - key: HF_RERANK_URL
+        sync: false
+      - key: HF_RERANK_SECRET
+        sync: false
+      - key: HF_TOKEN
         sync: false
       - key: VOYAGE_API_KEY
         sync: false

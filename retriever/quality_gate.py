@@ -111,22 +111,34 @@ class RetrievalQualityGate:
     # single scalar signal; see flagship.md Phase 3.5 for the accepted
     # miss.
     #
-    # The floors are PROVIDER-SCOPED because the two reranker backends
-    # emit incomparable scales: the local cross-encoder emits raw logits
-    # (above), while Voyage's rerank API emits normalized 0..1. Applying
-    # the local floors to Voyage scores would make WEAK_FLOOR=2.0
-    # unreachable (every query WEAK) and REFUSE_FLOOR=-3.0 impossible to
-    # trip (the refusal signal silently dies) — so the Voyage entry is
-    # None, meaning "not calibrated yet", until
-    # evaluation/calibrate_relevance.py has been re-run against the
-    # fully-migrated corpus. None reuses the existing "no rerank_score"
-    # skip path rather than thresholding an uncalibrated number.
+    # The floors are PROVIDER-SCOPED because the reranker backends do
+    # not all share a score scale. What decides the entry is the MODEL,
+    # not the transport:
+    #   "local"   — the cross-encoder in-process: raw logits (above).
+    #   "hfspace" — the SAME model (Xenova/ms-marco-MiniLM-L-6-v2, same
+    #               pinned fastembed build) hosted on an HF Space and
+    #               called over HTTP. Same scale, so it shares local's
+    #               calibrated floors deliberately — moving the model to
+    #               a bigger CPU does not change what it scores. If that
+    #               Space's model or fastembed version ever diverges
+    #               from hf_space/requirements.txt, this entry stops
+    #               being valid and must go back to None.
+    #   "voyage"  — a DIFFERENT model emitting normalized 0..1. Applying
+    #               the local floors there would make the weak floor of
+    #               2.0 unreachable (every query WEAK) and the refuse
+    #               floor of -3.0 impossible to trip (the refusal signal
+    #               silently dies), so it stays None — "not calibrated
+    #               yet" — until evaluation/calibrate_relevance.py has
+    #               been re-run against the fully-migrated corpus. None
+    #               reuses the existing "no rerank_score" skip path
+    #               rather than thresholding an uncalibrated number.
     # --------------------------------------------------------
 
     _FLOORS: Dict[str, Optional[Tuple[float, float]]] = {
         # provider: (REFUSE_FLOOR, WEAK_FLOOR)
-        "local": (-3.0, 2.0),   # ms-marco raw logits, calibrated 2026-08-12
-        "voyage": None,         # 0..1 normalized — set from calibration
+        "local": (-3.0, 2.0),    # ms-marco raw logits, calibrated 2026-08-12
+        "hfspace": (-3.0, 2.0),  # same model, same scale — shares that calibration
+        "voyage": None,          # 0..1 normalized — set from its own calibration
     }
 
     # --------------------------------------------------------

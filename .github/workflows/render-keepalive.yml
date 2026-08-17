@@ -5,6 +5,13 @@ name: Render keepalive
 # /ping endpoint (api/main.py) every 10 minutes to keep it warm.
 # No secrets needed — /ping is unauthenticated by design.
 #
+# The same cron also pings the HF Space reranker (hf_space/), which
+# sleeps after 48h idle on free CPU Basic — a 10-minute interval keeps
+# it far clear of that threshold. Its /health endpoint is likewise
+# unauthenticated. That ping is best-effort: RAGent's retrieval path is
+# fail-soft around the reranker, so a sleeping Space degrades a query,
+# it does not break one — and it must never fail the Render ping job.
+#
 # Note: GitHub disables scheduled workflows after 60 days with no
 # commits to the repo — a push resets that clock.
 
@@ -26,4 +33,18 @@ jobs:
           if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
             echo "::error::Render keepalive ping failed (HTTP $status)"
             exit 1
+          fi
+
+      - name: Ping HF Space reranker /health endpoint
+        # Skipped entirely until the HF_RERANK_URL repo variable is set,
+        # so the job stays green before the Space exists.
+        if: vars.HF_RERANK_URL != ''
+        continue-on-error: true
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 60 \
+            "${{ vars.HF_RERANK_URL }}/health")
+          echo "Reranker Space responded with HTTP $status"
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::warning::Reranker Space keepalive ping failed (HTTP $status)"
           fi

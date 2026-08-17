@@ -1,11 +1,12 @@
 # Reranker Latency & Embedder Quota — Free-Tier Options
 
 **Date**: 2026-08-16
-**Status**: **Decided 2026-08-17 — Option A** (Voyage reranker only; embeddings stay on Gemini).
-Shipped behind `RERANKER_PROVIDER` (default `local`, i.e. no behavior change on merge).
-Remaining sequencing: finish `migrate_embeddings_to_gemini --resume`, re-run
-`evaluation/calibrate_relevance.py` for both providers, set `quality_gate._FLOORS["voyage"]`,
-then flip the flag on Render.
+**Status**: **Decided 2026-08-17 — Option C** (HF Space, self-hosted, same model).
+Option A (Voyage) was chosen first and fully implemented, then **reversed on measured
+evidence**: Voyage's cardless free tier is rate-limited to 3 RPM / 10K TPM, which cannot serve
+RAGent's real request shape. Both providers now ship behind `RERANKER_PROVIDER`
+(`local` | `hfspace` | `voyage`, default `local`). Embeddings stay on Gemini either way, and
+the `--resume` migration is unaffected.
 
 ## Problem
 
@@ -117,16 +118,55 @@ third-party aggregator describes the free allowance as a time-limited trial, whi
 Voyage's own docs; treat it as unverified — which is exactly why the fail-soft path is
 mandatory rather than optional.
 
-**Q2 — Option chosen: A.** Smallest blast radius, no vector-dim change, does not abandon the
-in-flight Gemini embedding migration, and the reranker is the only one of the two components
-with a clean fail-soft.
+**Q1b — Voyage's cardless rate limits kill Option A. Measured on a live key, 2026-08-17.**
+The billing answer above is correct but was not the whole story. Voyage's own 429 body states:
+*"You have not yet added your payment method ... and will have reduced rate limits of 3 RPM and
+10K TPM."* Measured at 467 tokens per real ~500-token chunk:
+
+| candidates | tokens | result |
+|---|---|---|
+| 5 | 2,335 | 200 OK |
+| 10 | 4,670 | 200 OK |
+| 20 (FACTUAL, `limit=5`) | ~9,340 | **429** |
+| 28 (`limit=7`) | ~13,076 | 429 |
+| 40 (LISTICLE, `limit=10`) | ~18,680 | 429 |
+
+`rag_retriever.py`'s `fetch_limit = max(limit * 4, 20)` with `strategy_selector.py`'s
+`limit` of 5/7/10 means **no real request shape fits**. Worse, `_execute_comparison` reranks
+once per sub-query, so a single comparison query needs 2-3 requests — the entire 3 RPM minute.
+Capping input at 10 candidates would fit, but that is a scope cut to the rerank pass (its whole
+job is rescuing chunks RRF ranked low) and still leaves ~1 query/minute. The 200M free tokens
+are real and unreachable: at 10K TPM they are rate-limited out of use.
+
+**Q2 — Option chosen: C (HF Space).** Option A was implemented first (commit `2c4145e`) on the
+belief that the cardless free tier was usable; the measurement above reversed it. C wins on the
+axes that actually bind here:
+- Free CPU Basic is 2 vCPU / 16GB at $0/hr with **no card and no request/compute quota** — the
+  only free-tier limit is concurrent Spaces (docs say 8; forum reports ~3 in practice; RAGent
+  needs 1). The Modal failure mode was *billing*, and with no card and no paid hardware
+  selected it cannot recur.
+- It keeps `Xenova/ms-marco-MiniLM-L-6-v2`, so **the calibration re-run disappears entirely**.
+  Verified bit-identical scores between `batch_size=1` (Render's anti-OOM setting) and
+  `batch_size=64` (the Space's): max abs delta 0.000000000. `_FLOORS["hfspace"]` therefore
+  reuses local's 2026-08-12 floors, and the honesty gate keeps working from day one instead of
+  waiting on the embedding migration.
+- No candidate cap: 16GB removes the `_RERANK_BATCH_SIZE = 1` constraint. Measured locally
+  through the real dispatch path: 20 candidates 2.8s, 40 candidates 6.7s (vs 106-122s on
+  Render).
+- The cold-start objection from this document's original Option C analysis stands and is
+  mitigated as originally proposed: the existing `render-keepalive.yml` 10-min cron now also
+  pings `/health`, which is far inside the 48h sleep threshold.
+
+Voyage remains implemented and reachable via one env var, as a fallback.
 
 **Q3 — n/a** (no collection recreation under Option A).
 
-**Q4 — calibration is sequenced, not skipped.** It cannot run meaningfully while the corpus is
-in a mixed vector space (800 Gemini / 1991 E5), so the swap ships behind
-`RERANKER_PROVIDER=local` and `quality_gate._FLOORS["voyage"] = None` until the migration
-finishes and `evaluation/calibrate_relevance.py` has been re-run for both providers.
+**Q4 — no calibration re-run is needed for the chosen option.** The HF Space runs the same
+model on the same pinned `fastembed`, so the 2026-08-12 calibration still holds (proof above).
+This also removes the dependency on the embedding migration: calibration could not have run
+meaningfully while the corpus is mixed-space (800 Gemini / 1991 E5), which would have blocked
+Option A for days. `_FLOORS["voyage"]` stays `None` — if Voyage is ever adopted, that entry
+needs its own calibration run first.
 
 **Correction to this document:** the Option B bullet listed `chunking/editorial_chunker.py` and
 `embed/prepare_editorial_payloads.py` as embedder call sites. Neither imports

@@ -1,0 +1,8 @@
+# fastembed is pinned to the exact version RAGent runs locally (0.7.4).
+# Score parity with the in-process path is the reason this service exists
+# at all -- quality_gate's floors are calibrated on that build's raw
+# logits, and an ONNX/tokenizer change across versions could shift them.
+fastembed==0.7.4
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+pydantic==2.12.5

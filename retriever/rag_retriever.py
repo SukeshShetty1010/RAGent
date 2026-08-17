@@ -50,8 +50,9 @@ if not logger.handlers:
 # Gemini's API (llm/gemini_client.py) — no local model.
 #
 # Reranking is provider-dispatched via RERANKER_PROVIDER:
-#   "local"  — in-process fastembed cross-encoder (default)
-#   "voyage" — Voyage's rerank HTTP API (llm/voyage_client.py)
+#   "local"   — in-process fastembed cross-encoder (default)
+#   "hfspace" — same model over HTTP on a free HF Space (hf_space/)
+#   "voyage"  — Voyage's rerank HTTP API (llm/voyage_client.py)
 # The ONNX cross-encoder is constructed ONLY on the local path; that
 # conditional is the whole point of the flag, since it is what actually
 # keeps the ~300MB model out of the Render process.
@@ -81,10 +82,14 @@ reranker: Optional[TextCrossEncoder] = None
 
 if RERANKER_PROVIDER == "local":
     reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2")
+elif RERANKER_PROVIDER == "hfspace":
+    # Validate config at boot rather than degrading every live query to
+    # "rerank unavailable" — same eager-error principle as the local
+    # model load. Reachability is NOT checked here: a sleeping Space
+    # must not block startup, and the request path is fail-soft.
+    from llm.hf_rerank_client import _get_base_url
+    logger.info(f"Reranker provider: hfspace ({_get_base_url()})")
 else:
-    # Fail loudly at boot on a missing key rather than degrading every
-    # live query to "rerank unavailable" — same eager-error principle as
-    # the local model load.
     from llm.voyage_client import VOYAGE_RERANK_MODEL, _get_voyage_api_key
     _get_voyage_api_key()
     logger.info(f"Reranker provider: voyage ({VOYAGE_RERANK_MODEL})")
@@ -109,11 +114,16 @@ def _rerank_scores(query: str, contents: List[str]) -> List[float]:
     quality_gate.py compares local and web `rerank_score` values on one
     scale. Raises on failure; both callers are fail-soft around it.
 
-    NOTE the scales differ by provider: local returns raw ms-marco
-    logits (~-8..+11), Voyage returns normalized 0..1.
+    NOTE the scales differ by provider: local and hfspace both return
+    raw ms-marco logits (~-8..+11) from the same model; Voyage returns
+    normalized 0..1.
     """
     if not contents:
         return []
+
+    if RERANKER_PROVIDER == "hfspace":
+        from llm.hf_rerank_client import rerank as hf_rerank
+        return hf_rerank(query, contents)
 
     if RERANKER_PROVIDER == "voyage":
         from llm.voyage_client import rerank as voyage_rerank
