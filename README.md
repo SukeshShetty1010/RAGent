@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)]()
 [![Qdrant](https://img.shields.io/badge/Vector_DB-Qdrant-green.svg)]()
-[![Modal](https://img.shields.io/badge/LLM_Infra-Modal-orange.svg)]()
+[![Gemini](https://img.shields.io/badge/LLM-Gemini_+_Groq_fallback-orange.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)]()
 
 **🔗 Live demo:** [rag-ent.onrender.com](https://rag-ent.onrender.com) — try a real query, then try `Grand Theft Auto VI` to see the honesty gate refuse instead of hallucinate (Render free tier — first request after idle may take a few seconds to cold-start).
@@ -43,8 +43,8 @@ flowchart TB
     
     subgraph Retrieval["Step 3: Evidence Retrieval"]
         RO[RetrievalOrchestrator]
-        WV[(Qdrant<br/>Hybrid Search: BM25 + E5 Dense, RRF Fusion)]
-        RR[Cross-Encoder Reranker<br/>ms-marco-MiniLM-L-6-v2 on Modal]
+        WV[(Qdrant<br/>Hybrid Search: BM25 + Gemini Dense, RRF Fusion)]
+        RR[Cross-Encoder Reranker<br/>Cloudflare Workers AI / in-process ONNX]
         QG[RetrievalQualityGate]
         WD[decide_web_search LLM decision]
         WS[WebSearchTool / Tavily]
@@ -67,7 +67,7 @@ flowchart TB
     
     subgraph Generation["Step 6-7: Prompt & LLM"]
         PM[PromptManager]
-        LLM[Llama 3.1 8B via Groq / Gemma 3 via Modal]
+        LLM[Gemini Flash primary / Llama 3.1 8B via Groq fallback]
         OV[OutputValidator]
         CTX --> PM
         PM -->|FULL/PARTIAL| LLM
@@ -104,7 +104,7 @@ flowchart LR
     
     subgraph Chunking["Chunking & Embedding"]
         CH[editorial_chunker.py]
-        EM[E5-base-v2 Embedder]
+        EM[Gemini gemini-embedding-001<br/>768-dim, L2-normalized]
     end
     
     subgraph Vector["Vector Storage"]
@@ -194,15 +194,15 @@ The ingestion layer handles multi-source data acquisition from three gaming APIs
 
 ### RAG Architecture
 
-The retrieval layer implements **hybrid search** combining BM25 keyword matching with dense vector similarity. Editorial content is chunked using a word-based strategy with configurable overlap, then embedded via GPU-accelerated E5 embeddings. Schemas enforce strict typing across 5 Qdrant collections.
+The retrieval layer implements **hybrid search** combining BM25 keyword matching with dense vector similarity. Editorial content is chunked using a word-based strategy with configurable overlap, then embedded via Gemini's embedding API. Schemas enforce strict typing across 6 Qdrant collections.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Vector DB Schema Design | `vector/create_schema.py` | 5 collections: EditorialChunk, Game, PlatformSpec, IGDB_Game, GameSpot_Game |
+| Vector DB Schema Design | `vector/create_schema.py` | 6 collections: EditorialChunk, Game, PlatformSpec, IGDB_Game, GameSpot_Game, UsageCounter |
 | Hybrid Search (BM25 + Vector) | `retriever/rag_retriever.py` | `RAGRetriever.retrieve()` with `FusionQuery(fusion=Fusion.RRF)` over `dense` + `bm25` sparse |
-| Cross-Encoder Reranking | `llm/modal_rerank.py` | `ms-marco-MiniLM-L-6-v2` on Modal reorders fused candidates into `rerank_score` (original RRF `score` preserved for the quality gate) |
+| Pluggable Cross-Encoder Reranking | `retriever/rag_retriever.py`, `retriever/reranker_provider.py` | `_rerank_scores()` dispatches on `RERANKER_PROVIDER`; reorders fused candidates into `rerank_score` (original RRF `score` preserved for the quality gate) |
 | Word-Based Chunking | `chunking/editorial_chunker.py` | `EditorialChunker` (500 tokens, 50 overlap) |
-| GPU Embedding Service | `llm/modal_embed.py` | `E5Embedder` on T4 GPU (`intfloat/e5-base-v2`) |
+| Embedding Service | `llm/gemini_client.py` | `embed_texts()` — `gemini-embedding-001` at 768-dim, L2-normalized, batched with 429 backoff |
 
 
 ### Agentic Logic & Control Flow
@@ -229,14 +229,22 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 
 ### LLM Infrastructure
 
-LLM serving uses **Groq** (`llama-3.1-8b-instant`) as the primary generator for ultra-low latency streaming, with **Gemma 3 12B** (`google/gemma-3-12b-it`) on Modal L40S wired in as a live fallback — every generation call catches `groq.RateLimitError` and, on a 429, reroutes to the Modal-hosted vLLM engine instead of failing the request. GPU-accelerated embeddings and cross-encoder reranking also run on Modal (T4 and CPU respectively) on every request, not just as a fallback. The lazy binding pattern ensures environment variables are loaded before client initialization, enabling seamless CI/Docker/Render deployment. This infrastructure powers the **75% LLM latency attribution** in the system profile.
+The entire stack runs on **free tiers with no payment method on file** — a hard constraint that drove every choice below.
+
+Generation is **Gemini-primary** (`gemini-flash-latest`) with **Groq** (`llama-3.1-8b-instant`) as a fail-soft fallback: any Gemini error, including an unset key, degrades to Groq rather than failing the request. Embeddings use Gemini's `gemini-embedding-001` at 768 dimensions.
+
+Reranking is **provider-dispatched** at import time via `RERANKER_PROVIDER`, because where it runs turned out to matter enormously. Running the ONNX cross-encoder in-process on Render's free tier (0.1 vCPU / 512MB) measured **~103s per query** and required `batch_size=1` to avoid an OOM kill. Moving it to **Cloudflare Workers AI** (`@cf/baai/bge-reranker-base`, 10,000 Neurons/day free, always warm) brought retrieval to **~6s** — a 16x improvement — and removed the ~300MB model from the request path entirely.
+
+Because each backend emits a different score scale, `retriever/quality_gate.py` keeps **per-provider relevance floors**, and a provider without a calibrated entry skips the relevance ladder rather than thresholding numbers it cannot interpret.
 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
-| Streaming LLM Client | `llm/ragent_client_streaming.py` | `chat_completion_streaming()` via Groq API, falls back to Modal on `RateLimitError` |
-| Rate-Limit Fallback to Modal | `llm/ragent_client.py` | `_get_modal_llm()`, `_generate_via_modal_fallback()` — `Gemma312BVLLM.generate()` on L40S GPU via vLLM |
-| Lazy Client Binding | `llm/ragent_client.py` | `_get_groq_client()`, `_get_modal_llm()` for CI/Docker compatibility |
-| GPU Embedding Infrastructure | `llm/modal_embed.py` | `E5Embedder` with `intfloat/e5-base-v2` on T4 GPU |
+| Streaming LLM Client | `llm/ragent_client_streaming.py` | `chat_completion_streaming()` — Gemini primary, Groq fallback |
+| Provider Fallback Chain | `llm/ragent_client.py` | `chat_completion_remote()`, `last_used_model()` — reports whichever model actually served the call |
+| Gemini Client | `llm/gemini_client.py` | `chat` via OpenAI-compat endpoint, `embed_texts()` via native REST (key sent as a header, never a URL param) |
+| Pluggable Reranker Backends | `llm/cloudflare_rerank_client.py`, `llm/hf_rerank_client.py`, `llm/voyage_client.py` | One `rerank(query, documents) -> List[float]` contract, input-order guaranteed, each fail-soft at the call site |
+| Provider-Scoped Honesty Floors | `retriever/quality_gate.py` | `_FLOORS` per backend; `None` = uncalibrated, skip the ladder |
+| Free-Tier Usage Accounting | `utils/usage_counter.py` | Qdrant-backed request/token counters per provider and surface, surfaced at `/api/usage` |
 
 
 ### Observability & Evaluation
@@ -260,7 +268,9 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 | **Deterministic IDs** | Idempotent upserts, cache safety | `unified_game_id = slug-year-sha1[:8]` |
 | **Intent Schema Versioning** | Cache invalidation on logic changes | `INTENT_SCHEMA_VERSION = "v2"` |
 | **Evidence-Gated Honesty** | Prevent hallucination on weak evidence | `CapabilityAssessor` → `INSUFFICIENT` bypasses LLM |
-| **Hybrid Retrieval** | Semantic + keyword matching | Qdrant BM25 sparse + Dense Vector (E5) |
+| **Hybrid Retrieval** | Semantic + keyword matching | Qdrant BM25 sparse + dense vectors (Gemini, 768-dim) |
+| **Pluggable Reranker** | Free-tier CPU could not run it in-process (~103s/query) | `RERANKER_PROVIDER` dispatch → Cloudflare Workers AI, ~6s |
+| **Per-Provider Relevance Floors** | Each reranker emits a different score scale | `_FLOORS[provider]`; uncalibrated ⇒ skip the ladder, never guess |
 | **Multi-Stage Prompt Fallback** | Guarantee prompt budget compliance | verbose → concise → truncated → minimal |
 | **Quality Gate Signals** | Decouple decision from detection | `QualityReport` with `OK/WEAK/EMPTY` |
 | **Fail-Safe Degradation** | Never crash, always degrade gracefully | `try/except` returning `PARTIAL` |
@@ -271,12 +281,14 @@ Full-stack observability with **thread-safe metrics collection**, nested latency
 
 ### Prerequisites
 
+Every service below has a free tier that requires **no payment method**.
+
 - Python 3.10+
-- [Groq](https://groq.com) account for default ultra-fast inference
-- [Modal](https://modal.com) account (serverless GPU for embeddings, reranking, and the Gemma 3 12B rate-limit fallback)
+- [Google AI Studio](https://aistudio.google.com) key for Gemini (primary generation + embeddings)
+- [Groq](https://groq.com) account (generation fallback)
 - [Qdrant Cloud](https://cloud.qdrant.io) cluster (free tier works)
-- [HuggingFace](https://huggingface.co) account with access to `google/gemma-3-12b-it` (if using Modal LLM)
-- API keys: RAWG, IGDB (Twitch OAuth), GameSpot, Tavily, Groq
+- [Cloudflare](https://dash.cloudflare.com) account for Workers AI reranking — optional; omit it and the reranker runs in-process (`RERANKER_PROVIDER=local`)
+- API keys: RAWG, IGDB (Twitch OAuth), GameSpot, Tavily
 
 ### Installation
 
@@ -298,22 +310,18 @@ cp .env.example .env
 # Edit .env with your API keys (see .env.example for all required variables)
 ```
 
-### Modal Setup
+### Reranker Setup (optional)
 
-```bash
-# Authenticate Modal
-modal setup
+The reranker backend is chosen with `RERANKER_PROVIDER`, resolved once at import:
 
-# Store your HuggingFace token as a Modal secret (required for Gemma 3)
-modal secret create huggingface-secret HF_TOKEN=<your_hf_token>
+| Value | Backend | Notes |
+|-------|---------|-------|
+| `local` (default) | in-process `fastembed` ONNX cross-encoder | Zero setup. Fine locally (~1-3s); ~103s on Render's 0.1 vCPU |
+| `cloudflare` | Workers AI `@cf/baai/bge-reranker-base` | 10,000 Neurons/day free, no card, always warm. Needs `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` (Workers AI: Read) |
+| `hfspace` | `hf_space/` Docker Space, same model as `local` | Requires an HF PRO subscription since July 2026 |
+| `voyage` | Voyage `rerank-2.5-lite` | Cardless free tier is capped at 3 RPM / 10K TPM, below this workload's request shape |
 
-# Deploy the LLM, embedding, and reranking services
-modal deploy llm/modal_llm.py
-modal deploy llm/modal_embed.py
-modal deploy llm/modal_rerank.py
-```
-
-> `retriever/rag_retriever.py` resolves the embed/rerank services via `modal.Cls.from_name(...)` at import time — deploy these before starting the API or ingesting data.
+> Every backend is fail-soft: if it errors, retrieval keeps the RRF ordering and the quality gate skips the relevance floor rather than refusing. Swapping to a backend whose floors are uncalibrated is safe — it degrades honesty gating, it does not fabricate.
 
 ### Ingest Data
 
@@ -348,7 +356,7 @@ Production runs as a **single Render web service** on the free tier (512MB RAM),
 
 - `Dockerfile` is a multi-stage build — Stage 1 builds the Next.js frontend as a static export (`npm run build` → `frontend/out`), Stage 2 installs Python deps and copies the static export into `frontend_build/`, served directly by FastAPI.
 - `render.yaml` defines the single web service and its health check (`/health`).
-- Because RAM is capped at 512MB, heavy ML deps (`torch`, `sentence-transformers`, local model loads) must **never** be added to `requirements.txt` — embedding, reranking, and (optionally) generation are hosted on Modal instead. Keep new dependencies on the Render request path lightweight.
+- Because RAM is capped at 512MB, heavy ML deps (`torch`, `sentence-transformers`, local model loads) must **never** be added to `requirements.txt`. Embedding and generation are API calls (Gemini/Groq), and reranking is an API call too when `RERANKER_PROVIDER=cloudflare`. Keep new dependencies on the Render request path lightweight — and measure peak RSS under real load, not just at boot.
 - All API keys/secrets must be set in the Render dashboard's environment variables — `.env` is gitignored and not deployed.
 
 ```bash
@@ -374,7 +382,7 @@ docker run -p 10000:10000 --env-file .env ragent
 | 7 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
 | 8 | `ContextAssembler` | Deduplicates, orders by entity balance |
 | 9 | `PromptManager` | Applies `comparison_verbose` template |
-| 10 | `RageEngine` | Generates via Groq (`llama-3.1-8b-instant`); falls back to Modal (`Gemma 3 12B`) on a Groq rate-limit |
+| 10 | `RageEngine` | Generates via Gemini (`gemini-flash-latest`); falls back to Groq (`llama-3.1-8b-instant`) on any Gemini error |
 | 11 | `OutputValidator` | Checks balanced Markdown + required PARTIAL section, annotates result (fail-soft) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.
@@ -417,11 +425,12 @@ RAGent/
 ├── data/                  # API clients (RAWG, IGDB, GameSpot)
 ├── embed/                 # Embedding payload preparation
 ├── engine/                # RageEngine (7-step execution) + streaming variant
+├── evaluation/            # Golden set, RAGAS, ablation, relevance calibration
 ├── frontend/              # Next.js web application (built as static export in prod)
+├── hf_space/              # Standalone reranker service (HF Docker Space; separate deploy target)
 ├── ingest/                # Multi-source data ingestion
 ├── KPI/                   # Executive KPI dashboard (5 modules)
-├── llm/                   # Groq streaming client & Modal services (LLM, embed, rerank)
-├── modal_lib/             # Modal utilities and configurations
+├── llm/                   # Gemini/Groq generation + embeddings, pluggable reranker clients
 ├── pre_process/           # Data cleaning & transformation
 ├── retriever/             # Orchestrator, quality gate, strategy selector
 ├── tests/                 # pytest suite + standalone regression/verification scripts

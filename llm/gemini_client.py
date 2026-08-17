@@ -90,7 +90,12 @@ def embed_texts(
     if not texts:
         return []
     api_key = _get_gemini_api_key()
-    url = f"{_GEMINI_REST_BASE}/models/{GEMINI_EMBED_MODEL}:batchEmbedContents?key={api_key}"
+    url = f"{_GEMINI_REST_BASE}/models/{GEMINI_EMBED_MODEL}:batchEmbedContents"
+    # Key goes in a header, NOT ?key=... — requests' HTTPError message
+    # embeds the full URL, so a query-param key ends up verbatim in every
+    # 429/500 traceback, in Render's logs and in local run logs. Hit for
+    # real during the embedding migration's 429 wall.
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
 
     results: List[List[float]] = []
     for start in range(0, len(texts), _EMBED_BATCH_SIZE):
@@ -109,7 +114,7 @@ def embed_texts(
 
         delay = 1.0
         for attempt in range(_EMBED_MAX_RETRIES):
-            resp = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(url, json=payload, headers=headers, timeout=30)
             if resp.status_code == 429 and attempt < _EMBED_MAX_RETRIES - 1:
                 logger.warning(
                     f"Gemini embedContent rate-limited, retrying in {delay}s "

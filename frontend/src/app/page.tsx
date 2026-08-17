@@ -113,9 +113,25 @@ type UsageData = {
   by_surface: Record<string, SurfaceUsage>;
 };
 
+// Display names only. Which providers exist is the backend's call —
+// /api/usage returns them — so this map is a lookup, never the source of
+// truth: an unrecognized key still renders, capitalized.
+const PROVIDER_LABELS: Record<string, string> = {
+  gemini: 'Gemini',
+  groq: 'Groq',
+  cloudflare: 'Cloudflare',
+  voyage: 'Voyage',
+  hfspace: 'HF Space',
+};
+
+function providerLabel(key: string): string {
+  return PROVIDER_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
+}
+
 function UsageCard({ name, usage }: { name: string; usage?: ProviderUsage }) {
   const pct = usage?.percent_of_rpd ?? 0;
   const barColor = pct >= 90 ? 'bg-red-500' : pct >= 60 ? 'bg-amber-500' : 'bg-cyan-500';
+  const tokens = (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0);
   return (
     <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4">
       <p className="text-sm font-semibold text-slate-200 uppercase tracking-wider">{name}</p>
@@ -123,7 +139,9 @@ function UsageCard({ name, usage }: { name: string; usage?: ProviderUsage }) {
         {usage?.requests ?? 0}
         {usage?.limits?.rpd ? (
           <span className="text-sm font-normal text-slate-500"> / {usage.limits.rpd} req/day</span>
-        ) : null}
+        ) : (
+          <span className="text-sm font-normal text-slate-500"> req</span>
+        )}
       </p>
       {usage?.limits?.rpd ? (
         <div className="w-full h-2 bg-slate-800 rounded-full mt-2 overflow-hidden">
@@ -134,6 +152,11 @@ function UsageCard({ name, usage }: { name: string; usage?: ProviderUsage }) {
         </div>
       ) : null}
       <p className="text-xs text-slate-500 mt-2">
+        {/* No progress bar without a declared rpd: providers capped on
+            something else (Cloudflare bills Neurons) would otherwise get
+            a bar drawn against an invented limit. Tokens are shown
+            instead, which is the figure their cap derives from. */}
+        {tokens > 0 ? `${tokens.toLocaleString()} tokens · ` : ''}
         {usage?.fallback_events ?? 0} fallback event(s)
       </p>
     </div>
@@ -182,8 +205,14 @@ function UsageDashboard({ onClose }: { onClose: () => void }) {
               </p>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <UsageCard name="Gemini" usage={data.by_provider?.gemini} />
-              <UsageCard name="Groq" usage={data.by_provider?.groq} />
+              {/* Driven by whatever /api/usage returns, in its order.
+                  Hardcoding the provider list here meant a new backend
+                  provider (the Cloudflare reranker) was counted but
+                  invisible — the UI was deciding which providers exist,
+                  which is the backend's job. */}
+              {Object.entries(data.by_provider ?? {}).map(([key, usage]) => (
+                <UsageCard key={key} name={providerLabel(key)} usage={usage} />
+              ))}
             </div>
 
             {Object.keys(data.by_surface || {}).length > 0 && (

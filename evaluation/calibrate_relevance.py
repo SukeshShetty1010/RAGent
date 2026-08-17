@@ -2,12 +2,17 @@
 """
 evaluation/calibrate_relevance.py — Relevance Floor Calibration
 
-retriever/quality_gate.py's REFUSE_FLOOR/WEAK_FLOOR thresholds must
-come from measurement, not a guess: CrossEncoder.predict applies
-Sigmoid when num_labels == 1 but honours a model-config-declared
-activation function, so ms-marco-MiniLM-L-6-v2's actual output range
-is unknown until observed (see sentence_transformers/cross_encoder/
-CrossEncoder.py:469-493 in the installed package).
+retriever/quality_gate.py's per-provider floors (_FLOORS) must come
+from measurement, not a guess, because each reranker backend emits a
+different scale and none of them documents it reliably:
+  - local/hfspace (Xenova/ms-marco-MiniLM-L-6-v2 via fastembed) turned
+    out to emit raw logits, roughly -8..+11 on this corpus.
+  - cloudflare (@cf/baai/bge-reranker-base) emits 0..1 despite docs
+    implying raw logits, heavily saturated toward both ends.
+  - voyage (rerank-2.5-lite) emits 0..1.
+Run this once per provider and record the result; the output file names
+the provider it was produced with, since the numbers are meaningless
+without it.
 
 Retrieval-only: no LLM call, no web search, no orchestrator web
 decision. Runs every golden_set.jsonl query through RAGRetriever
@@ -33,7 +38,7 @@ from typing import Any, Dict, List, Optional
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
-from retriever.rag_retriever import RAGRetriever
+from retriever.rag_retriever import RAGRetriever, RERANKER_PROVIDER
 from retriever.corpus_index import _get_entity_index
 
 GOLDEN_SET_PATH = Path(__file__).resolve().parent / "data" / "golden_set.jsonl"
@@ -85,11 +90,14 @@ def _summarize(records: List[Dict[str, Any]]) -> Dict[str, float]:
     values = [r["max_relevance"] for r in records]
     if not values:
         return {"count": 0, "min": None, "max": None, "mean": None}
+    # 6 decimals, not 4: bge-reranker-base's "irrelevant" scores land
+    # around 3.7e-05, which 4 decimals rounds to a flat 0.0 and destroys
+    # the separation this file exists to measure.
     return {
         "count": len(values),
-        "min": round(min(values), 4),
-        "max": round(max(values), 4),
-        "mean": round(sum(values) / len(values), 4),
+        "min": round(min(values), 6),
+        "max": round(max(values), 6),
+        "mean": round(sum(values) / len(values), 6),
     }
 
 
@@ -118,17 +126,34 @@ def calibrate(golden_set: List[Dict[str, Any]]) -> Dict[str, Any]:
                 continue
 
             rerank_scores = [c["rerank_score"] for c in chunks if c.get("rerank_score") is not None]
-            max_relevance = max(rerank_scores) if rerank_scores else 0.0
-            mean_relevance = sum(rerank_scores) / len(rerank_scores) if rerank_scores else 0.0
             entity_grounded = entity_index.assess_grounding(query, chunks)
+
+            if not rerank_scores:
+                # No score at all — an empty result set, or a fail-soft
+                # rerank omission. Recorded as an error rather than
+                # substituted with 0.0: on a 0..1 provider that sentinel
+                # is indistinguishable from "scored maximally
+                # irrelevant" and would drag the floors down, which is
+                # exactly the mistake this run exists to avoid.
+                per_query.append(
+                    {
+                        "id": record["id"],
+                        "query": query,
+                        "should_refuse": bool(record.get("should_refuse")),
+                        "error": "no rerank_score on any chunk",
+                        "entity_grounded": entity_grounded,
+                        "evidence_count": len(chunks),
+                    }
+                )
+                continue
 
             per_query.append(
                 {
                     "id": record["id"],
                     "query": query,
                     "should_refuse": bool(record.get("should_refuse")),
-                    "max_relevance": round(max_relevance, 4),
-                    "mean_relevance": round(mean_relevance, 4),
+                    "max_relevance": round(max(rerank_scores), 6),
+                    "mean_relevance": round(sum(rerank_scores) / len(rerank_scores), 6),
                     "entity_grounded": entity_grounded,
                     "evidence_count": len(chunks),
                 }
@@ -144,6 +169,10 @@ def calibrate(golden_set: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     return {
         "generated": date.today().isoformat(),
+        # Which backend produced these numbers. Without it the scores are
+        # unreadable — -3.0 is a sane refuse floor for ms-marco logits
+        # and nonsense for a 0..1 provider.
+        "reranker_provider": RERANKER_PROVIDER,
         "total_queries": len(golden_set),
         "scored": len(scored),
         "errored": len(per_query) - len(scored),
@@ -165,10 +194,14 @@ def main() -> None:
     result = calibrate(golden_set)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = RESULTS_DIR / f"relevance_calibration_{date.today().isoformat()}.json"
+    # Provider goes in the filename so per-provider runs on the same day
+    # cannot overwrite each other. The 2026-08-12 baseline predates this
+    # and is implicitly "local".
+    out_path = RESULTS_DIR / f"relevance_calibration_{RERANKER_PROVIDER}_{date.today().isoformat()}.json"
     out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"\nWrote {out_path}")
+    print(f"Reranker provider: {RERANKER_PROVIDER}")
     print("\n=== SEPARATION ===")
     print(f"should_refuse group max_relevance: {result['should_refuse_relevance']}")
     print(f"answerable group max_relevance:    {result['answerable_relevance']}")
