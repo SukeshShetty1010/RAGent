@@ -16,7 +16,7 @@ from llm.ragent_client import (
     _ANSWER_MAX_TOKENS,
     _GROQ_MODEL,
 )
-from llm.gemini_client import _get_gemini_client, GEMINI_MODEL
+from llm.gemini_client import _get_gemini_client, create_completion, GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +38,14 @@ def chat_completion_streaming(
     with ProfileBlock("LLMGenerationStreaming"):
         try:
             client = _get_gemini_client()
-            stream = client.chat.completions.create(
+            stream = create_completion(
+                client,
                 model=GEMINI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=True,
                 stream_options={"include_usage": True},
-                reasoning_effort="none",
                 **kwargs,
             )
             for chunk in stream:

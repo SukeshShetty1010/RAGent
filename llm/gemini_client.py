@@ -12,7 +12,7 @@ import time
 from typing import Any, List
 
 import requests
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 
 from utils.usage_counter import UsageCounter
 
@@ -23,9 +23,37 @@ logger = logging.getLogger(__name__)
 # native and OpenAI-compat endpoints. gemini-flash-latest is an alias that
 # always resolves to Google's current default flash model, so this stays
 # correct across future deprecations without a code change.
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+# gemini-flash-latest is deliberately NOT the default. That alias
+# currently resolves to gemini-3.7-flash, which allows 20 requests/day on
+# the free tier and was observed closing long response streams
+# mid-answer, with no finish_reason, leaving a severed sentence on screen
+# (2026-08-18). gemini-flash-lite-latest streamed to completion in every
+# measured run (7/7, finish_reason="stop") and has a far larger free
+# allowance. A smaller model that finishes its answer beats a stronger
+# one that gets cut off. Override with GEMINI_MODEL if a paid key or a
+# different tradeoff applies.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
 GEMINI_EMBED_MODEL = os.environ.get("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 GEMINI_EMBED_DIM = 768
+
+# Suppress the thinking budget on models that support it. Set to "" to
+# stop sending the parameter entirely.
+#
+# This is NOT uniformly supported, which quietly broke the promise that
+# GEMINI_MODEL is swappable without a code change: gemini-flash-latest
+# (currently gemini-3.7-flash) accepts "none", while every lite model
+# rejects it with a bare 400 "Request contains an invalid argument"
+# (confirmed live 2026-08-18 for gemini-flash-lite-latest and
+# gemini-3.5-flash-lite; both accept "low"). Because the clients treat
+# any Gemini exception as a reason to fall back, pointing GEMINI_MODEL at
+# a lite model made *every* request fail over to Groq while looking like
+# a healthy Gemini-primary deploy. create_completion() below degrades
+# instead.
+GEMINI_REASONING_EFFORT = os.environ.get("GEMINI_REASONING_EFFORT", "none").strip()
+
+# model name -> whether it accepts reasoning_effort. Populated on first
+# rejection so the retry is paid once per process, not once per request.
+_reasoning_effort_supported: dict[str, bool] = {}
 
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 _GEMINI_REST_BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -48,6 +76,38 @@ def _get_gemini_client() -> OpenAI:
     if _gemini_client is None:
         _gemini_client = OpenAI(base_url=_GEMINI_BASE_URL, api_key=_get_gemini_api_key())
     return _gemini_client
+
+
+def create_completion(client: OpenAI, *, model: str, **kwargs: Any) -> Any:
+    """chat.completions.create with reasoning_effort applied only where
+    the model accepts it.
+
+    Sends reasoning_effort on the first call for a given model; if that
+    call is rejected as a bad request, retries once without it and
+    remembers the answer. The flag is only marked unsupported when the
+    retry actually succeeds, so a 400 caused by something else (an
+    oversized prompt, say) still surfaces as itself rather than being
+    permanently misattributed to reasoning_effort.
+
+    Used for streaming and non-streaming alike. With stream=True the
+    request is issued eagerly and a rejection surfaces here, before any
+    token has been yielded, so the retry cannot duplicate output.
+    """
+    effort = GEMINI_REASONING_EFFORT
+    if effort and _reasoning_effort_supported.get(model, True):
+        try:
+            return client.chat.completions.create(
+                model=model, reasoning_effort=effort, **kwargs
+            )
+        except BadRequestError:
+            result = client.chat.completions.create(model=model, **kwargs)
+            _reasoning_effort_supported[model] = False
+            logger.warning(
+                f"{model} rejected reasoning_effort={effort!r}; "
+                f"continuing without it for the rest of this process"
+            )
+            return result
+    return client.chat.completions.create(model=model, **kwargs)
 
 
 def _get_gemini_api_key() -> str:

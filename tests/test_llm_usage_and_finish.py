@@ -194,6 +194,98 @@ def test_streaming_leaves_no_finish_reason_when_stream_is_cut(monkeypatch):
 
 
 # ------------------------------------------------------------------
+# create_completion: reasoning_effort degradation
+# ------------------------------------------------------------------
+
+class _RecordingCompletions:
+    """Records the kwargs of each create() call, optionally rejecting the
+    first one the way a lite Gemini model rejects reasoning_effort."""
+
+    def __init__(self, reject_reasoning_effort: bool):
+        self.reject = reject_reasoning_effort
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.reject and "reasoning_effort" in kwargs:
+            from openai import BadRequestError
+            raise BadRequestError(
+                "Request contains an invalid argument.",
+                response=_FakeResponse(),
+                body=None,
+            )
+        return "completion"
+
+
+class _FakeResponse:
+    status_code = 400
+    headers: dict = {}
+    request = None
+
+
+def _recording_client(reject):
+    completions = _RecordingCompletions(reject)
+
+    class _Chat:
+        pass
+
+    class _Client:
+        pass
+
+    chat = _Chat()
+    chat.completions = completions
+    client = _Client()
+    client.chat = chat
+    return client, completions
+
+
+def test_create_completion_sends_reasoning_effort_when_accepted():
+    from llm import gemini_client
+
+    gemini_client._reasoning_effort_supported.clear()
+    client, completions = _recording_client(reject=False)
+
+    gemini_client.create_completion(client, model="accepting-model", messages=[])
+
+    assert len(completions.calls) == 1
+    assert completions.calls[0]["reasoning_effort"] == gemini_client.GEMINI_REASONING_EFFORT
+
+
+def test_create_completion_retries_without_reasoning_effort_on_rejection():
+    """A lite model answers reasoning_effort with a bare 400. Treating
+    that as a Gemini outage sent every request to Groq while the deploy
+    still looked Gemini-primary."""
+    from llm import gemini_client
+
+    gemini_client._reasoning_effort_supported.clear()
+    client, completions = _recording_client(reject=True)
+
+    result = gemini_client.create_completion(client, model="lite-model", messages=[])
+
+    assert result == "completion"
+    assert len(completions.calls) == 2
+    assert "reasoning_effort" in completions.calls[0]
+    assert "reasoning_effort" not in completions.calls[1]
+
+    # The rejection is remembered, so later calls skip the doomed attempt.
+    gemini_client.create_completion(client, model="lite-model", messages=[])
+    assert len(completions.calls) == 3
+    assert "reasoning_effort" not in completions.calls[2]
+
+
+def test_create_completion_omits_reasoning_effort_when_blank(monkeypatch):
+    from llm import gemini_client
+
+    gemini_client._reasoning_effort_supported.clear()
+    monkeypatch.setattr(gemini_client, "GEMINI_REASONING_EFFORT", "")
+    client, completions = _recording_client(reject=False)
+
+    gemini_client.create_completion(client, model="any-model", messages=[])
+
+    assert "reasoning_effort" not in completions.calls[0]
+
+
+# ------------------------------------------------------------------
 # Config
 # ------------------------------------------------------------------
 

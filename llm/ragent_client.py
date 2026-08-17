@@ -11,7 +11,7 @@ from groq import Groq
 from utils.observability import ProfileBlock, MetricsRegistry
 from utils.usage_counter import UsageCounter
 from llm.pricing import estimate_cost
-from llm.gemini_client import _get_gemini_client, GEMINI_MODEL
+from llm.gemini_client import _get_gemini_client, create_completion, GEMINI_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -143,13 +143,13 @@ def chat_completion_remote(
     with ProfileBlock("LLMGeneration"):
         try:
             client = _get_gemini_client()
-            completion = client.chat.completions.create(
+            completion = create_completion(
+                client,
                 model=GEMINI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=False,
-                reasoning_effort="none",
                 **kwargs,
             )
             accumulated = [completion.choices[0].message.content or ""]
@@ -234,13 +234,13 @@ def chat_completion_decision(
     with ProfileBlock("LLMDecision"):
         try:
             client = _get_gemini_client()
-            completion = client.chat.completions.create(
+            completion = create_completion(
+                client,
                 model=GEMINI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=False,
-                reasoning_effort="none",
                 **kwargs,
             )
             response = completion.choices[0].message.content or ""

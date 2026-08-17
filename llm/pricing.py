@@ -27,6 +27,7 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     # 0.0 rather than guessing.
     "openai/gpt-oss-120b": (0.15, 0.60),
     # Deliberate 0.0 — Gemini free tier, not a missing-model default.
+    "gemini-flash-lite-latest": (0.0, 0.0),
     "gemini-flash-latest": (0.0, 0.0),
 }
 

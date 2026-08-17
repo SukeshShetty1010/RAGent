@@ -231,9 +231,11 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 
 The entire stack runs on **free tiers with no payment method on file** — a hard constraint that drove every choice below.
 
-Generation is **Gemini-primary** (`gemini-flash-latest`) with **Groq** (`openai/gpt-oss-120b`) as a fail-soft fallback: any Gemini error, including an unset key, degrades to Groq rather than failing the request. Both are overridable via `GEMINI_MODEL` / `GROQ_MODEL` without a code change — worth knowing, because both providers have retired a model out from under this project already. Embeddings use Gemini's `gemini-embedding-001` at 768 dimensions.
+Generation is **Gemini-primary** (`gemini-flash-lite-latest`) with **Groq** (`openai/gpt-oss-120b`) as a fail-soft fallback: any Gemini error, including an unset key, degrades to Groq rather than failing the request. Both are overridable via `GEMINI_MODEL` / `GROQ_MODEL` without a code change — worth knowing, because both providers have retired a model out from under this project already. Embeddings use Gemini's `gemini-embedding-001` at 768 dimensions.
 
-Free tiers move, and they move quietly. `gemini-flash-latest` is an alias that currently resolves to `gemini-3.7-flash`, which allows **20 requests/day** on the free tier; past that, Gemini sometimes closes the response stream mid-answer instead of returning an error. The pipeline detects this (an answer that ends with no `finish_reason` is reported as truncated rather than presented as complete) but cannot repair it, so a busy day needs either a lite model pinned via `GEMINI_MODEL` or a paid key.
+Free tiers move, and they move quietly. The obvious choice here would be `gemini-flash-latest`, but that alias currently resolves to `gemini-3.7-flash`, which allows **20 requests/day** and was observed closing long response streams mid-answer with no `finish_reason` — leaving a severed sentence on screen. The lite model finished its answer in every measured run and has a much larger allowance, so it is the default: a smaller model that completes beats a stronger one that gets cut off. Incomplete answers are detected and labelled either way rather than being passed off as finished.
+
+One sharp edge worth knowing if you swap models: `reasoning_effort` is not uniformly supported. `gemini-flash-latest` accepts `"none"`; every lite model rejects it with a bare HTTP 400. Because the clients treat any Gemini error as grounds to fall back, hardcoding that parameter sent **every** request to Groq while the deploy still looked Gemini-primary. `create_completion()` in `llm/gemini_client.py` now retries once without it and caches the result per model, so all Gemini calls must go through that helper rather than the SDK directly.
 
 Reranking is **provider-dispatched** at import time via `RERANKER_PROVIDER`, because where it runs turned out to matter enormously. Running the ONNX cross-encoder in-process on Render's free tier (0.1 vCPU / 512MB) measured **~103s per query** and required `batch_size=1` to avoid an OOM kill. Moving it to **Cloudflare Workers AI** (`@cf/baai/bge-reranker-base`, 10,000 Neurons/day free, always warm) brought retrieval to **~6s** — a 16x improvement — and removed the ~300MB model from the request path entirely.
 
@@ -384,7 +386,7 @@ docker run -p 10000:10000 --env-file .env ragent
 | 7 | `CapabilityAssessor` | Entity coverage 2/2 → `PARTIAL` |
 | 8 | `ContextAssembler` | Deduplicates, orders by entity balance |
 | 9 | `PromptManager` | Applies `comparison_verbose` template |
-| 10 | `RageEngine` | Generates via Gemini (`gemini-flash-latest`); falls back to Groq (`openai/gpt-oss-120b`) on any Gemini error |
+| 10 | `RageEngine` | Generates via Gemini (`gemini-flash-lite-latest`); falls back to Groq (`openai/gpt-oss-120b`) on any Gemini error |
 | 11 | `OutputValidator` | Checks balanced Markdown + required PARTIAL section, annotates result (fail-soft) |
 
 **Capability Profile**: `PARTIAL` — Transparent, non-hallucinating response with cited sources.

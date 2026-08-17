@@ -14,8 +14,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def test_gemini_model_default():
+    """Defaults to a lite model on purpose: gemini-flash-latest resolves
+    to a 20-request/day model that closes long streams mid-answer."""
     from llm.gemini_client import GEMINI_MODEL
-    assert GEMINI_MODEL == "gemini-flash-latest"
+    assert GEMINI_MODEL == "gemini-flash-lite-latest"
 
 
 def test_gemini_embed_model_and_dim():
@@ -25,9 +27,13 @@ def test_gemini_embed_model_and_dim():
 
 
 def test_pricing_has_gemini_row():
+    from llm.gemini_client import GEMINI_MODEL
     from llm.pricing import MODEL_PRICING
     assert "gemini-flash-latest" in MODEL_PRICING
     assert MODEL_PRICING["gemini-flash-latest"] == (0.0, 0.0)
+    # Whichever Gemini model is actually in use must be priced, or its
+    # 0.0 cost is a missing row rather than a free tier.
+    assert MODEL_PRICING.get(GEMINI_MODEL) == (0.0, 0.0)
 
 
 def test_requirements_has_openai_no_modal():
