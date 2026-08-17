@@ -2,13 +2,17 @@
 RAG Retriever (FULLY OBSERVABLE)
 
 Hybrid Search (BM25 Sparse + Dense Vector) via Qdrant
-with Reciprocal Rank Fusion (RRF), followed by a cross-encoder
-reranking pass over the fused candidates.
+with Reciprocal Rank Fusion (RRF), followed by a reranking
+pass over the fused candidates.
+
+Reranking is provider-dispatched (RERANKER_PROVIDER): the in-process
+fastembed cross-encoder, or Voyage's rerank HTTP API. See
+_rerank_scores() below.
 
 Instrumentation added for:
 - Embedding generation
 - Vector query
-- Cross-encoder reranking
+- Reranking
 - Result formatting
 """
 
@@ -29,6 +33,7 @@ from fastembed.rerank.cross_encoder import TextCrossEncoder
 
 from utils.observability import ProfileBlock, MetricsRegistry
 from llm.gemini_client import embed_text
+from retriever.reranker_provider import resolve_reranker_provider
 
 logger = logging.getLogger("RAG_RETRIEVER")
 if not logger.handlers:
@@ -38,21 +43,51 @@ if not logger.handlers:
 # ---------------------------------------------------------------------
 # Embedding Models
 # ---------------------------------------------------------------------
-# BM25 sparse encoding and cross-encoder reranking both run locally
-# (CPU-only, ONNX). Per CLAUDE.md, both are loaded eagerly at module
-# level rather than lazily: a failure to load must surface as a visible
-# boot-time error, not an unexplained hang on the first live request.
-# Dense embeddings call Gemini's API (llm/gemini_client.py) — no local
-# model, no Modal dependency.
+# BM25 sparse encoding always runs locally (CPU-only, ONNX). Per
+# CLAUDE.md it is loaded eagerly at module level rather than lazily: a
+# failure to load must surface as a visible boot-time error, not an
+# unexplained hang on the first live request. Dense embeddings call
+# Gemini's API (llm/gemini_client.py) — no local model.
+#
+# Reranking is provider-dispatched via RERANKER_PROVIDER:
+#   "local"  — in-process fastembed cross-encoder (default)
+#   "voyage" — Voyage's rerank HTTP API (llm/voyage_client.py)
+# The ONNX cross-encoder is constructed ONLY on the local path; that
+# conditional is the whole point of the flag, since it is what actually
+# keeps the ~300MB model out of the Render process.
+
+# .env must be parsed before RERANKER_PROVIDER is read at import time —
+# RAGRetriever.__init__ also calls load_dotenv(), but that runs far too
+# late to influence the module-level provider decision below.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:  # pragma: no cover - dotenv is a hard dependency
+    pass
 
 # BM25 sparse encoder (lightweight, CPU-only)
 bm25_encoder = SparseTextEmbedding(model_name="Qdrant/bm25")
 
+# Resolved once at import, not per call: the eager-load decision below is
+# made from it, so re-reading it later could dispatch to a local reranker
+# that was never constructed.
+RERANKER_PROVIDER = resolve_reranker_provider()
+
 # Cross-encoder reranker — identical model to the one formerly hosted on
-# Modal. retriever/quality_gate.py's REFUSE_FLOOR/WEAK_FLOOR are
+# Modal. retriever/quality_gate.py's local relevance floors are
 # calibrated on this exact model's raw logits; do not swap it for a
 # different reranker without re-running that calibration.
-reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2")
+reranker: Optional[TextCrossEncoder] = None
+
+if RERANKER_PROVIDER == "local":
+    reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2")
+else:
+    # Fail loudly at boot on a missing key rather than degrading every
+    # live query to "rerank unavailable" — same eager-error principle as
+    # the local model load.
+    from llm.voyage_client import VOYAGE_RERANK_MODEL, _get_voyage_api_key
+    _get_voyage_api_key()
+    logger.info(f"Reranker provider: voyage ({VOYAGE_RERANK_MODEL})")
 
 # ONNX Runtime's per-call memory scales with rerank() batch_size, not just
 # candidate count — confirmed live: 20 real-length (~500-token) candidates
@@ -61,8 +96,33 @@ reranker = TextCrossEncoder(model_name="Xenova/ms-marco-MiniLM-L-6-v2")
 # query. batch_size=1 processes candidates sequentially instead, measured
 # flat at ~305MB RSS (reranker + one full rerank call) with no measurable
 # latency cost on this CPU-bound workload. Do not raise this without
-# re-measuring peak RSS under Render's 512MB cap.
+# re-measuring peak RSS under Render's 512MB cap. Local path only — the
+# Voyage path sends all candidates in one HTTP request.
 _RERANK_BATCH_SIZE = 1
+
+
+def _rerank_scores(query: str, contents: List[str]) -> List[float]:
+    """Relevance scores for `contents` against `query`, in input order.
+
+    Single dispatch point for both rerank call sites (`_rerank` and
+    `score_relevance`) — they must always use the same backend, since
+    quality_gate.py compares local and web `rerank_score` values on one
+    scale. Raises on failure; both callers are fail-soft around it.
+
+    NOTE the scales differ by provider: local returns raw ms-marco
+    logits (~-8..+11), Voyage returns normalized 0..1.
+    """
+    if not contents:
+        return []
+
+    if RERANKER_PROVIDER == "voyage":
+        from llm.voyage_client import rerank as voyage_rerank
+        return voyage_rerank(query, contents)
+
+    return [
+        float(s)
+        for s in reranker.rerank(query, contents, batch_size=_RERANK_BATCH_SIZE)
+    ]
 
 # ---------------------------------------------------------------------
 # RAG Retriever
@@ -256,28 +316,35 @@ class RAGRetriever:
 
     # --------------------------------------------------
     # Public relevance scoring (for evidence already retrieved
-    # elsewhere, e.g. web search results — same cross-encoder scale
-    # as the local rerank_score, so quality_gate can compare them).
+    # elsewhere, e.g. web search results — same reranker backend and
+    # therefore the same scale as rerank_score, so quality_gate can
+    # compare local and web evidence).
     # --------------------------------------------------
 
-    def score_relevance(self, query: str, contents: List[str]) -> List[float]:
+    def score_relevance(self, query: str, contents: List[str]) -> List[Optional[float]]:
         """
-        Score `contents` against `query` with the same in-process
-        cross-encoder used by `_rerank`. Fail-soft: on any reranker
-        error, returns 0.0 for every item rather than raising, so a
-        caller merging these scores into evidence never crashes on a
-        degraded reranker.
+        Score `contents` against `query` with the same reranker backend
+        used by `_rerank`. Fail-soft: on any reranker error, returns
+        None for every item rather than raising, so a caller merging
+        these scores into evidence never crashes on a degraded reranker.
+
+        None, not 0.0: callers must leave `rerank_score` unset on
+        failure so quality_gate.py takes its "no rerank_score" skip
+        path. A sentinel 0.0 was harmless on the local logit scale but
+        sits below any sane refuse floor on Voyage's normalized 0..1
+        scale — i.e. an outage would have turned every web-augmented
+        query into a refusal.
         """
         if not contents:
             return []
 
         try:
-            return [float(s) for s in reranker.rerank(query, contents, batch_size=_RERANK_BATCH_SIZE)]
+            return list(_rerank_scores(query, contents))
         except Exception as exc:
             logger.warning(
-                f"Cross-encoder rerank unavailable (fail-soft): {exc}"
+                f"Reranker unavailable (fail-soft): {exc}"
             )
-            return [0.0] * len(contents)
+            return [None] * len(contents)
 
     # --------------------------------------------------
     # Reranking
@@ -302,7 +369,7 @@ class RAGRetriever:
 
         try:
             contents = [c.get("content") or "" for c in candidates]
-            rerank_scores = list(reranker.rerank(query, contents, batch_size=_RERANK_BATCH_SIZE))
+            rerank_scores = _rerank_scores(query, contents)
 
             for c, s in zip(candidates, rerank_scores):
                 c["rerank_score"] = float(s)
@@ -313,7 +380,7 @@ class RAGRetriever:
 
         except Exception as exc:
             logger.warning(
-                f"Cross-encoder rerank unavailable (fail-soft): {exc}"
+                f"Reranker unavailable (fail-soft): {exc}"
             )
 
         return candidates[:limit]

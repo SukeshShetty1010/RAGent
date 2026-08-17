@@ -221,8 +221,14 @@ class RetrievalOrchestrator:
                 with ProfileBlock("ScoreWebEvidence"):
                     contents = [c.get("content") or "" for c in web_chunks]
                     web_scores = self.retriever.score_relevance(query, contents)
+                    # None means the reranker was unavailable for this
+                    # call. Leave the field unset so quality_gate.py takes
+                    # its "no rerank_score" skip path — writing a sentinel
+                    # here would score web evidence as maximally
+                    # irrelevant and refuse the query instead.
                     for c, s in zip(web_chunks, web_scores):
-                        c["rerank_score"] = s
+                        if s is not None:
+                            c["rerank_score"] = s
 
                 with ProfileBlock("QualityGateReMerge"):
                     quality_report = self.quality_gate.evaluate(

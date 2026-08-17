@@ -12,14 +12,30 @@ sanity, both fast and offline once the ONNX model is cached.
 
 import pytest
 
+from retriever.reranker_provider import resolve_reranker_provider
+
 pytestmark = pytest.mark.unit
 
+# The local cross-encoder only exists when RERANKER_PROVIDER is "local"
+# (see retriever/rag_retriever.py) — under "voyage" it is deliberately
+# never constructed, which is what keeps the ~300MB ONNX model out of
+# the Render process. These tests are about that model specifically, so
+# they skip rather than fail on the Voyage path;
+# tests/test_voyage_client.py covers the other backend.
+local_only = pytest.mark.skipif(
+    resolve_reranker_provider() != "local",
+    reason="RERANKER_PROVIDER is not 'local'; no in-process cross-encoder is loaded",
+)
 
+
+@local_only
 def test_reranker_model_identity():
     from retriever.rag_retriever import reranker
+    assert reranker is not None
     assert reranker.model_name == "Xenova/ms-marco-MiniLM-L-6-v2"
 
 
+@local_only
 def test_reranker_orders_relevant_above_irrelevant():
     from retriever.rag_retriever import reranker
 

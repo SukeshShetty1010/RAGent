@@ -24,12 +24,15 @@ from typing import Dict, Tuple
 logger = logging.getLogger(__name__)
 
 COLLECTION = "UsageCounter"
-PROVIDERS = ("gemini", "groq")
-SURFACES = ("chat", "decision", "embedding", "ragas_judge", "ablation")
+PROVIDERS = ("gemini", "groq", "voyage")
+SURFACES = ("chat", "decision", "embedding", "ragas_judge", "ablation", "rerank")
 
 # Configured from the actual AI Studio / Groq console quota pages, not a
 # blog post — verify before trusting these for anything but a rough
-# "how close am I" dashboard bar.
+# "how close am I" dashboard bar. Voyage is deliberately absent: its free
+# allowance is a token budget, not a requests-per-day cap, so an "rpd"
+# bar would be meaningless. read_today() tolerates the omission — the
+# provider renders with limits {} and percent_of_rpd None.
 FREE_TIER_LIMITS = {
     "gemini": {"rpd": 1500, "rpm": 15},
     "groq": {"rpd": 14400, "rpm": 30},

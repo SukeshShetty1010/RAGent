@@ -1,7 +1,11 @@
 # Reranker Latency & Embedder Quota — Free-Tier Options
 
 **Date**: 2026-08-16
-**Status**: Undecided — options gathered, no option chosen. Resume here next session.
+**Status**: **Decided 2026-08-17 — Option A** (Voyage reranker only; embeddings stay on Gemini).
+Shipped behind `RERANKER_PROVIDER` (default `local`, i.e. no behavior change on merge).
+Remaining sequencing: finish `migrate_embeddings_to_gemini --resume`, re-run
+`evaluation/calibrate_relevance.py` for both providers, set `quality_gate._FLOORS["voyage"]`,
+then flip the flag on Render.
 
 ## Problem
 
@@ -103,7 +107,34 @@ Host the existing fastembed embedder + cross-encoder reranker on a free HF Space
   adding an HF Space ping to the same workflow is free-tier-negligible.
 - **Qdrant**: no new cost regardless of option (same collection, existing plan).
 
-## Open questions for next session
+## Resolved (2026-08-17)
+
+**Q1 — Voyage signup/billing: answered.** Free Tier requires **no payment method**; an org
+without a card on file stays on Free Tier, and *adding* a card is what moves it to Usage Tier 1
+— so there is no auto-bill path past the free allowance. `rerank-2.5-lite` is $0.02/M tokens
+with 200M free tokens per account (~20,000 queries at 20 candidates × ~500 tokens). One
+third-party aggregator describes the free allowance as a time-limited trial, which contradicts
+Voyage's own docs; treat it as unverified — which is exactly why the fail-soft path is
+mandatory rather than optional.
+
+**Q2 — Option chosen: A.** Smallest blast radius, no vector-dim change, does not abandon the
+in-flight Gemini embedding migration, and the reranker is the only one of the two components
+with a clean fail-soft.
+
+**Q3 — n/a** (no collection recreation under Option A).
+
+**Q4 — calibration is sequenced, not skipped.** It cannot run meaningfully while the corpus is
+in a mixed vector space (800 Gemini / 1991 E5), so the swap ships behind
+`RERANKER_PROVIDER=local` and `quality_gate._FLOORS["voyage"] = None` until the migration
+finishes and `evaluation/calibrate_relevance.py` has been re-run for both providers.
+
+**Correction to this document:** the Option B bullet listed `chunking/editorial_chunker.py` and
+`embed/prepare_editorial_payloads.py` as embedder call sites. Neither imports
+`llm.gemini_client`. The actual callers are `upsert/upsert_editorial_chunks.py`,
+`retriever/rag_retriever.py`, `scripts/migrate_embeddings_to_gemini.py`, and
+`evaluation/ragas_embeddings.py`.
+
+## Original open questions (superseded by the section above)
 
 1. Check Voyage AI's actual signup flow — card required? auto-bill or hard-stop past free tier?
 2. Pick: Option A (reranker-only, low risk) vs Option B (full swap, more upside but abandons

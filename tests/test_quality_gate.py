@@ -18,9 +18,19 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def gate() -> RetrievalQualityGate:
+def gate(monkeypatch) -> RetrievalQualityGate:
+    # Floors are provider-scoped; pin the provider so these tests measure
+    # the ladder rather than whatever RERANKER_PROVIDER happens to be set
+    # to in the developer's environment.
+    monkeypatch.setenv("RERANKER_PROVIDER", "local")
     entity_index = CorpusEntityIndex.from_titles(["Far Cry 5"])
     return RetrievalQualityGate(entity_index=entity_index)
+
+
+def _floors(gate: RetrievalQualityGate):
+    floors = gate._resolve_floors()
+    assert floors is not None, "local provider must have calibrated floors"
+    return floors
 
 
 def _chunk(content="Some editorial content about the game.", title="Far Cry 5 Wiki", rerank_score=None, score=0.8):
@@ -37,23 +47,69 @@ def test_empty_chunk_list_is_empty(gate):
 
 
 def test_below_refuse_floor_is_empty(gate):
-    chunks = [_chunk(rerank_score=-6.0)]
+    refuse_floor, _ = _floors(gate)
+    score = refuse_floor - 3.0
+    chunks = [_chunk(rerank_score=score)]
     report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
     assert report.status == QualityStatus.QUALITY_EMPTY
-    assert report.max_relevance == -6.0
+    assert report.max_relevance == score
 
 
 def test_between_floors_is_weak(gate):
-    chunks = [_chunk(rerank_score=0.0)]
+    refuse_floor, weak_floor = _floors(gate)
+    chunks = [_chunk(rerank_score=(refuse_floor + weak_floor) / 2)]
     report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
     assert report.status == QualityStatus.QUALITY_WEAK
 
 
 def test_above_weak_floor_is_ok(gate):
-    chunks = [_chunk(rerank_score=5.0)]
+    _, weak_floor = _floors(gate)
+    score = weak_floor + 3.0
+    chunks = [_chunk(rerank_score=score)]
     report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
     assert report.status == QualityStatus.QUALITY_OK
-    assert report.max_relevance == 5.0
+    assert report.max_relevance == score
+
+
+def test_uncalibrated_provider_skips_floor_never_refuses(gate, monkeypatch):
+    """
+    A reranker provider with no calibrated floors (_FLOORS[...] is None)
+    must skip the relevance ladder entirely. Thresholding a foreign
+    score scale is the failure mode this guards: Voyage's normalized
+    0..1 scores are all below the local REFUSE_FLOOR of -3.0, so
+    applying local floors to them would refuse every single query.
+    """
+    monkeypatch.setitem(RetrievalQualityGate._FLOORS, "voyage", None)
+    monkeypatch.setenv("RERANKER_PROVIDER", "voyage")
+
+    chunks = [_chunk(rerank_score=0.42)]
+    report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
+
+    assert report.status == QualityStatus.QUALITY_OK
+    assert report.max_relevance is None
+    assert "relevance floor skipped" in report.reason
+
+
+def test_calibrated_provider_uses_its_own_floors(gate, monkeypatch):
+    """Once a provider has floors, the ladder applies on that provider's
+    own scale — a 0.05 on a 0..1 scale refuses, where the same number
+    would land WEAK under the local logit floors."""
+    monkeypatch.setitem(RetrievalQualityGate._FLOORS, "voyage", (0.1, 0.5))
+    monkeypatch.setenv("RERANKER_PROVIDER", "voyage")
+
+    report = gate.evaluate(
+        query="What platforms can I play Far Cry 5 on?",
+        task=TaskType.FACTUAL,
+        chunks=[_chunk(rerank_score=0.05)],
+    )
+    assert report.status == QualityStatus.QUALITY_EMPTY
+
+    report = gate.evaluate(
+        query="What platforms can I play Far Cry 5 on?",
+        task=TaskType.FACTUAL,
+        chunks=[_chunk(rerank_score=0.8)],
+    )
+    assert report.status == QualityStatus.QUALITY_OK
 
 
 def test_missing_rerank_score_skips_floor_never_refuses(gate):

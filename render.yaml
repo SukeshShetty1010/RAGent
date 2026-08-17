@@ -22,6 +22,11 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      # Reranker ("local" = in-process ONNX cross-encoder, "voyage" = HTTP API)
+      - key: RERANKER_PROVIDER
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
       # External APIs
       - key: TAVILY_API_KEY
         sync: false

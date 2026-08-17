@@ -9,10 +9,11 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 from agent.task_router import TaskType
 from retriever.corpus_index import CorpusEntityIndex, _get_entity_index
+from retriever.reranker_provider import resolve_reranker_provider
 
 
 # ============================================================
@@ -109,15 +110,41 @@ class RetrievalQualityGate:
     # (partial answer, not refused). That is the honest bound of a
     # single scalar signal; see flagship.md Phase 3.5 for the accepted
     # miss.
+    #
+    # The floors are PROVIDER-SCOPED because the two reranker backends
+    # emit incomparable scales: the local cross-encoder emits raw logits
+    # (above), while Voyage's rerank API emits normalized 0..1. Applying
+    # the local floors to Voyage scores would make WEAK_FLOOR=2.0
+    # unreachable (every query WEAK) and REFUSE_FLOOR=-3.0 impossible to
+    # trip (the refusal signal silently dies) — so the Voyage entry is
+    # None, meaning "not calibrated yet", until
+    # evaluation/calibrate_relevance.py has been re-run against the
+    # fully-migrated corpus. None reuses the existing "no rerank_score"
+    # skip path rather than thresholding an uncalibrated number.
     # --------------------------------------------------------
 
-    REFUSE_FLOOR = -3.0
-    WEAK_FLOOR = 2.0
+    _FLOORS: Dict[str, Optional[Tuple[float, float]]] = {
+        # provider: (REFUSE_FLOOR, WEAK_FLOOR)
+        "local": (-3.0, 2.0),   # ms-marco raw logits, calibrated 2026-08-12
+        "voyage": None,         # 0..1 normalized — set from calibration
+    }
 
     # --------------------------------------------------------
 
     def __init__(self, entity_index: Optional[CorpusEntityIndex] = None) -> None:
         self._entity_index_override = entity_index
+
+    def _resolve_floors(self) -> Optional[Tuple[float, float]]:
+        """(refuse, weak) for the active reranker, or None if that
+        provider has no calibrated floors.
+
+        Resolved per call, not cached, so a provider switch (or a test's
+        monkeypatch.setenv) takes effect without a module reload. The env
+        var is read via retriever/reranker_provider.py rather than
+        importing rag_retriever, which would pull the fastembed ONNX
+        models into every hermetic quality-gate test.
+        """
+        return self._FLOORS.get(resolve_reranker_provider())
 
     def _entity_index(self) -> CorpusEntityIndex:
         if self._entity_index_override is not None:
@@ -189,19 +216,23 @@ class RetrievalQualityGate:
             return report
 
         avg_score = sum(scores) / len(scores) if scores else 0.0
+        floors = self._resolve_floors()
 
-        if not rerank_scores:
-            # Reranker unavailable on this call (fail-soft omission —
-            # see rag_retriever.py:297-300 — or an ablation mode). A
-            # degraded reranker must not turn into a refusal storm, so
-            # the relevance ladder is skipped entirely rather than
-            # refusing or thresholding an uncalibrated number.
-            logger.warning(
-                "No rerank_score on any chunk — relevance floor skipped"
+        if not rerank_scores or floors is None:
+            # Either the reranker was unavailable on this call (fail-soft
+            # omission in rag_retriever._rerank, or an ablation mode), or
+            # the active reranker provider has no calibrated floors. In
+            # both cases the relevance ladder is skipped entirely rather
+            # than refusing or thresholding an uncalibrated number — a
+            # degraded reranker must not turn into a refusal storm.
+            cause = (
+                "no rerank_score" if not rerank_scores
+                else f"floors uncalibrated for provider '{resolve_reranker_provider()}'"
             )
+            logger.warning(f"Relevance floor skipped — {cause}")
             report = QualityReport(
                 status=QualityStatus.QUALITY_OK,
-                reason="Evidence present (relevance floor skipped — no rerank_score)",
+                reason=f"Evidence present (relevance floor skipped — {cause})",
                 confidence_score=avg_score,
                 has_temporal_signal=temporal_signal,
                 entity_grounded=entity_grounded,
@@ -211,11 +242,12 @@ class RetrievalQualityGate:
             return report
 
         max_relevance = max(rerank_scores)
+        refuse_floor, weak_floor = floors
 
-        if max_relevance < self.REFUSE_FLOOR:
+        if max_relevance < refuse_floor:
             status = QualityStatus.QUALITY_EMPTY
             reason = "No evidence above relevance floor"
-        elif max_relevance < self.WEAK_FLOOR:
+        elif max_relevance < weak_floor:
             status = QualityStatus.QUALITY_WEAK
             reason = "Evidence below confident-relevance floor"
         else:
