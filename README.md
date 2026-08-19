@@ -244,7 +244,7 @@ Because each backend emits a different score scale, `retriever/quality_gate.py` 
 | Engineering Skill | Source Module | Key Functions/Classes |
 |-------------------|---------------|----------------------|
 | Streaming LLM Client | `llm/ragent_client_streaming.py` | `chat_completion_streaming()` — Gemini primary, Groq fallback |
-| Provider Fallback Chain | `llm/ragent_client.py` | `chat_completion_remote()`, `last_used_model()` — reports whichever model actually served the call |
+| Provider Fallback Chain | `llm/ragent_client.py` | `chat_completion_remote()`, `answer_model()` — reports whichever model actually produced the answer, distinct from decision-call attribution |
 | Gemini Client | `llm/gemini_client.py` | `chat` via OpenAI-compat endpoint, `embed_texts()` via native REST (key sent as a header, never a URL param) |
 | Pluggable Reranker Backends | `llm/cloudflare_rerank_client.py`, `llm/hf_rerank_client.py`, `llm/voyage_client.py` | One `rerank(query, documents) -> List[float]` contract, input-order guaranteed, each fail-soft at the call site |
 | Provider-Scoped Honesty Floors | `retriever/quality_gate.py` | `_FLOORS` per backend; `None` = uncalibrated, skip the ladder |

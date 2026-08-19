@@ -63,9 +63,7 @@ class ContextEngineeringKPI:
         # ----------------------------------------------------
         # Reset registry for clean aggregation
         # ----------------------------------------------------
-        self.registry._counters.clear()
-        self.registry._distributions.clear()
-        self.registry._categoricals.clear()
+        self.registry.reset()
 
         # ----------------------------------------------------
         # Execute traffic

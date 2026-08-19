@@ -26,6 +26,7 @@ type Kpis = {
   cost_usd: number | null;
   finish_reason: string | null;
   answer_truncated: boolean;
+  answer_model?: string | null;
 };
 
 type Message = {
@@ -110,7 +111,7 @@ const markdownComponents = {
 
 /* ── Per-answer KPI panel ─────────────────────────────── */
 
-function Metric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'good' | 'warn' | 'bad' | 'accent' }) {
+function Metric({ label, value, tone = 'default', className = '' }: { label: string; value: string; tone?: 'default' | 'good' | 'warn' | 'bad' | 'accent'; className?: string }) {
   const toneClass = {
     default: 'text-slate-200',
     accent: 'text-cyan-400',
@@ -119,7 +120,7 @@ function Metric({ label, value, tone = 'default' }: { label: string; value: stri
     bad: 'text-red-400',
   }[tone];
   return (
-    <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
+    <div className={`bg-slate-900/50 border border-slate-800 rounded-xl p-3 ${className}`}>
       <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">{label}</p>
       <p className={`text-lg font-bold ${toneClass}`}>{value}</p>
     </div>
@@ -169,6 +170,7 @@ function KpiPanel({ kpis }: { kpis: Kpis }) {
         <Metric label="Quality Gate" value={kpis.quality_status} tone={qualityTone(kpis.quality_status)} />
         <Metric label="Tokens (in → out)" value={tokens} />
         <Metric label="Est. Cost" value={cost} />
+        <Metric label="Answer Model" value={kpis.answer_model ?? '—'} className="col-span-2" />
       </div>
     </div>
   );

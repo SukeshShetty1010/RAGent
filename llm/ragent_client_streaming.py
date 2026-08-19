@@ -12,6 +12,7 @@ from llm.ragent_client import (
     _get_groq_client,
     _record_usage,
     _record_finish_reason,
+    _record_answer_model,
     _chunk_usage,
     _ANSWER_MAX_TOKENS,
     _GROQ_MODEL,
@@ -66,6 +67,7 @@ def chat_completion_streaming(
                     yield text
             _record_usage(gemini_usage, GEMINI_MODEL)
             MetricsRegistry.get().inc("llm_provider_gemini")
+            _record_answer_model(GEMINI_MODEL)
             UsageCounter.get().record(
                 "gemini", "chat",
                 prompt_tokens=getattr(gemini_usage, "prompt_tokens", 0) or 0,
@@ -74,8 +76,11 @@ def chat_completion_streaming(
         except Exception as exc:
             if any_yielded:
                 # A chunk already reached the SSE stream — falling back now
-                # would duplicate the prefix, so stop here instead.
+                # would duplicate the prefix, so stop here instead. The text
+                # the user received still came from Gemini, so attribute it
+                # there rather than leaving the trace saying "unknown".
                 logger.error(f"Gemini failed mid-stream, aborting (no fallback): {exc}")
+                _record_answer_model(GEMINI_MODEL)
             else:
                 # Nothing yielded yet, safe to retry the whole prompt on Groq.
                 logger.warning(f"Gemini unavailable, falling back to Groq: {exc}")
@@ -110,6 +115,7 @@ def chat_completion_streaming(
                                 yield text
                         _record_usage(groq_usage, _GROQ_MODEL)
                         MetricsRegistry.get().inc("llm_provider_groq")
+                        _record_answer_model(_GROQ_MODEL)
                         UsageCounter.get().record(
                             "groq", "chat",
                             prompt_tokens=getattr(groq_usage, "prompt_tokens", 0) or 0,

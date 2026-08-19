@@ -95,17 +95,21 @@ def _record_usage(usage: Any, model: str) -> None:
     )
 
 
-def last_used_model() -> str:
-    """Which model actually served the most recent generation call, per the
-    llm_provider_* counters incremented by chat_completion_remote/decision/
-    streaming. Used to report the real model to tracing instead of a
-    hardcoded string."""
-    counters = MetricsRegistry.get().generate_report()["counters"]
-    if counters.get("llm_provider_gemini", 0) > 0:
-        return GEMINI_MODEL
-    if counters.get("llm_provider_groq", 0) > 0:
-        return _GROQ_MODEL
-    return "unknown"
+def _record_answer_model(model: str) -> None:
+    """Record which model produced a user-facing answer (not a decision call)."""
+    MetricsRegistry.get().record("answer_model", model)
+
+
+def answer_model() -> str:
+    """Which model actually produced the most recent user-facing answer.
+
+    Reads the "answer_model" categorical, which chat_completion_remote/
+    streaming record on success. Deliberately distinct from decision calls
+    (chat_completion_decision records "decision_model" instead), so a
+    Gemini-served web-search decision can no longer masquerade as the
+    model that wrote the answer when the answer itself fell back to Groq.
+    """
+    return MetricsRegistry.get().last_label("answer_model") or "unknown"
 
 _groq_client = None
 
@@ -156,6 +160,7 @@ def chat_completion_remote(
             _record_finish_reason(completion.choices[0].finish_reason)
             _record_usage(completion.usage, GEMINI_MODEL)
             MetricsRegistry.get().inc("llm_provider_gemini")
+            _record_answer_model(GEMINI_MODEL)
             usage = completion.usage
             UsageCounter.get().record(
                 "gemini", surface,
@@ -194,6 +199,7 @@ def chat_completion_remote(
                             accumulated.append(chunk.choices[0].delta.content)
                     _record_usage(groq_usage, _GROQ_MODEL)
                     MetricsRegistry.get().inc("llm_provider_groq")
+                    _record_answer_model(_GROQ_MODEL)
                     UsageCounter.get().record(
                         "groq", surface,
                         prompt_tokens=getattr(groq_usage, "prompt_tokens", 0) or 0,
@@ -246,6 +252,7 @@ def chat_completion_decision(
             response = completion.choices[0].message.content or ""
             _record_usage(completion.usage, GEMINI_MODEL)
             MetricsRegistry.get().inc("llm_provider_gemini")
+            MetricsRegistry.get().record("decision_model", GEMINI_MODEL)
             UsageCounter.get().record(
                 "gemini", "decision",
                 prompt_tokens=getattr(completion.usage, "prompt_tokens", 0) or 0,
@@ -266,6 +273,7 @@ def chat_completion_decision(
             response = completion.choices[0].message.content or ""
             _record_usage(completion.usage, _GROQ_MODEL)
             MetricsRegistry.get().inc("llm_provider_groq")
+            MetricsRegistry.get().record("decision_model", _GROQ_MODEL)
             UsageCounter.get().record(
                 "groq", "decision",
                 prompt_tokens=getattr(completion.usage, "prompt_tokens", 0) or 0,

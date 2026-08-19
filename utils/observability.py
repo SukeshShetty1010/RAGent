@@ -53,15 +53,24 @@ class DistributionMetric:
 class CategoricalMetric:
     name: str
     values: Dict[str, int] = field(default_factory=dict)
+    last: Optional[str] = None
 
 
 # ============================================================
-# Metrics Registry (Singleton)
+# Metrics Registry (per-thread instance)
 # ============================================================
 
 class MetricsRegistry:
-    _instance: "MetricsRegistry | None" = None
-    _lock = threading.Lock()
+    # api/main.py runs every chat request on its own threading.Thread
+    # (see run_engine there). A process-wide singleton let one request's
+    # reset()/writes clobber another's in-flight counters mid-request.
+    # Scoping the registry per-thread, the same way utils/tracing.py
+    # scopes _local, means each request thread only ever sees its own
+    # metrics. reset() still exists and is still called at the start of
+    # each engine run: a thread-local instance is only fresh if the
+    # thread itself is fresh, and reset() keeps correctness independent
+    # of whether some future change reuses/pools worker threads.
+    _local = threading.local()
 
     def __init__(self) -> None:
         self._counters: Dict[str, CounterMetric] = {}
@@ -70,15 +79,25 @@ class MetricsRegistry:
         self._registry_lock = threading.Lock()
 
     # --------------------------------------------------------
-    # Singleton Access
+    # Per-thread Access
     # --------------------------------------------------------
     @classmethod
     def get(cls) -> "MetricsRegistry":
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
+        instance = getattr(cls._local, "instance", None)
+        if instance is None:
+            instance = cls()
+            cls._local.instance = instance
+        return instance
+
+    # --------------------------------------------------------
+    # Reset
+    # --------------------------------------------------------
+    def reset(self) -> None:
+        """Clear all counters, distributions and categoricals together."""
+        with self._registry_lock:
+            self._counters.clear()
+            self._distributions.clear()
+            self._categoricals.clear()
 
     # --------------------------------------------------------
     # Counters
@@ -107,6 +126,7 @@ class MetricsRegistry:
                 name, CategoricalMetric(name)
             )
             metric.values[label] = metric.values.get(label, 0) + 1
+            metric.last = label
 
     # --------------------------------------------------------
     # Point lookups
@@ -118,6 +138,14 @@ class MetricsRegistry:
             if dist is None or not dist.values:
                 return None
             return dist.values[-1]
+
+    def last_label(self, name: str) -> str | None:
+        """Most recently recorded label for a categorical metric, or None."""
+        with self._registry_lock:
+            cat = self._categoricals.get(name)
+            if cat is None:
+                return None
+            return cat.last
 
     # --------------------------------------------------------
     # Reporting

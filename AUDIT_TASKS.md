@@ -20,7 +20,9 @@ These two were fixed together, not independently, because they're causally coupl
 
 **T8 and T9 fixed** together (same day, follow-up pass). Both live in `retriever/corpus_index.py` and both feed the same consumer, `RetrievalQualityGate.evaluate()` — currently the only live refusal path in production per §1, so their false positives were the entire refusal surface. See the "Resolved" notes inside §8 and §9. §8 in particular shipped a materially different fix than the snippet originally proposed in that section — the proposed one-liner was hand-traced and found to introduce its own new false refusals (`"What's..."`, `"Tell me..."`, `"Compare X and Y"` queries), so a monotone verdict/match span-set split was used instead. This fix should land *before* §1 (relevance floor calibration) and §17 (evaluation re-runs), since `evaluation/calibrate_relevance.py` uses `assess_grounding()` to partition golden-set queries and this change alters some of those verdicts.
 
-Remaining 19 tasks are unchanged from the original audit below.
+**T5 and T6 fixed** together (same day, follow-up pass). Causally coupled — §6's own text notes that under §5, a concurrent request's Gemini counter can flip the (already wrong) model attribution, so §6 could not be fixed durably without §5 first. `MetricsRegistry` (`utils/observability.py`) is now scoped per-thread via `threading.local()`, mirroring `utils/tracing.py`'s existing pattern; the answer-serving model is now recorded explicitly (`answer_model` categorical) at the point each provider actually produces the answer, rather than inferred from provider-usage counters, and is now surfaced through `kpis["answer_model"]` and a UI tile, not just Langfuse. See the "Resolved" notes inside §5 and §6. Test suite now `190 passed, 3 skipped` (up from 179 — 11 net new tests; the two pre-existing `live`-marked `test_qdrant_rebuild.py` failures are unrelated, no `.env`/Qdrant credentials in this environment).
+
+Remaining 17 tasks are unchanged from the original audit below.
 
 ---
 
@@ -32,8 +34,8 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T2** — Order assembled context by `rerank_score`, not the RRF `score` (§2) — Fixed 2026-08-19
 - [ ] **T3** — Finish the last 91 chunks of the Gemini embedding migration (§3)
 - [ ] **T4** — Remove the `max_tokens=150` override in `decide_web_search` (§4)
-- [ ] **T5** — Scope `MetricsRegistry` per request, or accept cross-request KPI contamination (§5)
-- [ ] **T6** — Fix `last_used_model()` to report the model that served the *answer* (§6)
+- [x] **T5** — Scope `MetricsRegistry` per request, or accept cross-request KPI contamination (§5) — Fixed 2026-08-19
+- [x] **T6** — Fix `last_used_model()` to report the model that served the *answer* (§6) — Fixed 2026-08-19
 - [ ] **T7** — Reconcile the two engines: `llm_latency_ms`, trace attributes, refusal string (§7)
 - [x] **T8** — Make `candidate_spans()` handle non-interrogative queries (§8) — Fixed 2026-08-19
 - [x] **T9** — Allow the entity index to refresh without a process restart (§9) — Fixed 2026-08-19
@@ -331,6 +333,18 @@ Two options:
 1. **Thread-local registry** — mirror `tracing.py`: make `MetricsRegistry.get()` return a per-thread instance. Cleanest, and `_reset_metrics()` can then go away entirely. Check every consumer first: `evaluation/`, `KPI/`, and the CLI harnesses read the registry from the main thread and expect process-wide accumulation.
 2. **Accept it and document it** — legitimate if this stays a single-user demo. But then the KPI panel should not be presented as per-answer truth.
 
+### Resolved — 2026-08-19
+
+Fixed alongside §6 (they're causally coupled — see the status update at the top of this file). Shipped option 1: `MetricsRegistry.get()` (`utils/observability.py`) now returns a per-thread instance via `threading.local()`, mirroring `utils/tracing.py`'s `_local` exactly, including its comment explaining the per-request-thread reasoning. `_reset_metrics()` was not deleted as originally proposed — it survives as a public `MetricsRegistry.reset()` method, called once at the top of each engine `run()`/`run_streaming()`, because a thread-local instance is only fresh if the thread is fresh, and `reset()` keeps correctness independent of whether a future change pools or reuses worker threads.
+
+Every consumer was checked before making the change, not assumed safe: no `ThreadPoolExecutor`/`concurrent.futures` usage exists anywhere on the request path (only `api/main.py`'s per-request `threading.Thread` and an unrelated `asyncio.to_thread` in `evaluation/ragas_embeddings.py` that never touches the registry); `KPI/System_Performance_KPI.py`, `KPI/Context_Engineering_KPI.py`, `tests/KPI_run.py`, and the CLI harnesses (`retriever/rag_retriever.py`, `agent/tools/web_search.py`, `upsert/upsert_all.py`) all construct the engine and read the registry synchronously on the same (main) thread; `evaluation/` never reads the registry at all.
+
+`KPI/System_Performance_KPI.py` and `KPI/Context_Engineering_KPI.py` were updated to call `registry.reset()` instead of clearing the three private dicts by hand.
+
+Tests: `tests/test_observability.py` gained thread-isolation coverage — two threads writing independently don't leak into each other or the main thread, and the exact §5 failure mode (thread A records, thread B resets and records, thread A's report stays untouched) is now a passing regression test that failed against the pre-fix singleton.
+
+**Found but out of scope:** `KPI/Context_Engineering_KPI.py` runs 5 queries in a loop expecting to aggregate metrics across all of them, but `RageEngine.run()` resets the registry at the start of *every* run — so its aggregate KPIs (e.g. "Prompt Budget Compliance Rate") only ever reflect the last query while `total_runs` stays 5. Pre-existing, not introduced by this fix, and not fixed here since it needs a separate decision about per-run vs. aggregate semantics.
+
 ---
 
 ## §6 — `last_used_model()` reports the wrong model when the decision and the answer used different providers
@@ -364,6 +378,16 @@ Under §5 this gets worse: a *different* concurrent request's Gemini counter can
 ### Fix
 
 Record the provider that served the answer explicitly rather than inferring it from counters — e.g. have the streaming and blocking clients set a categorical `answer_provider` and read that, or have them return the model name alongside the text.
+
+### Resolved — 2026-08-19
+
+Fixed alongside §5 (see the status update at the top of this file, and §5's own "Resolved" note — the thread-local registry migration was a prerequisite so this fix couldn't be undone by a concurrent request's counters). Shipped the recommended approach: `llm/ragent_client.py` and `llm/ragent_client_streaming.py` now record a categorical `answer_model` explicitly at each point a user-facing answer is actually produced (Gemini success, Groq fallback success, and the mid-stream-failure branch where Gemini tokens already reached the user before it died) via a new `_record_answer_model()` helper, instead of inferring the model from the `llm_provider_*` counters. `chat_completion_decision()` now records a separate `decision_model` categorical so a Gemini-served web-search decision can no longer masquerade as the model that wrote the answer.
+
+`last_used_model()` was replaced with `answer_model()` (`MetricsRegistry.get().last_label("answer_model") or "unknown"`) rather than kept as a compatibility alias — "last used" was the name that licensed the original bug, and there were only 4 call sites plus one `README.md` mention to update, no external consumer. `MetricsRegistry` gained `last_label(name)`, the categorical mirror of the existing `last(name)` for distributions.
+
+Surfaced past Langfuse: both engines now capture `answer_model_used` and add `kpis["answer_model"]`, and the frontend (`frontend/src/app/page.tsx`) renders it as a new "Answer Model" tile in the KPI panel (`Metric` gained an optional `className` prop to let the tile span two columns, since model names like `gemini-flash-lite-latest` don't fit the default tile width).
+
+Tests: `tests/test_answer_model_attribution.py` (new) — covers the exact §6 scenario end to end (decision served by Gemini, answer falls back to Groq → `answer_model()` must return the Groq model, which failed against the pre-fix code), plus the Gemini-served, decision-only, and mid-stream-failure cases. `last_label()` gained unit coverage in `tests/test_observability.py`.
 
 ---
 

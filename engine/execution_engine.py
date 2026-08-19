@@ -81,13 +81,14 @@ class RageEngine:
             raise RuntimeError("Engine already closed")
 
         registry = MetricsRegistry.get()
-        self._reset_metrics(registry)
+        registry.reset()
 
         engine_start = time.perf_counter()
 
         final_answer = ""
         llm_ran = False
         llm_latency_ms: Optional[float] = None
+        answer_model_used: Optional[str] = None
 
         agent_decisions: Dict[str, Any] = {}
         assembled_chunks: List[Dict[str, Any]] = []
@@ -200,7 +201,7 @@ class RageEngine:
                 # ------------------------------------------------
                 if capability != AnswerCapability.INSUFFICIENT:
                     try:
-                        from llm.ragent_client import chat_completion_remote, last_used_model
+                        from llm.ragent_client import chat_completion_remote, answer_model
 
                         llm_start = time.perf_counter()
                         response = chat_completion_remote(prompt)
@@ -210,9 +211,10 @@ class RageEngine:
 
                         final_answer = response.strip()
                         llm_ran = True
+                        answer_model_used = answer_model()
 
                         tracing.record_generation(
-                            model=last_used_model(),
+                            model=answer_model_used,
                             prompt=prompt,
                             output=final_answer,
                             prompt_tokens=int(MetricsRegistry.get().last("llm_prompt_tokens") or 0),
@@ -282,6 +284,7 @@ class RageEngine:
             "task_success": bool(
                 llm_ran and capability != AnswerCapability.INSUFFICIENT
             ),
+            "answer_model": answer_model_used,
         }
 
         raw_metrics = registry.generate_report()
@@ -323,13 +326,3 @@ class RageEngine:
             self.orchestrator.close()
         finally:
             self._closed = True
-
-    # --------------------------------------------------------
-    # Helpers
-    # --------------------------------------------------------
-
-    @staticmethod
-    def _reset_metrics(registry: MetricsRegistry) -> None:
-        registry._counters.clear()
-        registry._distributions.clear()
-        registry._categoricals.clear()

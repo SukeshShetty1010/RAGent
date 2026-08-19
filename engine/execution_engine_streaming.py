@@ -131,12 +131,13 @@ class StreamingRageEngine:
             raise RuntimeError("Engine already closed")
 
         registry = MetricsRegistry.get()
-        self._reset_metrics(registry)
+        registry.reset()
         engine_start = time.perf_counter()
 
         final_answer = ""
         llm_ran = False
         llm_latency_ms: Optional[float] = None
+        answer_model_used: Optional[str] = None
 
         agent_decisions: Dict[str, Any] = {}
         assembled_chunks: List[Dict[str, Any]] = []
@@ -319,8 +320,8 @@ class StreamingRageEngine:
 
                     except ImportError:
                         # Fall back to blocking generation
-                        from llm.ragent_client import chat_completion_remote, last_used_model
-                        
+                        from llm.ragent_client import chat_completion_remote
+
                         llm_start = time.perf_counter()
                         response = chat_completion_remote(prompt)
                         llm_latency_ms = (time.perf_counter() - llm_start) * 1000.0
@@ -343,10 +344,11 @@ class StreamingRageEngine:
                     llm_latency_ms = (time.perf_counter() - step_start) * 1000.0
 
                     if llm_ran:
-                        from llm.ragent_client import last_used_model
+                        from llm.ragent_client import answer_model
 
+                        answer_model_used = answer_model()
                         tracing.record_generation(
-                            model=last_used_model(),
+                            model=answer_model_used,
                             prompt=prompt,
                             output=final_answer,
                             prompt_tokens=int(MetricsRegistry.get().last("llm_prompt_tokens") or 0),
@@ -416,6 +418,7 @@ class StreamingRageEngine:
             "task_success": bool(
                 llm_ran and capability != AnswerCapability.INSUFFICIENT
             ),
+            "answer_model": answer_model_used,
         }
 
         raw_metrics = registry.generate_report()
@@ -490,13 +493,3 @@ class StreamingRageEngine:
             self.orchestrator.close()
         finally:
             self._closed = True
-
-    # --------------------------------------------------------
-    # Helpers
-    # --------------------------------------------------------
-
-    @staticmethod
-    def _reset_metrics(registry: MetricsRegistry) -> None:
-        registry._counters.clear()
-        registry._distributions.clear()
-        registry._categoricals.clear()

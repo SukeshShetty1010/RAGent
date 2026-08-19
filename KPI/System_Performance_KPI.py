@@ -41,9 +41,7 @@ class SystemPerformanceKPI:
         # ----------------------------------------------------
         # Reset observability
         # ----------------------------------------------------
-        self.registry._counters.clear()
-        self.registry._distributions.clear()
-        self.registry._categoricals.clear()
+        self.registry.reset()
 
         # ----------------------------------------------------
         # Execute representative request
