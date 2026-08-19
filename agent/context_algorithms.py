@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import List, Dict, Any, DefaultDict, Set
+from typing import List, Dict, Any, DefaultDict, Set, Callable
 from collections import defaultdict
 
 # ============================================================
@@ -77,6 +77,39 @@ def deduplicate_chunks(
 # Ordering Strategies
 # ============================================================
 
+def is_fully_reranked(chunks: List[Dict[str, Any]]) -> bool:
+    """True when EVERY chunk carries a cross-encoder `rerank_score`.
+
+    All-or-nothing by design. The two fields are not comparable:
+    `score` is a Qdrant RRF fusion score for local chunks (~0.016-0.033)
+    and Tavily's 0..1 relevance for web chunks, while `rerank_score` is
+    the reranker's own scale (raw ms-marco logits for local/hfspace,
+    0..1 for cloudflare/voyage). Sorting a list that mixes the two ranks
+    chunks by which field they happen to carry rather than by relevance,
+    so a partially-scored list falls back to `score` for the WHOLE list.
+    """
+    return bool(chunks) and all(c.get("rerank_score") is not None for c in chunks)
+
+
+def relevance_key(chunks: List[Dict[str, Any]]) -> Callable[[Dict[str, Any]], float]:
+    """Sort key ranking `chunks` by cross-encoder relevance when every
+    chunk has one, else by the original retrieval `score`.
+
+    Decided once over the whole list and reused for every sub-sort
+    inside an ordering strategy, so groups never disagree about which
+    field they rank on.
+
+    Known limitation: if a local rerank succeeds but score_relevance
+    fails for merged web evidence, the list is partial and this falls
+    back to `score` for everything -- reintroducing the RRF-vs-Tavily
+    cross-scale sort. That is pre-existing behavior, not a regression;
+    no comparable signal exists on that path.
+    """
+    if is_fully_reranked(chunks):
+        return lambda c: float(c["rerank_score"])
+    return lambda c: float(c.get("score", 0.0) or 0.0)
+
+
 def order_comparison(
     chunks: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -97,10 +130,12 @@ def order_comparison(
         else:
             grouped[ctx].append(c)
 
-    for items in grouped.values():
-        items.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    key = relevance_key(chunks)
 
-    general.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    for items in grouped.values():
+        items.sort(key=key, reverse=True)
+
+    general.sort(key=key, reverse=True)
 
     ordered: List[Dict[str, Any]] = []
 
@@ -112,7 +147,7 @@ def order_comparison(
     for items in grouped.values():
         remaining.extend(items)
 
-    remaining.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    remaining.sort(key=key, reverse=True)
 
     ordered.extend(general)
     ordered.extend(remaining)
@@ -138,7 +173,7 @@ def order_listicle(
             unordered.append(c)
 
     ordered.sort(key=lambda c: c.get("chunk_index", 0))
-    unordered.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    unordered.sort(key=relevance_key(unordered), reverse=True)
 
     return ordered + unordered
 
@@ -151,7 +186,7 @@ def order_factual(
     """
     return sorted(
         chunks,
-        key=lambda c: c.get("score", 0.0),
+        key=relevance_key(chunks),
         reverse=True,
     )
 

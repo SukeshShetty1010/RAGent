@@ -127,26 +127,46 @@ def _rerank_scores(query: str, contents: List[str]) -> List[float]:
     raw ms-marco logits (~-8..+11) from the same model, while cloudflare
     and voyage both return normalized 0..1 from different models — so
     each needs its own calibrated floors.
+
+    One score per document is a contract, not a convention: `_rerank`
+    zips the result onto candidates and `score_relevance`'s result is
+    zipped onto web chunks (orchestrator.py). A short list makes `zip`
+    truncate silently, corrupting quality_gate's max_relevance (a max()
+    over whichever subset got scored) and producing exactly the
+    mixed-scale list context_algorithms.relevance_key must never sort.
+    cloudflare and hfspace already raise on a length mismatch
+    themselves; this guard is what actually protects `local` (the
+    default provider, a bare generator with no such check) and `voyage`
+    (which can't return short but silently pads with 0.0 instead).
     """
     if not contents:
         return []
 
     if RERANKER_PROVIDER == "cloudflare":
         from llm.cloudflare_rerank_client import rerank as cf_rerank
-        return cf_rerank(query, contents)
+        scores = cf_rerank(query, contents)
 
-    if RERANKER_PROVIDER == "hfspace":
+    elif RERANKER_PROVIDER == "hfspace":
         from llm.hf_rerank_client import rerank as hf_rerank
-        return hf_rerank(query, contents)
+        scores = hf_rerank(query, contents)
 
-    if RERANKER_PROVIDER == "voyage":
+    elif RERANKER_PROVIDER == "voyage":
         from llm.voyage_client import rerank as voyage_rerank
-        return voyage_rerank(query, contents)
+        scores = voyage_rerank(query, contents)
 
-    return [
-        float(s)
-        for s in reranker.rerank(query, contents, batch_size=_RERANK_BATCH_SIZE)
-    ]
+    else:
+        scores = [
+            float(s)
+            for s in reranker.rerank(query, contents, batch_size=_RERANK_BATCH_SIZE)
+        ]
+
+    if len(scores) != len(contents):
+        raise ValueError(
+            f"{RERANKER_PROVIDER} reranker returned {len(scores)} scores "
+            f"for {len(contents)} documents"
+        )
+
+    return scores
 
 # ---------------------------------------------------------------------
 # RAG Retriever
@@ -386,27 +406,35 @@ class RAGRetriever:
         `score` (RRF fusion score) untouched for downstream consumers.
 
         Fail-soft: on any reranker error, falls back to the original
-        RRF ordering.
+        RRF ordering and leaves NO candidate carrying a `rerank_score`.
+        Scoring and mutation are separate phases on purpose — a
+        half-scored list (some candidates with `rerank_score`, some
+        without) is worse than none at all, since
+        context_algorithms.relevance_key falls back to comparing `score`
+        across the whole list the moment even one chunk is missing it,
+        silently discarding every score that WAS computed.
         """
         if not candidates:
             return candidates
 
         try:
             contents = [c.get("content") or "" for c in candidates]
-            rerank_scores = _rerank_scores(query, contents)
-
-            for c, s in zip(candidates, rerank_scores):
-                c["rerank_score"] = float(s)
-
-            candidates.sort(
-                key=lambda c: c["rerank_score"], reverse=True
-            )
-
+            scored = [float(s) for s in _rerank_scores(query, contents)]
+            if len(scored) != len(candidates):
+                raise ValueError(
+                    f"reranker returned {len(scored)} scores for "
+                    f"{len(candidates)} candidates"
+                )
         except Exception as exc:
             logger.warning(
                 f"Reranker unavailable (fail-soft): {exc}"
             )
+            return candidates[:limit]
 
+        for c, s in zip(candidates, scored):
+            c["rerank_score"] = s
+
+        candidates.sort(key=lambda c: c["rerank_score"], reverse=True)
         return candidates[:limit]
 
     # --------------------------------------------------

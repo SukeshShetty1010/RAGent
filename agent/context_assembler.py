@@ -13,6 +13,7 @@ from agent.context_algorithms import (
     order_listicle,
     order_factual,
     apply_character_budget,
+    is_fully_reranked,
 )
 
 from utils.observability import ProfileBlock, MetricsRegistry
@@ -77,6 +78,11 @@ class ContextAssembler:
                 "context_deduped_chunks", len(deduped)
             )
 
+            MetricsRegistry.get().record(
+                "context_order_key",
+                "rerank_score" if is_fully_reranked(deduped) else "score",
+            )
+
             # ------------------------------------------------
             # Step B: Task-aware Ordering
             # ------------------------------------------------
@@ -98,6 +104,16 @@ class ContextAssembler:
             # ------------------------------------------------
             # Step D: HARD Context Budget Enforcement
             # ------------------------------------------------
+            oversized = sum(
+                1 for c in ordered
+                if len(c.get("content") or "") > self.MAX_CONTEXT_CHARS
+            )
+            if oversized:
+                logger.warning(
+                    f"{oversized} chunk(s) exceed MAX_CONTEXT_CHARS="
+                    f"{self.MAX_CONTEXT_CHARS} and were dropped whole"
+                )
+
             with ProfileBlock("SafeContextCap"):
                 final_chunks = apply_character_budget(
                     ordered_chunks=ordered,
@@ -111,5 +127,11 @@ class ContextAssembler:
                 "context_final_chars",
                 sum(len(c.get("content", "")) for c in final_chunks),
             )
+
+            dropped = len(ordered) - len(final_chunks)
+            if dropped:
+                MetricsRegistry.get().observe(
+                    "context_chunks_dropped_by_budget", dropped
+                )
 
             return final_chunks
