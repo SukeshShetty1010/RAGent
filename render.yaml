@@ -44,6 +44,10 @@ services:
         sync: false
       - key: VOYAGE_API_KEY
         sync: false
+      # Corpus entity index refresh interval (seconds). 0 disables
+      # refresh. Default (900) applies if unset.
+      - key: CORPUS_INDEX_TTL_SECONDS
+        sync: false
       # External APIs
       - key: TAVILY_API_KEY
         sync: false

@@ -407,6 +407,20 @@ grading change, not a silent weakening (both now pass).
 Full artifacts: `evaluation/results/relevance_calibration_2026-08-12.json`,
 `runs_2026-08-12_{default,corpusonly}.jsonl`, `refusal_2026-08-12_{default,corpusonly}.json`.
 
+**Follow-up fix (2026-08-19):** a full-codebase audit (`AUDIT_TASKS.md` §8/§9) found two more
+false-refusal sources in `corpus_index.py`, both landing after this phase closed. §8:
+`candidate_spans()` unconditionally skipped the sentence-initial token, so an entity-only query
+with no interrogative lead-in ("Far Cry 5 combat") produced no matching span and fell through to
+a refusal for a game genuinely in the corpus. Fixed with an asymmetric span search — a
+conservative span set (unchanged default) decides whether the query names an entity at all, and a
+separate greedy set (including the first token) is checked for a match — constructed so it can
+only turn a false refusal into a correct answer, never the reverse. §9: the entity index was a
+bare process-lifetime singleton with no refresh path; added a TTL (default 900s) with a
+single-flight refresh lock so newly-ingested titles become groundable without a restart, without
+adding request latency or a thundering herd against Qdrant. See the "Resolved" notes in
+`AUDIT_TASKS.md` §8/§9 for the full trace, including why the audit's own originally-proposed §8
+fix was rejected (it introduced new refusals on 5 of the 50 golden-set queries).
+
 ### Phase 4 — Presentation (4–6 h)
 
 **4.1 Rewrite the metrics section** *(~2 h)* — Replace the five "resume-grade" tables with

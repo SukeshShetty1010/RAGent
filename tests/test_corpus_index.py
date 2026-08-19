@@ -87,7 +87,63 @@ def test_candidate_spans_keeps_digits_and_roman_numerals_whole(index):
 
 def test_candidate_spans_ignores_sentence_initial_token(index):
     spans = index.candidate_spans("Grand Theft Auto V release date")
-    # The query's first token ("Grand") is never span-seeded, so the
-    # entity is missed here by design — callers must phrase queries
-    # with the entity mid/end-sentence, which the golden set does.
+    # The default (conservative) span set never seeds off the first
+    # token, so it misses an entity that opens the sentence. This is
+    # the "verdict" set assess_grounding uses to decide whether the
+    # query names *any* entity at all — it stays conservative on
+    # purpose. See test_sentence_initial_title_is_grounded below for
+    # the "match" set, which does include the first token and recovers
+    # this exact case at the assess_grounding level.
     assert ("grand", "theft", "auto", "v") not in spans
+
+
+def test_sentence_initial_title_is_grounded(index):
+    """assess_grounding must not miss an entity just because it opens
+    the sentence: it searches a wider (greedy) span set than
+    candidate_spans()'s default, once the conservative set has
+    confirmed the query names something at all."""
+    result = index.assess_grounding(
+        "Grand Theft Auto V release date",
+        evidence=[],
+    )
+    assert result is True
+
+
+def test_bare_title_query_is_grounded(index):
+    """Regression for AUDIT_TASKS §8: an entity-only query with no
+    interrogative lead-in ("What...") must still ground, since the
+    corpus does anchor Far Cry 5."""
+    result = index.assess_grounding("Far Cry 5 combat", evidence=[])
+    assert result is True
+
+
+def test_leading_verb_query_is_grounded(index):
+    result = index.assess_grounding(
+        "Compare Far Cry 5 and Doom Eternal", evidence=[]
+    )
+    assert result is True
+
+
+def test_leading_non_stopword_without_entity_stays_none(index):
+    """A leading non-stopword verb with no known title anywhere in the
+    query must not manufacture a refusal."""
+    result = index.assess_grounding("Tell me about combat", evidence=[])
+    assert result is None
+
+
+def test_contraction_leading_token_stays_none(index):
+    """"What's" is not in _STOPWORDS (the tokenizer keeps apostrophes),
+    so a naive "skip index 0 only if it's a stopword" fix would treat
+    it as a candidate span and refuse. 5 of the 50 golden-set queries
+    open with "What's"."""
+    result = index.assess_grounding(
+        "What's the best co-op shooter?", evidence=[]
+    )
+    assert result is None
+
+
+def test_sentence_initial_unknown_title_still_refuses(index):
+    result = index.assess_grounding(
+        "Grand Theft Auto VI release date", evidence=[]
+    )
+    assert result is False

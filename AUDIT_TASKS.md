@@ -9,19 +9,34 @@ The system runs and answers queries. Nothing here is a crash. Everything here is
 
 ---
 
+## Status update — 2026-08-19
+
+**T2 and T20 fixed** together, commit [`b70ccfa`](https://github.com/SukeshShetty1010/RAG_ent/commit/b70ccfa) on `main`. Test suite now `168 passed, 3 skipped` (up from 159 — 9 net new tests; two pre-existing `live`-marked tests in `test_qdrant_rebuild.py` fail locally for unrelated reasons, no `.env`/Qdrant credentials in this environment).
+
+These two were fixed together, not independently, because they're causally coupled: §2's own fix note below already says a `rerank_score` sort produces a list "sorted incoherently across two different scales" unless §20 is fixed first — §20 is exactly how that half-scored list gets produced. See the "Resolved" notes inside §2 and §20 for what actually shipped, which differs from each section's originally-proposed snippet in two deliberate ways:
+
+- §2 shipped an all-or-nothing `is_fully_reranked()` / `relevance_key()` pair instead of the per-chunk `_relevance()` fallback the fix snippet proposed — the snippet's own approach mixes scales within one sort, which is precisely the hazard the surrounding prose warns against.
+- §20's guard was placed in `_rerank_scores()` (the single dispatch point shared by `_rerank` and `score_relevance`), not in `_rerank()` as proposed, because `score_relevance()` has the identical exposure via `orchestrator.py:229`. The provider table in §20 also had two errors, corrected there: `hfspace` already guards against a short result, and `local` — not `hfspace` — is the actually-unguarded default provider.
+
+**T8 and T9 fixed** together (same day, follow-up pass). Both live in `retriever/corpus_index.py` and both feed the same consumer, `RetrievalQualityGate.evaluate()` — currently the only live refusal path in production per §1, so their false positives were the entire refusal surface. See the "Resolved" notes inside §8 and §9. §8 in particular shipped a materially different fix than the snippet originally proposed in that section — the proposed one-liner was hand-traced and found to introduce its own new false refusals (`"What's..."`, `"Tell me..."`, `"Compare X and Y"` queries), so a monotone verdict/match span-set split was used instead. This fix should land *before* §1 (relevance floor calibration) and §17 (evaluation re-runs), since `evaluation/calibrate_relevance.py` uses `assess_grounding()` to partition golden-set queries and this change alters some of those verdicts.
+
+Remaining 19 tasks are unchanged from the original audit below.
+
+---
+
 ## Task checklist
 
 Ordered by impact. Items 1–3 are the ones that change what the user actually receives.
 
 - [ ] **T1** — Calibrate the Cloudflare reranker floors; the honesty gate is currently switched off (§1)
-- [ ] **T2** — Order assembled context by `rerank_score`, not the RRF `score` (§2)
+- [x] **T2** — Order assembled context by `rerank_score`, not the RRF `score` (§2) — Fixed 2026-08-19
 - [ ] **T3** — Finish the last 91 chunks of the Gemini embedding migration (§3)
 - [ ] **T4** — Remove the `max_tokens=150` override in `decide_web_search` (§4)
 - [ ] **T5** — Scope `MetricsRegistry` per request, or accept cross-request KPI contamination (§5)
 - [ ] **T6** — Fix `last_used_model()` to report the model that served the *answer* (§6)
 - [ ] **T7** — Reconcile the two engines: `llm_latency_ms`, trace attributes, refusal string (§7)
-- [ ] **T8** — Make `candidate_spans()` handle non-interrogative queries (§8)
-- [ ] **T9** — Allow the entity index to refresh without a process restart (§9)
+- [x] **T8** — Make `candidate_spans()` handle non-interrogative queries (§8) — Fixed 2026-08-19
+- [x] **T9** — Allow the entity index to refresh without a process restart (§9) — Fixed 2026-08-19
 - [ ] **T10** — Either consume `RouterDecision`'s three dead fields or delete them (§10)
 - [ ] **T11** — Decide whether web fallback should be reachable outside `TaskType.OPEN` (§11)
 - [ ] **T12** — Either send `insufficient_prompt()` to the LLM or delete it (§12)
@@ -32,7 +47,7 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17)
 - [ ] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18)
 - [ ] **T19** — Cancel the engine thread when the SSE client disconnects (§19)
-- [ ] **T20** — Harden `_rerank()` against a short score list (§20)
+- [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
 - [ ] **T21** — Fix stale comments and docs that describe retired infrastructure (§21)
 - [ ] **T22** — Drop the unused `transformers` dependency (§22)
 - [ ] **T23** — Invert the two "uncalibrated placeholder" tests once T1 lands (§23)
@@ -180,6 +195,18 @@ def _relevance(c: Dict[str, Any]) -> float:
 Careful: a mixed list (some chunks with a rerank score, some without) sorts incoherently across two different scales. Prefer *all* rerank scores or *none* — and see §20, which is exactly how a mixed list gets produced.
 
 Separately, consider whether `MAX_CONTEXT_CHARS = 4000` still makes sense. It is a Modal/Llama-8B-era number. Gemini Flash Lite has a million-token window; the pipeline retrieves and reranks 5–10 chunks and then throws away 60–70% of them for a budget that no longer binds.
+
+### Resolved — 2026-08-19
+
+Fixed alongside §20 (they're causally coupled — see the status update at the top of this file). Shipped `is_fully_reranked(chunks)` + `relevance_key(chunks)` in `agent/context_algorithms.py` instead of the per-chunk `_relevance()` fallback proposed above: the proposed snippet scores each chunk independently, defaulting to `score` per-chunk when `rerank_score` is missing on *that* chunk — which is exactly the "mixed list sorts incoherently across two scales" hazard this section already warns about, just moved from an accidental outcome into the fix itself. `relevance_key()` instead decides once, over the whole list: `rerank_score` for every chunk if every chunk has one, else `score` for the whole list. All 5 sort sites (`order_comparison` ×3, `order_listicle`'s tail, `order_factual`) now go through it.
+
+Also caught in the process: on a `LOCAL_PLUS_WEB` merge, sorting by `score` was already mixing Qdrant's RRF fusion score (~0.016–0.033) with Tavily's 0..1 relevance (`agent/tools/web_search.py:110`) — a second instance of the same cross-scale hazard, independent of the reranker question. `relevance_key()` fixes this too, since local and web chunks share the reranker's scale once both are scored.
+
+`MAX_CONTEXT_CHARS` was deliberately left untouched (ordering-only fix, by scope decision).
+
+`agent/context_assembler.py` gained observability the section didn't ask for but the fix needed to be verifiable: `context_order_key` (records whether `rerank_score` or `score` won, per assembly call) and `context_chunks_dropped_by_budget`, plus a warning when a chunk exceeds `MAX_CONTEXT_CHARS` and is dropped whole (closing this section's "no log line" secondary note).
+
+Tests: `tests/test_context_ordering.py` (new, 8 tests) — zero test coverage existed for `context_algorithms.py` or `context_assembler.py` before this.
 
 ---
 
@@ -437,6 +464,39 @@ if idx == 0 and tokens[0].lower() in _STOPWORDS:
 
 Add a regression test for a bare-title query — `"Far Cry 5 combat"` — asserting `assess_grounding` is not `False`.
 
+### Resolved — 2026-08-19
+
+Shipped a different fix than the snippet proposed above. That snippet —
+`if idx == 0 and tokens[0].lower() in _STOPWORDS: continue` — was hand-traced
+against `_TOKEN_RE` (which keeps apostrophes) and found to introduce new
+false refusals of its own: `"What's the best co-op shooter?"` → `"what's"`
+is not in `_STOPWORDS` → seeds a junk span → refuses (**5 of the 50
+golden-set queries open with "What's"**); `"Tell me about combat"` →
+`"tell"` not in `_STOPWORDS` → refuses where today it's `None`; `"Compare
+Far Cry 5 and Doom Eternal"` → `"Compare"` absorbs into the adjacent span →
+`("compare","far","cry","5")` → no match → a previously-grounded query
+would flip to refused.
+
+Instead, `candidate_spans()` gained an `include_sentence_initial` keyword
+(default `False`, preserving today's behavior exactly) and
+`assess_grounding()` now checks two span sets: the conservative default
+(index 0 excluded) as the "does this query name any entity at all" verdict,
+plus the greedy `include_sentence_initial=True` variant for matching. Both
+sets are checked against `known_titles`/`source_titles` — not just the
+greedy one — because including index 0 can merge a leading non-entity word
+into what would otherwise be a clean span (the `"Compare Far Cry 5..."`
+case above), and the conservative set already splits that correctly. This
+construction is monotone: it can only turn a `False` into a `True`, never
+`None`/`True` into `False`.
+
+Tests: `tests/test_corpus_index.py` gained 6 new cases covering the bare-title
+regression this section asked for, the `"Compare X and Y"` and `"What's..."`
+non-regressions, and the sentence-initial-title recovery case, alongside all
+8 pre-existing tests (unchanged, still passing — including
+`test_candidate_spans_ignores_sentence_initial_token`, whose comment was
+reworded since it's now only true at the span level, not the grounding
+level).
+
 ---
 
 ## §9 — The corpus entity index never refreshes
@@ -457,6 +517,37 @@ def _get_entity_index() -> CorpusEntityIndex:
 Loaded once per process, from a single Qdrant scroll of the `Game` collection. Any game ingested after the API booted is not in `known_titles`, so queries about it hit §8's `QUALITY_EMPTY` refusal path until the service restarts.
 
 On Render this partly hides itself — the free tier spins down after ~15 minutes idle, so the index is rebuilt often. That is luck, not design. Add a TTL, or an explicit invalidation the ingest path can call.
+
+### Resolved — 2026-08-19
+
+Added a TTL (`CORPUS_INDEX_TTL_SECONDS`, default 900s, `<= 0` disables
+refresh) plus a `threading.Lock`-guarded single-flight rebuild: on expiry,
+one thread refreshes while concurrent requests keep serving the current
+index rather than queueing behind a Qdrant scroll (the API spawns a thread
+per request — see `api/main.py`). The TTL is read from `os.environ` per
+call rather than cached, matching the existing convention in
+`quality_gate._resolve_floors()`.
+
+Two fail-soft details worth calling out: `_entity_index_loaded_at` is
+bumped *before* the rebuild attempt, so a persistently-failing Qdrant
+retries once per TTL window rather than on every request during the
+outage; and a refresh that comes back with an empty `known_titles` (the
+constructor's existing behavior on a swallowed load exception) keeps the
+previous good index instead of replacing it — an empty index would make
+every query un-groundable.
+
+Also added `invalidate_entity_index()` as an explicit seam, but **not**
+wired to the ingest path as this section originally suggested:
+`scripts/bulk_ingest.py` and `upsert/*` run as separate CLI processes and
+cannot reach this module's in-process state, so a hook there would do
+nothing for the real staleness. The TTL is the actual fix for that path;
+the invalidation function exists for tests and any future in-process
+ingest trigger.
+
+Tests: `tests/test_corpus_index_ttl.py` (new, 5 tests) — caching within
+TTL, rebuild on expiry, keep-previous-index on a failed/empty refresh,
+refresh disabled at `TTL<=0`, and `invalidate_entity_index()` forcing a
+rebuild even with refresh disabled.
 
 ---
 
@@ -758,6 +849,17 @@ if len(rerank_scores) != len(candidates):
 
 Placed before the loop, this turns a partial mutation into a clean fail-soft fallback to RRF order.
 
+### Resolved — 2026-08-19
+
+Fixed alongside §2. Two corrections to this section's own analysis, made while implementing:
+
+1. **The guard moved to `_rerank_scores()`, not `_rerank()`.** `score_relevance()` has the identical exposure — its result is zipped onto `web_chunks` at `orchestrator.py:229` — and `_rerank_scores()` is the single dispatch point both callers already share (its own docstring says so). A length check inside `_rerank()` alone would have left `score_relevance()`'s web-evidence path unguarded.
+2. **The provider table above has two errors.** Checked each client directly: `llm/hf_rerank_client.py:131-134` **does** raise on a length mismatch — `hfspace` was already guarded, contrary to what's stated above. `local` — the default provider, and the one this whole finding is really about — calls `reranker.rerank()` (a bare generator) with no check at all; it's the actually-unguarded path. `voyage` can't return short (it pre-allocates `[0.0] * len(documents)`), but silently pads with `0.0` for omitted documents instead, which is arguably worse on a 0..1 scale since it reads as "confirmed irrelevant" rather than "unscored."
+
+`_rerank_scores()` now raises `ValueError` on any length mismatch, for every provider branch, before returning. `_rerank()` was also restructured so scoring and mutation are separate phases — nothing is written to any candidate until every score is validated — since a length check alone doesn't prevent the *original* code's problem: it mutated candidates as it scored them, inside the same `try` the check would live in, so a *later* failure could still leave earlier candidates partially mutated. `score_relevance()` needed no code change; its existing `except` already converts the new `ValueError` into its documented all-`None` fail-soft return.
+
+Tests: `tests/test_rerank_failsoft.py` gained 3 tests (up from 4) — one exercising `_rerank()`'s own inner length check, two exercising `_rerank_scores()`'s guard directly (via a stub reranker returning one fewer score than requested, rather than monkeypatching `_rerank_scores` itself, which would bypass the exact code under test).
+
 ---
 
 ## §21 — Comments and docs describe retired infrastructure
@@ -826,7 +928,7 @@ But the effect today is that the suite goes green while **asserting that the pro
 The three that change what users receive:
 
 1. **§1 — the honesty gate is off.** An uncalibrated `None` disables the relevance ladder for the active reranker, so every query with any evidence is graded `QUALITY_OK`, PARTIAL is nearly unreachable, and the weak-evidence web-search path is dead. Tooling to fix it is written and has never been run.
-2. **§2 — reranking is thrown away.** Context assembly re-sorts by the RRF score, then a 4000-char budget admits 2–3 of the ~1500-char chunks. The cross-encoder pays full cost and barely influences the prompt.
+2. **§2 — reranking is thrown away.** *(Fixed 2026-08-19, together with §20 — see status update at the top of this file.)* Context assembly re-sorts by the RRF score, then a 4000-char budget admits 2–3 of the ~1500-char chunks. The cross-encoder pays full cost and barely influences the prompt.
 3. **§3 — the migration is 91 chunks short.** Those chunks are being searched with mismatched embedding spaces right now.
 
 **Order of operations matters:** §3 → §1 → §17. Calibrating or evaluating before the corpus is uniform bakes the mismatch into the floors and into every published number.

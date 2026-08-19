@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
+import time
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from qdrant_client import QdrantClient
@@ -141,14 +143,31 @@ class CorpusEntityIndex:
     # Public API
     # --------------------------------------------------------
 
-    def candidate_spans(self, query: str) -> List[Tuple[str, ...]]:
+    def candidate_spans(
+        self, query: str, *, include_sentence_initial: bool = False
+    ) -> List[Tuple[str, ...]]:
         """
         Maximal runs of capitalized tokens in `query`, normalized to
-        lowercase token tuples. The sentence-initial token is never
-        considered (golden-set queries are always interrogative:
-        "What...", "Which...", "Can I...") so it never seeds a span.
-        Digits and Roman numerals continue an in-progress span so
-        "Far Cry 5" and "Grand Theft Auto VI" stay whole.
+        lowercase token tuples. Digits and Roman numerals continue an
+        in-progress span so "Far Cry 5" and "Grand Theft Auto VI" stay
+        whole.
+
+        By default the sentence-initial token never seeds a span. Many
+        golden-set queries are interrogative ("What...", "Which...",
+        "Can I...") where token 0 is a stopword anyway, but plenty of
+        real queries are not ("Far Cry 5 combat", "Compare X and Y",
+        "Tell me about...") — for those, skipping index 0 unconditionally
+        either misses the entity entirely or, if index 0 is treated like
+        any other token, turns non-entity leading words ("Tell", "What's")
+        into spurious spans. `assess_grounding` resolves this by using
+        two calls: this default (conservative) as the "does the query
+        name any entity at all" verdict, and `include_sentence_initial=True`
+        (greedy) as the "what could match a known title" search — so a
+        stray leading word can only ever help a match, never manufacture
+        a false refusal on its own.
+
+        Pass include_sentence_initial=True to also let index 0 seed a
+        span.
         """
         tokens = _tokenize(query)
         spans: List[Tuple[str, ...]] = []
@@ -162,7 +181,7 @@ class CorpusEntityIndex:
             current.clear()
 
         for idx, tok in enumerate(tokens):
-            if idx == 0:
+            if idx == 0 and not include_sentence_initial:
                 continue
 
             lower = tok.lower()
@@ -205,8 +224,10 @@ class CorpusEntityIndex:
         if self._load_failed or not self.known_titles:
             return None
 
-        spans = self.candidate_spans(query)
-        if not spans:
+        # Conservative verdict set: does the query name any entity at
+        # all? (Sentence-initial token excluded — see candidate_spans.)
+        verdict_spans = self.candidate_spans(query)
+        if not verdict_spans:
             return None
 
         # Web results routinely echo the query in their page title
@@ -221,7 +242,20 @@ class CorpusEntityIndex:
             if c.get("source_type") != "web"
         )
 
-        for span in spans:
+        # Greedy match set: includes the sentence-initial token, so a
+        # bare title query ("Far Cry 5 combat") grounds even though its
+        # entity opens the sentence. Checked ALONGSIDE verdict_spans,
+        # not instead of it: including index 0 can merge a leading
+        # non-entity word into what would otherwise be a clean span
+        # ("Compare Far Cry 5 and..." -> "compare far cry 5" instead of
+        # "far cry 5"), which breaks the match that verdict_spans (idx0
+        # excluded) already gets right. Only used to look for a match,
+        # never to decide there is none — verdict_spans already
+        # established the query names *something*, so checking a wider
+        # span set here can only turn a False into a True, never
+        # manufacture a new False.
+        match_spans = self.candidate_spans(query, include_sentence_initial=True)
+        for span in (*verdict_spans, *match_spans):
             if span in self.known_titles:
                 return True
             span_text = " ".join(span)
@@ -233,14 +267,78 @@ class CorpusEntityIndex:
 
 # ============================================================
 # Lazy singleton accessor (same pattern as
-# rag_retriever._get_dense_encoder / _get_reranker)
+# rag_retriever._get_dense_encoder / _get_reranker), with a TTL so
+# titles ingested after process start eventually become groundable
+# without a restart.
 # ============================================================
 
+_ENTITY_INDEX_TTL_ENV = "CORPUS_INDEX_TTL_SECONDS"
+_DEFAULT_TTL_SECONDS = 900.0
+
 _entity_index: Optional[CorpusEntityIndex] = None
+_entity_index_loaded_at: float = 0.0
+_entity_index_lock = threading.Lock()
+
+
+def _ttl_seconds() -> float:
+    """Read per call, not cached — same rationale as
+    quality_gate._resolve_floors(): a test's monkeypatch.setenv must
+    take effect without a module reload. <= 0 disables refresh, which
+    an evaluation run wants (a mid-run rebuild would change the
+    grounding verdict between two queries of the same run — see
+    evaluation/calibrate_relevance.py, which holds one reference for
+    the whole run)."""
+    try:
+        return float(os.environ.get(_ENTITY_INDEX_TTL_ENV, _DEFAULT_TTL_SECONDS))
+    except ValueError:
+        return _DEFAULT_TTL_SECONDS
 
 
 def _get_entity_index() -> CorpusEntityIndex:
-    global _entity_index
-    if _entity_index is None:
-        _entity_index = CorpusEntityIndex()
+    global _entity_index, _entity_index_loaded_at
+
+    current = _entity_index
+    if current is None:
+        with _entity_index_lock:
+            if _entity_index is None:
+                _entity_index = CorpusEntityIndex()
+                _entity_index_loaded_at = time.monotonic()
+            return _entity_index
+
+    ttl = _ttl_seconds()
+    if ttl <= 0 or (time.monotonic() - _entity_index_loaded_at) < ttl:
+        return current
+
+    # Stale. Exactly one thread rebuilds; the rest keep serving the
+    # current index rather than queueing behind a Qdrant scroll.
+    if not _entity_index_lock.acquire(blocking=False):
+        return current
+    try:
+        # Bump BEFORE loading: if Qdrant is down, CorpusEntityIndex
+        # swallows the error into an empty known_titles rather than
+        # raising, and without this every request during the outage
+        # would retry the failing scroll instead of waiting a full TTL.
+        _entity_index_loaded_at = time.monotonic()
+        refreshed = CorpusEntityIndex()
+        if refreshed.known_titles:
+            _entity_index = refreshed
+        else:
+            logger.warning(
+                "CorpusEntityIndex refresh returned no titles — keeping previous index"
+            )
+    finally:
+        _entity_index_lock.release()
+
     return _entity_index
+
+
+def invalidate_entity_index() -> None:
+    """Force a rebuild on the next access. A test seam and future-
+    proofing hook, not a real ingest-invalidation path: the ingest CLIs
+    (scripts/bulk_ingest.py, upsert/*) run in a separate process from
+    the API and cannot reach this module's state — the TTL above is
+    what actually covers them."""
+    global _entity_index, _entity_index_loaded_at
+    with _entity_index_lock:
+        _entity_index = None
+        _entity_index_loaded_at = 0.0
