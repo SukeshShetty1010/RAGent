@@ -22,7 +22,9 @@ These two were fixed together, not independently, because they're causally coupl
 
 **T5 and T6 fixed** together (same day, follow-up pass). Causally coupled — §6's own text notes that under §5, a concurrent request's Gemini counter can flip the (already wrong) model attribution, so §6 could not be fixed durably without §5 first. `MetricsRegistry` (`utils/observability.py`) is now scoped per-thread via `threading.local()`, mirroring `utils/tracing.py`'s existing pattern; the answer-serving model is now recorded explicitly (`answer_model` categorical) at the point each provider actually produces the answer, rather than inferred from provider-usage counters, and is now surfaced through `kpis["answer_model"]` and a UI tile, not just Langfuse. See the "Resolved" notes inside §5 and §6. Test suite now `190 passed, 3 skipped` (up from 179 — 11 net new tests; the two pre-existing `live`-marked `test_qdrant_rebuild.py` failures are unrelated, no `.env`/Qdrant credentials in this environment).
 
-Remaining 17 tasks are unchanged from the original audit below.
+**T10 and T11 fixed** together (same day, follow-up pass), commit history on `main`. Causally coupled — both live in `agent/task_router.py` / `retriever/strategy_selector.py` and both concern the same underlying question: who owns the "can this query reach the web?" decision, and by what rule. `RouterDecision`'s three dead fields (`retrieval_strategy`, `web_search_allowed`, `max_results`) were deleted rather than consumed — a repo-wide grep confirmed nothing read them outside `strategy_selector.py`'s own unused test-harness fixtures, and the two independent derivations already disagreed. Separately, `StrategySelector.select()` now sets `allow_web_fallback=True` for COMPARISON, LISTICLE, and both FACTUAL branches whenever `IntentSignal.TEMPORAL` is present in `decision.intent_signals` (previously hardcoded `False`, reachable only via `TaskType.OPEN`), so a query like *"latest patch notes for Assassin's Creed Valhalla"* (`FACTUAL` + `TEMPORAL`) can now reach `orchestrator.py`'s temporal web-fallback gate. `quality_report.has_temporal_signal` (chunk-content-level, `retriever/quality_gate.py`) is a distinct signal from `IntentSignal.TEMPORAL` (query-level) and was intentionally left untouched — T11's fix only removes the task-type gate that blocked the temporal check from ever being evaluated for non-OPEN tasks. See the "Resolved" notes inside §10 and §11. Test suite now `201 passed, 3 skipped` (up from 190 — 11 net new tests in `tests/test_strategy_selector.py`, a file that did not exist before; the two pre-existing `live`-marked `test_qdrant_rebuild.py` failures are unrelated, no `.env`/Qdrant credentials in this environment).
+
+Remaining 15 tasks are unchanged from the original audit below.
 
 ---
 
@@ -39,8 +41,8 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [ ] **T7** — Reconcile the two engines: `llm_latency_ms`, trace attributes, refusal string (§7)
 - [x] **T8** — Make `candidate_spans()` handle non-interrogative queries (§8) — Fixed 2026-08-19
 - [x] **T9** — Allow the entity index to refresh without a process restart (§9) — Fixed 2026-08-19
-- [ ] **T10** — Either consume `RouterDecision`'s three dead fields or delete them (§10)
-- [ ] **T11** — Decide whether web fallback should be reachable outside `TaskType.OPEN` (§11)
+- [x] **T10** — Either consume `RouterDecision`'s three dead fields or delete them (§10) — Fixed 2026-08-19
+- [x] **T11** — Decide whether web fallback should be reachable outside `TaskType.OPEN` (§11) — Fixed 2026-08-19
 - [ ] **T12** — Either send `insufficient_prompt()` to the LLM or delete it (§12)
 - [ ] **T13** — Render the `stage` SSE events in the UI (§13)
 - [ ] **T14** — Decide whether the product is multi-turn; wire history if so (§14)
@@ -607,6 +609,12 @@ Worse than dead code: the two derivations can disagree without anything failing.
 
 **Fix:** pick one owner. Either `StrategySelector` consumes the router's fields, or the router stops computing them.
 
+### Resolved — 2026-08-19
+
+Fixed alongside §11 (they're causally coupled — see the status update at the top of this file). Shipped the "delete" half of the fix rather than "consume": `retrieval_strategy`, `web_search_allowed`, and `max_results` are removed from `RouterDecision` entirely, along with `TaskRouter`'s `_retrieval_strategy()`, `_web_allowed()`, `_max_results()` helper methods and their call sites in `route()`. `RouterDecision` now carries only `task`, `intent_signals`, and `reason` — the fields `StrategySelector.select()` actually reads. A repo-wide grep confirmed the only other references to the three removed fields were `strategy_selector.py`'s own `if __name__` test-harness literals, updated in the same pass; `agent_decisions["retrieval_strategy"]` in both engines was already built entirely from `StrategySelector`'s output, never from the router's fields, so this changes zero observable behavior.
+
+Tests: `tests/test_strategy_selector.py` (new, 11 tests) — see §11's Resolved note, since the same file covers both fixes.
+
 ---
 
 ## §11 — Web fallback is only reachable for `TaskType.OPEN`
@@ -636,6 +644,14 @@ Stack this with §1 and the picture in production is:
 `WebSearchTool`, `decide_web_search()`, `_refine_web_results()`, the web re-gate, and the `LOCAL_PLUS_WEB` merge state are all built, tested, and essentially unreachable in the current configuration.
 
 **Fix:** decide deliberately which tasks may reach the web. A TEMPORAL signal is a strong argument for allowing it regardless of task type — freshness is orthogonal to whether the question is factual or a comparison.
+
+### Resolved — 2026-08-19
+
+Fixed alongside §10 (see the status update at the top of this file). Shipped exactly the fix this section recommended: `StrategySelector.select()` now computes `has_temporal = IntentSignal.TEMPORAL in intent_signals` once at the top of the method, and the COMPARISON, LISTICLE, and both FACTUAL branches set `allow_web_fallback=has_temporal` instead of a hardcoded `False`. The OPEN branch's `allow_web_fallback=True` stays unconditional — orthogonal, exploratory-fallback behavior, not something a temporal check should narrow. `orchestrator.py`'s existing gate (`config.allow_web_fallback and quality_report.has_temporal_signal`) required no change; it already read the field correctly; it just could not observe `True` from a non-OPEN task before this fix.
+
+Deliberately left alone: `quality_report.has_temporal_signal` (`retriever/quality_gate.py`) checks whether *retrieved chunk content* contains temporal language — a distinct signal from `IntentSignal.TEMPORAL`, which is extracted from the *query* by `agent/intent/intent_extractor.py`. Conflating the two would have been an easy mistake; this fix only removes the task-type gate blocking the content-level check from ever running for non-OPEN tasks.
+
+Tests: `tests/test_strategy_selector.py` (new — no test file existed for this module before). 11 tests: for each of COMPARISON, LISTICLE, FACTUAL (single- and mixed-intent), `allow_web_fallback` is `False` without `TEMPORAL` and `True` with it; OPEN stays `True` regardless; plus a regression test matching this section's own example (`FACTUAL` + `TEMPORAL` → `allow_web_fallback=True`).
 
 ---
 

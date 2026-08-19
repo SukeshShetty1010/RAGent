@@ -50,9 +50,6 @@ class RouterDecision:
     task: TaskType
     intent_signals: Set[IntentSignal]
     reason: str
-    retrieval_strategy: str
-    web_search_allowed: bool
-    max_results: int
 
 
 # ============================================================
@@ -99,9 +96,6 @@ class TaskRouter:
                 task=task,
                 intent_signals=intent_signals,
                 reason=self._explain(task, intent_signals),
-                retrieval_strategy=self._retrieval_strategy(task),
-                web_search_allowed=self._web_allowed(task),
-                max_results=self._max_results(task),
             )
 
             MetricsRegistry.get().record(
@@ -134,28 +128,6 @@ class TaskRouter:
             return TaskType.FACTUAL
 
         return TaskType.OPEN
-
-    # --------------------------------------------------------
-    # Retrieval Policy
-    # --------------------------------------------------------
-
-    @staticmethod
-    def _retrieval_strategy(task: TaskType) -> str:
-        if task == TaskType.COMPARISON:
-            return "decomposition"
-        if task == TaskType.LISTICLE:
-            return "window_expansion"
-        if task == TaskType.FACTUAL:
-            return "standard"
-        return "hybrid"
-
-    @staticmethod
-    def _web_allowed(task: TaskType) -> bool:
-        return task == TaskType.OPEN
-
-    @staticmethod
-    def _max_results(task: TaskType) -> int:
-        return 10 if task == TaskType.LISTICLE else 5
 
     # --------------------------------------------------------
     # Explainability

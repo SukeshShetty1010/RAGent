@@ -58,6 +58,7 @@ class StrategySelector:
 
         task = decision.task
         intent_signals: Set[IntentSignal] = decision.intent_signals
+        has_temporal = IntentSignal.TEMPORAL in intent_signals
 
         # ----------------------------------------------------
         # COMPARISON (highest evidence demand)
@@ -67,7 +68,7 @@ class StrategySelector:
                 limit=5,
                 use_window_expansion=False,
                 use_query_decomposition=True,
-                allow_web_fallback=False,
+                allow_web_fallback=has_temporal,
             )
 
         # ----------------------------------------------------
@@ -78,7 +79,7 @@ class StrategySelector:
                 limit=10,
                 use_window_expansion=True,
                 use_query_decomposition=False,
-                allow_web_fallback=False,
+                allow_web_fallback=has_temporal,
             )
 
         # ----------------------------------------------------
@@ -91,14 +92,14 @@ class StrategySelector:
                     limit=7,
                     use_window_expansion=True,
                     use_query_decomposition=False,
-                    allow_web_fallback=False,
+                    allow_web_fallback=has_temporal,
                 )
 
             return RetrievalConfiguration(
                 limit=5,
                 use_window_expansion=False,
                 use_query_decomposition=False,
-                allow_web_fallback=False,
+                allow_web_fallback=has_temporal,
             )
 
         # ----------------------------------------------------
@@ -127,25 +128,16 @@ if __name__ == "__main__":
             task=TaskType.COMPARISON,
             intent_signals={IntentSignal.COMPARISON},
             reason="Test comparison",
-            retrieval_strategy="decomposition",
-            web_search_allowed=False,
-            max_results=5,
         ),
         RouterDecision(
             task=TaskType.FACTUAL,
             intent_signals={IntentSignal.FACTUAL, IntentSignal.COMPARISON},
             reason="Mixed intent factual",
-            retrieval_strategy="standard",
-            web_search_allowed=False,
-            max_results=5,
         ),
         RouterDecision(
             task=TaskType.OPEN,
             intent_signals=set(),
             reason="Fallback",
-            retrieval_strategy="hybrid",
-            web_search_allowed=True,
-            max_results=5,
         ),
     ]
 
