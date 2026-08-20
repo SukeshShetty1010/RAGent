@@ -111,7 +111,6 @@ def decide_web_search(
 
         raw = chat_completion_decision(
             prompt,
-            max_tokens=150,
             temperature=0.0,
             response_format={"type": "json_object"},
         )

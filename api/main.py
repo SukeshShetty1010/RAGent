@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List, Literal
 
 # Ensure project root is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -68,8 +69,22 @@ def get_engine() -> StreamingRageEngine:
         _engine = StreamingRageEngine()
     return _engine
 
+class Turn(BaseModel):
+    role: Literal["user", "assistant"]
+    # Hard per-turn cap (AUDIT_TASKS T14): history is user-supplied text
+    # entering a prompt, so this is a real input-validation boundary, not
+    # tidiness. The engine only ever uses the last 4 turns anyway
+    # (agent/decisions/query_rewrite.py's HISTORY_MAX_TURNS), each capped
+    # further to 500 chars there -- this is the outer, reject-the-request
+    # bound.
+    content: str = Field(max_length=4000)
+
+
 class ChatRequest(BaseModel):
     query: str
+    # Prior conversation turns, oldest first. Capped so a pathological
+    # client can't force an unbounded prompt through query_rewrite.
+    history: List[Turn] = Field(default_factory=list, max_length=20)
 
 @app.get("/health")
 def health_check():
@@ -128,6 +143,7 @@ async def chat_endpoint(request: Request, body: ChatRequest):
                 on_token_callback=on_token,
                 on_stage_callback=on_stage,
                 cancel_event=cancel,
+                history=[turn.model_dump() for turn in body.history],
             )
             # Make sure evidence is cleanly serializable
             safe_evidence = []

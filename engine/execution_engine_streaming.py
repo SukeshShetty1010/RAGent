@@ -44,6 +44,7 @@ from agent.capability.capability_types import AnswerCapability
 from agent.context_assembler import ContextAssembler
 from agent.prompt_manager import PromptManager
 from agent.output_validator import validate_answer, is_refusal
+from agent.decisions.query_rewrite import rewrite_query
 
 from utils.observability import MetricsRegistry, ProfileBlock
 from utils import tracing
@@ -130,6 +131,8 @@ class StreamingRageEngine:
         on_stage_callback: Optional[Callable[[StreamingStage], None]] = None,
         options: Optional[Dict[str, Any]] = None,
         cancel_event: Optional[threading.Event] = None,
+        *,
+        history: Optional[List[Dict[str, Any]]] = None,
     ) -> StreamingResult:
         """
         Execute RAG pipeline with streaming callbacks.
@@ -141,6 +144,13 @@ class StreamingRageEngine:
             options: Additional execution options
             cancel_event: When set, run_streaming stops at the next stage
                 boundary (or the next generated chunk) instead of continuing.
+            history: Prior conversation turns ({role, content}), oldest
+                first. None/empty (the default) reproduces today's
+                single-turn pipeline exactly -- every eval/KPI caller
+                stays on this default and is byte-for-byte unaffected.
+                When present, STEP 0 below may condense `query` into a
+                standalone form before routing/retrieval ever see it;
+                everything downstream of that step remains single-turn.
 
         Returns:
             StreamingResult with full execution data
@@ -188,6 +198,38 @@ class StreamingRageEngine:
             with tracing.trace_request(query), ProfileBlock("REQUEST_TOTAL"):
                 try:
                     # ------------------------------------------------
+                    # STEP 0: QUERY REWRITE (multi-turn condensation)
+                    # ------------------------------------------------
+                    checkpoint("query_rewrite")
+                    emit_stage("query_rewrite", "started")
+                    step_start = time.perf_counter()
+
+                    rewrite_result = rewrite_query(query=query, history=history)
+                    working_query = rewrite_result.rewritten_query
+
+                    agent_decisions["original_query"] = query
+                    agent_decisions["query_rewrite"] = {
+                        "rewritten_query": working_query,
+                        "source": rewrite_result.source,
+                        "reason": rewrite_result.reason,
+                    }
+
+                    MetricsRegistry.get().record(
+                        "query_rewrite_source", rewrite_result.source
+                    )
+
+                    tracing.set_trace_attributes(
+                        original_query=query,
+                        rewritten_query=working_query,
+                        query_rewrite_source=rewrite_result.source,
+                    )
+
+                    emit_stage("query_rewrite", "completed", {
+                        "rewritten": working_query != query,
+                        "source": rewrite_result.source,
+                    }, (time.perf_counter() - step_start) * 1000)
+
+                    # ------------------------------------------------
                     # STEP 1: ROUTING
                     # ------------------------------------------------
                     checkpoint("routing")
@@ -195,7 +237,7 @@ class StreamingRageEngine:
                     step_start = time.perf_counter()
 
                     decision = self.router.route(
-                        query,
+                        working_query,
                         intent_schema_version="v2",
                     )
 
@@ -238,7 +280,7 @@ class StreamingRageEngine:
                     step_start = time.perf_counter()
 
                     raw_chunks, merge_state, quality, web_decision, pre_web_quality = self.orchestrator.run(
-                        query=query,
+                        query=working_query,
                         decision=decision,
                         config=config,
                     )
@@ -253,10 +295,15 @@ class StreamingRageEngine:
                     if pre_web_quality is not quality:
                         agent_decisions["quality_pre_web"] = quality_report_dict(pre_web_quality)
 
+                    chunks_dropped_as_noise = MetricsRegistry.get().generate_report()[
+                        "counters"
+                    ].get("chunks_dropped_as_noise", 0)
+
                     emit_stage("retrieval", "completed", {
                         "chunks_found": len(raw_chunks),
                         "merge_state": merge_state,
                         "quality": quality_status,
+                        "chunks_dropped_as_noise": chunks_dropped_as_noise,
                     }, (time.perf_counter() - step_start) * 1000)
 
                     # ------------------------------------------------
@@ -310,7 +357,7 @@ class StreamingRageEngine:
                     step_start = time.perf_counter()
 
                     prompt = self.prompt_manager.generate_prompt(
-                        query=query,
+                        query=working_query,
                         chunks=assembled_chunks,
                         task=decision.task,
                         capability=capability,

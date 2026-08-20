@@ -67,7 +67,15 @@ type OutputValidation = {
   citation_count?: number;
 };
 
+type QueryRewrite = {
+  rewritten_query?: string;
+  source?: string; // "llm" | "skipped_no_history" | "skipped_self_contained" | "fallback_original"
+  reason?: string;
+};
+
 type AgentDecisions = {
+  original_query?: string;
+  query_rewrite?: QueryRewrite;
   task?: string;
   intent_signals?: string[];
   routing_reason?: string;
@@ -247,6 +255,7 @@ function KpiPanel({ kpis }: { kpis: Kpis }) {
 // unrecognized stage name still renders via the fallback, same reasoning
 // as PROVIDER_LABELS above.
 const STAGE_LABELS: Record<string, string> = {
+  query_rewrite: 'Query Rewrite',
   routing: 'Routing',
   strategy: 'Strategy Selection',
   retrieval: 'Retrieval',
@@ -263,6 +272,9 @@ function stageLabel(name: string): string {
 function stageDetail(stage: Stage): string | undefined {
   const d = stage.data ?? {};
   switch (stage.name) {
+    case 'query_rewrite':
+      if (d.source == null) return undefined;
+      return d.rewritten ? `rewritten · ${d.source}` : `unchanged · ${d.source}`;
     case 'routing': {
       const signals = Array.isArray(d.signals) ? (d.signals as string[]) : [];
       return d.task ? `${d.task}${signals.length ? ' · ' + signals.join(', ') : ''}` : undefined;
@@ -272,9 +284,13 @@ function stageDetail(stage: Stage): string | undefined {
       if (config.limit == null) return undefined;
       return `limit ${config.limit}${config.allow_web_fallback ? ' · web fallback' : ''}`;
     }
-    case 'retrieval':
+    case 'retrieval': {
       if (d.chunks_found == null) return undefined;
-      return `${d.chunks_found} chunks · ${d.merge_state} · ${d.quality}`;
+      const dropped = typeof d.chunks_dropped_as_noise === 'number' && d.chunks_dropped_as_noise > 0
+        ? ` · ${d.chunks_dropped_as_noise} dropped as noise`
+        : '';
+      return `${d.chunks_found} chunks · ${d.merge_state} · ${d.quality}${dropped}`;
+    }
     case 'capability':
       return typeof d.capability === 'string' ? d.capability : undefined;
     case 'context_assembly':
@@ -341,13 +357,29 @@ function TypingIndicatorDots() {
 /* ── Agent Decisions Panel ─────────────────────────────── */
 
 function AgentDecisionsPanel({ decisions }: { decisions: AgentDecisions }) {
+  const wasRewritten = decisions.query_rewrite?.source === 'llm' &&
+    decisions.query_rewrite.rewritten_query !== decisions.original_query;
   const hasAnything =
-    decisions.task || decisions.retrieval_strategy || decisions.quality ||
+    wasRewritten || decisions.task || decisions.retrieval_strategy || decisions.quality ||
     decisions.web_search_decision || decisions.output_validation;
   if (!hasAnything) return null;
 
   return (
     <div className="mt-2 space-y-3 text-sm">
+      {wasRewritten && (
+        <div>
+          <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Query Rewrite</p>
+          <p className="text-slate-300">
+            <span className="text-slate-500">&quot;{decisions.original_query}&quot;</span>
+            {' → '}
+            <span className="text-slate-100 font-medium">&quot;{decisions.query_rewrite?.rewritten_query}&quot;</span>
+          </p>
+          {decisions.query_rewrite?.reason && (
+            <p className="text-slate-500 text-xs mt-0.5">{decisions.query_rewrite.reason}</p>
+          )}
+        </div>
+      )}
+
       {decisions.task && (
         <div>
           <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Routing</p>
@@ -630,6 +662,14 @@ export default function ChatApp() {
     if (!input.trim() || isStreaming) return;
 
     const userMsg = input.trim();
+    // Last 4 completed turns, oldest first -- mirrors
+    // agent/decisions/query_rewrite.py's HISTORY_MAX_TURNS. Failed
+    // turns are excluded: a dropped/errored exchange isn't part of the
+    // conversation the user is actually continuing.
+    const history = messages
+      .filter((m) => !m.failed)
+      .slice(-4)
+      .map((m) => ({ role: m.role, content: m.content }));
     setInput('');
     setMessages((prev) => [...prev, { role: 'user', content: userMsg }]);
     setIsStreaming(true);
@@ -640,7 +680,7 @@ export default function ChatApp() {
       const response = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMsg }),
+        body: JSON.stringify({ query: userMsg, history }),
       });
 
       if (!response.body) throw new Error('No response body');

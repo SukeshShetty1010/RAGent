@@ -35,6 +35,41 @@ def test_decide_web_search_live_llm_quality_weak():
 
 
 @pytest.mark.unit
+def test_decide_web_search_does_not_override_max_tokens_default(monkeypatch):
+    """
+    Regression (AUDIT_TASKS T4): this call site used to pass
+    max_tokens=150, shadowing chat_completion_decision's deliberate
+    320 default and starving the Groq fallback (a reasoning model
+    whose hidden reasoning tokens are billed against max_tokens) of
+    output budget before it could emit any JSON.
+    """
+    captured_kwargs = {}
+
+    def _capture(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return '{"should_search_web": true, "reason": "test", "confidence": 0.5}'
+
+    monkeypatch.setattr(web_search_decision_mod, "chat_completion_decision", _capture)
+
+    report = QualityReport(
+        status=QualityStatus.QUALITY_WEAK,
+        reason="Only noise content detected",
+        confidence_score=0.2,
+        has_temporal_signal=False,
+    )
+
+    decide_web_search(
+        query="anything",
+        task=TaskType.FACTUAL,
+        quality_report=report,
+        allow_web_fallback=True,
+        evidence_summary=[],
+    )
+
+    assert "max_tokens" not in captured_kwargs
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "broken_return",
     [

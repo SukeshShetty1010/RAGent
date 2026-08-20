@@ -265,7 +265,7 @@ class RetrievalOrchestrator:
             if score < 0.5:
                 continue
 
-            if self.quality_gate.is_noise(title, content):
+            if self.quality_gate.is_noise(title, content, url):
                 continue
 
             if any(

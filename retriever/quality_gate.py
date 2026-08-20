@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 from agent.task_router import TaskType
 from retriever.corpus_index import CorpusEntityIndex, _get_entity_index
 from retriever.reranker_provider import resolve_reranker_provider
+from utils.observability import MetricsRegistry
 
 
 # ============================================================
@@ -69,11 +70,27 @@ class RetrievalQualityGate:
     # Noise indicators
     # --------------------------------------------------------
 
-    NOISE_KEYWORDS: Set[str] = {
+    # These keywords were written to catch storefronts and forums — a
+    # URL/title-shaped signal, not a prose one. Ordinary review copy
+    # legitimately says "a great deal of freedom" or "the modding
+    # community" without being commerce/forum noise. Split accordingly:
+    #
+    # - SOURCE_NOISE_KEYWORDS matches only source_title + source_url.
+    #   A page *titled* "Steam Summer Sale", or served from a /store/
+    #   path, is a storefront; a review that mentions one is not.
+    # - Content (the prose body) only trips noise on a DENSITY signal —
+    #   see is_noise() — because a single incidental keyword in running
+    #   text is not evidence the chunk itself is a storefront/forum
+    #   blob, but several distinct ones together are.
+    SOURCE_NOISE_KEYWORDS: Set[str] = {
         "sale", "sales", "discount", "deal", "bundle", "price", "store",
         "buy", "purchase",
         "community", "forum", "thread", "discussion",
     }
+
+    # Minimum number of DISTINCT keyword hits in the content body before
+    # it's treated as noise (vs. a single incidental mention in prose).
+    CONTENT_NOISE_DENSITY = 3
 
     # --------------------------------------------------------
     # Temporal signal patterns
@@ -197,9 +214,11 @@ class RetrievalQualityGate:
         for c in chunks:
             title = (c.get("source_title") or "").lower()
             content = (c.get("content") or "").lower()
+            url = (c.get("source_url") or "").lower()
             score = float(c.get("score", 0.0))
 
-            if self.is_noise(title, content):
+            if self.is_noise(title, content, url):
+                MetricsRegistry.get().inc("chunks_dropped_as_noise")
                 continue
 
             valid_chunks.append(c)
@@ -291,11 +310,26 @@ class RetrievalQualityGate:
     # Helpers
     # --------------------------------------------------------
 
-    def is_noise(self, title: str, content: str) -> bool:
-        text = f"{title} {content}".lower()
-        return any(
-            re.search(rf"\b{re.escape(k)}\b", text) for k in self.NOISE_KEYWORDS
+    def is_noise(self, title: str, content: str, url: str = "") -> bool:
+        """A chunk is noise if its SOURCE (title/URL) looks like a
+        storefront/forum, or its content body is dense with commerce/
+        forum vocabulary (>= CONTENT_NOISE_DENSITY distinct hits) rather
+        than mentioning one incidentally in prose.
+        """
+        source_text = f"{title} {url}".lower()
+        if any(
+            re.search(rf"\b{re.escape(k)}\b", source_text)
+            for k in self.SOURCE_NOISE_KEYWORDS
+        ):
+            return True
+
+        content_text = content.lower()
+        distinct_hits = sum(
+            1
+            for k in self.SOURCE_NOISE_KEYWORDS
+            if re.search(rf"\b{re.escape(k)}\b", content_text)
         )
+        return distinct_hits >= self.CONTENT_NOISE_DENSITY
 
     def _has_temporal_signal(self, title: str, content: str) -> bool:
         text = f"{title} {content}".lower()

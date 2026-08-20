@@ -127,7 +127,9 @@ def test_cancel_before_start_short_circuits_pipeline():
     assert result.kpis["cancelled"] is True
     assert result.kpis["task_success"] is False
     assert result.kpis["llm_ran"] is False
-    assert _find_stage(result.stages, "routing", "cancelled") is not None
+    # query_rewrite (STEP 0, AUDIT_TASKS T14) is now the first checkpoint
+    # in the pipeline, ahead of routing.
+    assert _find_stage(result.stages, "query_rewrite", "cancelled") is not None
 
 
 # ============================================================
@@ -217,7 +219,7 @@ class _FakeStreamingEngine:
         self._sleep_before_stages = sleep_before_stages
 
     def run_streaming(self, query, on_token_callback=None, on_stage_callback=None,
-                       cancel_event=None, options=None):
+                       cancel_event=None, options=None, history=None):
         if self._sleep_before_stages:
             time.sleep(self._sleep_before_stages)
         for stage in self._stages:

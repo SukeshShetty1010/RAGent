@@ -13,6 +13,7 @@ import pytest
 from agent.task_router import TaskType
 from retriever.corpus_index import CorpusEntityIndex
 from retriever.quality_gate import RetrievalQualityGate, QualityStatus
+from utils.observability import MetricsRegistry
 
 pytestmark = pytest.mark.unit
 
@@ -33,10 +34,12 @@ def _floors(gate: RetrievalQualityGate):
     return floors
 
 
-def _chunk(content="Some editorial content about the game.", title="Far Cry 5 Wiki", rerank_score=None, score=0.8):
+def _chunk(content="Some editorial content about the game.", title="Far Cry 5 Wiki", rerank_score=None, score=0.8, url=None):
     c = {"source_title": title, "content": content, "score": score}
     if rerank_score is not None:
         c["rerank_score"] = rerank_score
+    if url is not None:
+        c["source_url"] = url
     return c
 
 
@@ -189,3 +192,96 @@ def test_is_noise_still_catches_real_noise_keywords(gate):
     assert report.evidence_count == 0
     assert report.status == QualityStatus.QUALITY_WEAK
     assert report.reason == "Only noise content detected"
+
+
+# --------------------------------------------------------------------
+# T18: is_noise() must not discard ordinary review prose that merely
+# mentions a commerce/forum word in passing. Only the SOURCE (title,
+# URL) or a dense cluster of such words in the body should count.
+# --------------------------------------------------------------------
+
+PROSE_EXAMPLES = [
+    "The open world gives players a great deal of freedom to explore.",
+    "You can browse cosmetics in the in-game store without spending real money.",
+    "The modding community has kept this game alive for years.",
+    "Death carries a steep price of failure in the late game.",
+    "There is a lengthy discussion between the two characters about loyalty.",
+    "Before the final battle, the player must purchase upgrades from the outpost.",
+]
+
+
+@pytest.mark.parametrize("content", PROSE_EXAMPLES)
+def test_is_noise_survives_ordinary_review_prose(gate, content):
+    chunks = [_chunk(content=content, title="Far Cry 5 Review", rerank_score=5.0)]
+    report = gate.evaluate(
+        query="What is a good build for this game?",
+        task=TaskType.FACTUAL,
+        chunks=chunks,
+    )
+    assert report.evidence_count == 1
+    assert report.status != QualityStatus.QUALITY_WEAK or report.reason != "Only noise content detected"
+
+
+def test_noise_prose_does_not_break_entity_grounding():
+    """
+    The §8-interaction regression: a chunk titled after the queried
+    entity, whose body incidentally mentions a single commerce word,
+    must still survive into assess_grounding() so the query grounds.
+    Before the T18 fix this chunk was dropped, source_titles lost
+    "far cry 5", and the query was falsely refused as QUALITY_EMPTY.
+    """
+    entity_index = CorpusEntityIndex.from_titles(["Far Cry 5"])
+    gate = RetrievalQualityGate(entity_index=entity_index)
+
+    chunks = [
+        _chunk(
+            title="Far Cry 5 Review",
+            content="Combat rewards a great deal of freedom in how you approach outposts.",
+            rerank_score=5.0,
+        )
+    ]
+    report = gate.evaluate(
+        query="Far Cry 5 combat",
+        task=TaskType.FACTUAL,
+        chunks=chunks,
+    )
+    assert report.entity_grounded is not False
+    assert report.status != QualityStatus.QUALITY_EMPTY
+
+
+def test_storefront_title_is_still_noise(gate):
+    chunks = [_chunk(title="Steam Summer Sale", content="Ordinary editorial text.", rerank_score=5.0)]
+    report = gate.evaluate(
+        query="What is a good build for this game?",
+        task=TaskType.FACTUAL,
+        chunks=chunks,
+    )
+    assert report.evidence_count == 0
+
+
+def test_commerce_url_with_clean_prose_is_still_noise(gate):
+    chunks = [
+        _chunk(
+            title="Far Cry 5",
+            content="Ordinary editorial text with no flagged words at all.",
+            url="https://example.com/store/far-cry-5",
+            rerank_score=5.0,
+        )
+    ]
+    report = gate.evaluate(
+        query="What is a good build for this game?",
+        task=TaskType.FACTUAL,
+        chunks=chunks,
+    )
+    assert report.evidence_count == 0
+
+
+def test_chunks_dropped_as_noise_metric_increments(gate):
+    MetricsRegistry.get().reset()
+    chunks = [
+        _chunk(content="Check out this weekend's store sale and discount bundle.", rerank_score=5.0),
+        _chunk(content="Ordinary editorial prose about the story.", rerank_score=5.0),
+    ]
+    gate.evaluate(query="What is a good build for this game?", task=TaskType.FACTUAL, chunks=chunks)
+    counters = MetricsRegistry.get().generate_report()["counters"]
+    assert counters.get("chunks_dropped_as_noise") == 1

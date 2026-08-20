@@ -262,3 +262,25 @@ def test_both_engines_use_the_same_static_refusal_constant(monkeypatch):
 
     assert streaming_answer == INSUFFICIENT_REFUSAL
     assert blocking_answer == INSUFFICIENT_REFUSAL
+
+
+# ============================================================
+# 7. history=None (the default every eval/KPI caller uses) reproduces
+#    today's single-turn pipeline exactly (AUDIT_TASKS T14)
+# ============================================================
+
+@pytest.mark.unit
+def test_history_default_is_byte_for_byte_unaffected(monkeypatch):
+    monkeypatch.setattr(
+        "llm.ragent_client_streaming.chat_completion_streaming",
+        _fake_stream("Answer text (Source: 'Game Wiki')."),
+    )
+    kwargs = _full_pipeline_kwargs(AnswerCapability.FULL)
+
+    omitted = _build(StreamingRageEngine, **kwargs).run_streaming("q")
+    explicit_none = _build(StreamingRageEngine, **kwargs).run_streaming("q", history=None)
+
+    assert omitted.final_answer == explicit_none.final_answer
+    assert omitted.agent_decisions["original_query"] == "q"
+    assert omitted.agent_decisions["query_rewrite"]["source"] == "skipped_no_history"
+    assert omitted.agent_decisions["query_rewrite"]["rewritten_query"] == "q"

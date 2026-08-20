@@ -28,7 +28,9 @@ These two were fixed together, not independently, because they're causally coupl
 
 **T7 and T12 fixed** together, 2026-08-20. Causally coupled — §7c's refusal-string divergence and §12's discarded prompt are the same `else:` branch in both engines' STEP 7, so fixing them independently meant editing that block twice and picking the constant's home twice. §7 also turned out to understate itself: it calls the blocking engine one "which nothing in production calls," but `RageEngine` is what the entire measurement apparatus (`evaluation/run_eval.py`, all five `KPI/*.py`, `tests/verify_engine.py`) runs on, so its drift from the streaming engine production actually serves made T7 a prerequisite for T17, not a peer of it. Six more divergences beyond the three originally documented (7a–c) were found during the fix and are recorded in §7's Resolved note (7d–7i), the most significant being that `tracing.set_trace_attributes(cancelled=True)` on the cancel path was a silent no-op — it ran outside the Langfuse trace's active window, so T19's cancellation attribute never reached a trace. See the "Resolved" notes inside §7 and §12 for what shipped. Test suite now `224 passed, 3 skipped` (up from 209 — 15 net new tests across `tests/test_engine_contract.py` and `tests/test_insufficient_refusal.py`, both new files).
 
-Remaining 11 tasks are unchanged from the original audit below.
+**T18 and T14 fixed** together, 2026-08-20 (T4 folded in as a one-line freebie). Selected over the other 9 open tasks because T18 was the last unblocked Part-A defect with a live false-refusal path — T1/T3/T17/T23 are one scheduling chain blocked on the Gemini free-tier daily embedding quota, and T15/T16/T21/T22 are one-line hygiene with no behavioral stakes. Tracing §18 more precisely than it documents: `is_noise()`-dropped local chunks were never actually removed from the LLM's context (`orchestrator.run()` returns `local_chunks` unfiltered, and `execution_engine_streaming.py` assembles from `raw_chunks`) — the live harm was that a dropped chunk's `source_title` disappeared from `assess_grounding()`'s title-drift fallback, producing a false `QUALITY_EMPTY` refusal on fully-ingested games (e.g. a "Far Cry 5 combat" query, whose only titled chunk happens to mention "a great deal of freedom"). Per §1, entity grounding is currently the *only* live refusal path, so this was the entire refusal surface. `NOISE_KEYWORDS` is now split: `SOURCE_NOISE_KEYWORDS` matches only `source_title` + `source_url` (a storefront/forum is a source-shaped signal), and content only trips noise on a density rule (≥3 distinct keyword hits, not one incidental mention) — chosen to keep the existing 4-keyword storefront-blob fixture green unmodified. `MetricsRegistry.inc("chunks_dropped_as_noise")` makes the loss measurable, surfaced in the `retrieval` stage payload and the UI's pipeline detail line. T14 shipped as query condensation, not history-in-the-prompt: a new STEP 0 (`agent/decisions/query_rewrite.py`, modeled on `web_search_decision.py`) resolves anaphora into a standalone query before routing/retrieval/grounding ever run, with a deterministic pre-check that skips the LLM entirely for self-contained queries or empty history, and fails soft to the original query on any error. `history` is a per-call keyword argument on `run_streaming()`, defaulting to `None`/unaffecting every eval/KPI caller — never engine state — preserving `tests/verify_engine.py`'s statelessness contract. T4's fix (delete the `max_tokens=150` override in `web_search_decision.py`) was folded in since T14 added a sibling module reusing the same `chat_completion_decision()` default. See the "Resolved" notes inside §4, §14, and §18 for what shipped. Test suite now `239 passed, 3 skipped` (up from 224 — 15 net new tests across `tests/test_quality_gate.py`, `tests/test_query_rewrite.py` (new file), `tests/test_engine_contract.py`, `tests/test_web_search_decision.py`, and `tests/test_api.py`). The real-corpus drop-rate measurement §18's fix note calls for could not be run in this environment — no network path to the Qdrant Cloud cluster from this sandbox (connection refused/timeout on every attempt); `tests/regression_suite.py`, which also depends on a live Qdrant query, fails the same way and is unrelated to this change (confirmed: the timeout occurs inside `VectorQuery`, before any `is_noise()` code runs).
+
+Remaining 9 tasks are unchanged from the original audit below.
 
 ---
 
@@ -39,7 +41,7 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [ ] **T1** — Calibrate the Cloudflare reranker floors; the honesty gate is currently switched off (§1)
 - [x] **T2** — Order assembled context by `rerank_score`, not the RRF `score` (§2) — Fixed 2026-08-19
 - [ ] **T3** — Finish the last 91 chunks of the Gemini embedding migration (§3)
-- [ ] **T4** — Remove the `max_tokens=150` override in `decide_web_search` (§4)
+- [x] **T4** — Remove the `max_tokens=150` override in `decide_web_search` (§4) — Fixed 2026-08-20
 - [x] **T5** — Scope `MetricsRegistry` per request, or accept cross-request KPI contamination (§5) — Fixed 2026-08-19
 - [x] **T6** — Fix `last_used_model()` to report the model that served the *answer* (§6) — Fixed 2026-08-19
 - [x] **T7** — Reconcile the two engines: `llm_latency_ms`, trace attributes, refusal string (§7) — Fixed 2026-08-20
@@ -49,11 +51,11 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T11** — Decide whether web fallback should be reachable outside `TaskType.OPEN` (§11) — Fixed 2026-08-19
 - [x] **T12** — Either send `insufficient_prompt()` to the LLM or delete it (§12) — Fixed 2026-08-20
 - [x] **T13** — Render the `stage` SSE events in the UI (§13) — Fixed 2026-08-20
-- [ ] **T14** — Decide whether the product is multi-turn; wire history if so (§14)
+- [x] **T14** — Decide whether the product is multi-turn; wire history if so (§14) — Fixed 2026-08-20
 - [ ] **T15** — Delete `format_llama3_prompt()` (§15)
 - [ ] **T16** — Pin `fastembed` in the root `requirements.txt` (§16)
 - [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17)
-- [ ] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18)
+- [x] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18) — Fixed 2026-08-20
 - [x] **T19** — Cancel the engine thread when the SSE client disconnects (§19) — Fixed 2026-08-20
 - [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
 - [ ] **T21** — Fix stale comments and docs that describe retired infrastructure (§21)
@@ -290,6 +292,10 @@ This bites only on the Groq path — Gemini Flash Lite is not a reasoning model 
 ### Fix
 
 Delete the `max_tokens=150` argument. Let the 320 default apply.
+
+### Resolved — 2026-08-20
+
+Deleted the `max_tokens=150` argument at the call site; the 320 default on `chat_completion_decision` now applies. Folded into the same pass as T14, since `agent/decisions/query_rewrite.py` (new, T14) calls the same function and deliberately does not pass `max_tokens` either — a regression test (`test_decide_web_search_does_not_override_max_tokens_default` in `tests/test_web_search_decision.py`, and its counterpart in `tests/test_query_rewrite.py`) asserts neither call site overrides the default, so the bug can't silently return.
 
 ---
 
@@ -777,6 +783,16 @@ A user who asks *"Tell me about Far Cry 5"* and follows with *"what about its st
 
 **Fix:** either send the last N turns and add a query-rewriting step before intent extraction, or change the UI so it doesn't promise a conversation. Both are defensible; the current mismatch is not.
 
+### Resolved — 2026-08-20
+
+Took the query-rewriting path, deliberately not the history-in-the-prompt path: a new STEP 0 in `execution_engine_streaming.run_streaming()` calls `agent/decisions/query_rewrite.py` (new, modeled on `web_search_decision.py`'s bounded/single-shot/fail-soft shape) to condense the latest message into a standalone query *before* routing, retrieval, entity grounding, or capability assessment ever see it. Everything downstream stays exactly as single-turn as before — no history threading through the answer prompt, no change to intent extraction or the routing cache.
+
+A deterministic pre-check skips the LLM call entirely when history is empty or the query is already self-contained (no anaphora word, and not a bare fragment under 4 tokens), so most turns never spend the LLM budget. Any failure — exception, empty output, an absurdly long rewrite — falls back to the original query, tagged `query_rewrite_source="fallback_original"`, recorded in `MetricsRegistry` and the trace so the degradation is visible rather than silent (the lesson §4 teaches).
+
+`history` is a `*, history: Optional[...] = None` keyword-only argument on `run_streaming()`, never engine state — `RageEngine.run()` and every eval/KPI caller keep the default and are byte-for-byte unaffected, preserving `tests/verify_engine.py`'s statelessness contract. `api/main.py`'s `ChatRequest` gained an optional `history: List[Turn] = []` field (capped at 20 turns of ≤4000 chars each server-side; the engine itself further windows to the last 4 turns of ≤500 chars when building the rewrite prompt). The frontend sends the last 4 non-failed turns from existing `messages` state and renders the rewrite (when one actually happened) in `AgentDecisionsPanel`, plus a new `query_rewrite` pipeline stage via the existing `StageProgress` panel (T13). See `tests/test_query_rewrite.py` (new), and the extended `tests/test_engine_contract.py` / `tests/test_api.py`.
+
+One adjustment outside `query_rewrite.py` itself: adding STEP 0 made `query_rewrite` the pipeline's first checkpoint, ahead of `routing` — `tests/test_streaming_cancellation.py`'s pre-start-cancellation test now asserts the cancelled stage is `query_rewrite`, not `routing`, which is the correct new behavior (cancellation is now noticed one stage earlier), not a regression.
+
 ---
 
 ## §15 — `format_llama3_prompt()` is Modal-era leftover
@@ -873,6 +889,16 @@ Game-review prose that trips this:
 The keywords were chosen to reject *storefront and forum pages* — a sound goal for web results, where `_refine_web_results()` also calls `is_noise()`. Applying the same rule to local editorial chunks, which are curated GameSpot articles, throws away good evidence before the gate ever scores it. And it happens before `valid_chunks` is built, so the drop is invisible: `evidence_count` reports the survivors, with no counter for what was removed.
 
 **Fix:** scope it. Match on `source_title` and URL for the commerce/forum terms, keep a much narrower keyword set for content, or require a density threshold (several distinct hits, not one). At minimum add `MetricsRegistry.inc("chunks_dropped_as_noise")` so the loss is measurable before you decide.
+
+### Resolved — 2026-08-20
+
+Did both proposed narrowings, not one: `NOISE_KEYWORDS` is now `SOURCE_NOISE_KEYWORDS`, matched only against `source_title` + `source_url` (`is_noise(self, title, content, url="")`, positional-compatible with both existing call sites), plus a content density rule — noise only if the body contains ≥3 *distinct* keyword hits, not one incidental mention. `retriever/orchestrator.py:268`'s web call site now passes the `source_url` it already computed at line 263 but previously discarded, tightening the web path's own commerce-URL check in the same change. `MetricsRegistry.get().inc("chunks_dropped_as_noise")` runs in `evaluate()`'s filter loop and is surfaced in the `retrieval` stage's `data` payload (visible through T13's `StageProgress` panel).
+
+Tracing the actual failure chain (more specific than this section's original text): the drop was never really invisible evidence *loss* on the local path — `orchestrator.run()` returns `local_chunks` unfiltered and `execution_engine_streaming.py` assembles context from `raw_chunks`, so a noise-dropped chunk still reached the LLM. The real, live harm was that `assess_grounding()` (`corpus_index.py`) builds its title-drift fallback only from chunks that survived `is_noise()` — so a dropped chunk's `source_title` disappeared from that check, and a query like *"Far Cry 5 combat"* against a chunk titled "Far Cry 5 Review" containing "a great deal of freedom" produced a false `QUALITY_EMPTY` → hard refusal for a fully-ingested game. Per §1, entity grounding is currently the *only* live refusal path, so this was the entire refusal surface. This regression is pinned directly: `test_noise_prose_does_not_break_entity_grounding` in `tests/test_quality_gate.py` fails against the pre-fix code and passes now.
+
+`tests/test_quality_gate.py` gained 10 new tests: all six prose examples this section lists survive; a storefront *title* and a commerce *URL* with clean prose are still noise; the existing 4-distinct-keyword storefront-blob fixture (`test_is_noise_still_catches_real_noise_keywords`) stays green **unmodified** — the density threshold of 3 was chosen to keep it green, not the other way around; and the metrics counter increments correctly.
+
+Not done: the real-corpus drop-rate measurement (old-rule vs. new-rule, by keyword) this section's own audit standard calls for ("measured against the real corpus, not inferred"). This sandbox has no network path to the Qdrant Cloud cluster the corpus lives in — every attempt (`tests.regression_suite`, `tests.verify_engine`, a scratch `client.scroll()` script) times out or is refused at the TCP level, independent of this change. `tests.verify_engine` still reports `✅ ENGINE READY FOR UI` (fail-soft as designed), and the full hermetic suite is green, but the corpus-level number remains outstanding until this runs somewhere with Qdrant access.
 
 ---
 
