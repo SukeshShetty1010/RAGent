@@ -59,6 +59,7 @@ class PromptManager:
         chunks: List[Dict[str, Any]],
         task: TaskType,
         capability: AnswerCapability,
+        capability_reason: str | None = None,
     ) -> str:
         """
         Generate a prompt that respects:
@@ -79,7 +80,7 @@ class PromptManager:
                     "prompt_budget_mode",
                     "insufficient_safe_refusal",
                 )
-                return insufficient_prompt(query)
+                return insufficient_prompt(query, reason=capability_reason)
 
             # ------------------------------------------------
             # Context formatting (highest-value payload)

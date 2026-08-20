@@ -26,7 +26,9 @@ These two were fixed together, not independently, because they're causally coupl
 
 **T13 and T19 fixed** together, 2026-08-20. Causally coupled — the 7 `emit_stage()` call sites in `engine/execution_engine_streaming.py` are simultaneously the forward progress signal §13 needed and the natural backward cancellation checkpoints §19 needed, so fixing them separately would have meant touching the same functions twice. See the "Resolved" notes inside §13 and §19. Test suite now `209 passed, 3 skipped` (up from 201 passed, 3 skipped/deselected — 6 net new tests in `tests/test_streaming_cancellation.py`, a file that did not exist before; with `.env` now present the two `live`-marked `test_qdrant_rebuild.py` cases that previously failed for lack of credentials now pass as well, and all 5 `live`-marked tests in the suite pass end to end).
 
-Remaining 13 tasks are unchanged from the original audit below.
+**T7 and T12 fixed** together, 2026-08-20. Causally coupled — §7c's refusal-string divergence and §12's discarded prompt are the same `else:` branch in both engines' STEP 7, so fixing them independently meant editing that block twice and picking the constant's home twice. §7 also turned out to understate itself: it calls the blocking engine one "which nothing in production calls," but `RageEngine` is what the entire measurement apparatus (`evaluation/run_eval.py`, all five `KPI/*.py`, `tests/verify_engine.py`) runs on, so its drift from the streaming engine production actually serves made T7 a prerequisite for T17, not a peer of it. Six more divergences beyond the three originally documented (7a–c) were found during the fix and are recorded in §7's Resolved note (7d–7i), the most significant being that `tracing.set_trace_attributes(cancelled=True)` on the cancel path was a silent no-op — it ran outside the Langfuse trace's active window, so T19's cancellation attribute never reached a trace. See the "Resolved" notes inside §7 and §12 for what shipped. Test suite now `224 passed, 3 skipped` (up from 209 — 15 net new tests across `tests/test_engine_contract.py` and `tests/test_insufficient_refusal.py`, both new files).
+
+Remaining 11 tasks are unchanged from the original audit below.
 
 ---
 
@@ -40,12 +42,12 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [ ] **T4** — Remove the `max_tokens=150` override in `decide_web_search` (§4)
 - [x] **T5** — Scope `MetricsRegistry` per request, or accept cross-request KPI contamination (§5) — Fixed 2026-08-19
 - [x] **T6** — Fix `last_used_model()` to report the model that served the *answer* (§6) — Fixed 2026-08-19
-- [ ] **T7** — Reconcile the two engines: `llm_latency_ms`, trace attributes, refusal string (§7)
+- [x] **T7** — Reconcile the two engines: `llm_latency_ms`, trace attributes, refusal string (§7) — Fixed 2026-08-20
 - [x] **T8** — Make `candidate_spans()` handle non-interrogative queries (§8) — Fixed 2026-08-19
 - [x] **T9** — Allow the entity index to refresh without a process restart (§9) — Fixed 2026-08-19
 - [x] **T10** — Either consume `RouterDecision`'s three dead fields or delete them (§10) — Fixed 2026-08-19
 - [x] **T11** — Decide whether web fallback should be reachable outside `TaskType.OPEN` (§11) — Fixed 2026-08-19
-- [ ] **T12** — Either send `insufficient_prompt()` to the LLM or delete it (§12)
+- [x] **T12** — Either send `insufficient_prompt()` to the LLM or delete it (§12) — Fixed 2026-08-20
 - [x] **T13** — Render the `stage` SSE events in the UI (§13) — Fixed 2026-08-20
 - [ ] **T14** — Decide whether the product is multi-turn; wire history if so (§14)
 - [ ] **T15** — Delete `format_llama3_prompt()` (§15)
@@ -442,6 +444,25 @@ Anything that string-matches refusals across both engines — `evaluation/refusa
 
 Extract the shared tail (KPI aggregation, refusal constants, trace attributes) into one module both engines import, or make `RageEngine` a thin wrapper over `StreamingRageEngine` with a no-op token callback. Two hand-maintained copies of a 100-line KPI block will keep drifting.
 
+### Resolved — 2026-08-20
+
+Shipped the wrapper approach: `engine/execution_engine.py` is now a ~25-line `RageEngine(StreamingRageEngine)` subclass with no method overrides — `run()` was already a thin blocking wrapper around `run_streaming()` (used by `api/main.py`'s SSE loop's non-streaming callers and, before this fix, only itself), so nothing needed reimplementing. The 329-line duplicate pipeline is gone. `engine/execution_engine_streaming.py` is now the single engine body; `engine/contracts.py` (new) holds what both call sites need to agree on — `INSUFFICIENT_REFUSAL`, `GENERATION_FAILED`, `INTERNAL_ERROR` (one apostrophe, fixing 7c), the `ExecutionResult` TypedDict, and `quality_report_dict()` (replacing the two identical `_report_dict` closures).
+
+Exploration during the fix found six more divergences beyond the three this section documented, all fixed inside `execution_engine_streaming.py`:
+
+- **7d** — `kpis["cancelled"]` existed only on the streaming engine, so the two engines emitted different KPI *shapes*, not just different values. Now identical on both (`RageEngine` inherits the same KPI-aggregation code).
+- **7e** — the blocking engine ran `validate_answer()` and `record_generation()` *inside* the generation `try`, so a validator exception silently replaced a successfully generated answer with `GENERATION_FAILED`; the streaming engine ran them outside any try, so the same exception hit the fatal handler and produced `INTERNAL_ERROR` instead. Same underlying failure, two different wrong answers, neither of which was the answer that was actually generated. Validation now has its own `try/except` (recording `output_validation_errors` on failure) so an observability bug can never overwrite a good answer.
+- **7f** — the streaming engine emitted `generation`/`completed` even when the fail-soft `except Exception` branch meant `llm_ran` was `False` — the code fell through to the same `emit_stage(..., "completed")` call regardless. Now emits `"completed"` only when `llm_ran`, `"failed"` otherwise.
+- **7g** — dead assignment: the `ImportError` fallback branch computed `llm_latency_ms`, then the line right after the `try/except` unconditionally overwrote it. Removed along with 7a's fix (see below) — each success path now assigns its own latency once.
+- **7h** — the blocking engine had no `cancel_event`/`RequestCancelled` support, so T19's cancellation was one-sided. Free with the subclass approach: `RageEngine` inherits `run_streaming()` unchanged.
+- **7i** — `tracing.set_trace_attributes(cancelled=True)` on the cancel path was a silent no-op. It ran in `except RequestCancelled`, *outside* `with tracing.trace_request(...)` — whose `finally` had already set the thread-local `active` flag to `False` by the time that line executed, and `set_trace_attributes()` returns immediately when inactive. T19's cancellation attribute never reached Langfuse. Fixed by restructuring: the pipeline body is now a `try/except RequestCancelled/finally` nested *inside* `with tracing.trace_request(...)`, and the `finally` — which always runs before the `with` block exits, on every path — writes `set_trace_attributes(llm_ran=..., output_validation=..., cancelled=...)`. This is also the fix for 7b; there is now exactly one write, on every exit path, and it always lands.
+
+7a itself: `llm_latency_ms` is now assigned only on the two generation success paths (streaming and the `ImportError` blocking fallback), matching the blocking engine's original correct behavior; the KPI dict uses `is not None` (not truthiness) everywhere, so a genuine `0.0` survives instead of collapsing to `None`.
+
+One consequence recorded, not hidden: `evaluation/run_eval.py` and every `KPI/*.py` script import `RageEngine` and now transitively exercise `chat_completion_streaming` (Gemini primary, Groq fallback) instead of `chat_completion_remote`. This is the point of the fix — it makes T17's eventual re-run measure the code path production actually runs, rather than a stale duplicate — but it does mean every stored evaluation result now describes a colder trail than before this change, on top of what §17 already says. No evaluation re-run was performed as part of this fix; T17 stays blocked on T3.
+
+Tests: `tests/test_engine_contract.py` (new, 8 tests) — KPI key-set parity between the two engines (7d), `llm_latency_ms` is `None` on failure and a genuine `0.0` survives (7a), a validator exception leaves `final_answer` intact (7e), a failed generation emits `"failed"` not `"completed"` (7f), `set_trace_attributes` reaches an active fake trace on both the normal and the cancel path (7b/7i) — the assertion that fails against the pre-fix code, and both engines fall back to the identical `INSUFFICIENT_REFUSAL` object (7c). All hermetic: engines built via `object.__new__` plus stub collaborators, no network. Full suite: `224 passed, 3 skipped` (see the status update at the top of this file). `python -m tests.verify_engine` (not pytest-collected, run by hand) still passes — schema contract, silence protocol, and statelessness all confirmed against the rewritten engine.
+
 ---
 
 ## §8 — `candidate_spans()` discards the first token of every query
@@ -683,6 +704,21 @@ else:
 The prompt is built, two metrics are recorded about it, and it is never sent anywhere. Users get a fixed string instead of the honest, query-aware refusal the template was written to produce.
 
 **Fix:** either send it (a refusal that names what was asked and why the evidence fell short is materially better UX, at the cost of one LLM call on the refusal path), or delete `insufficient_prompt()` and the two metric records. The current state is the worst of both — the cost of maintaining it, none of the benefit.
+
+### Resolved — 2026-08-20
+
+Shipped "send it," with a verify-before-ship gate rather than sending the model's output unchecked:
+
+- `CapabilityAssessor.assess()` (`agent/capability/capability_assessor.py`) now records a `capability_reason` categorical at each `INSUFFICIENT` return — `no_evidence`, `quality_empty:<quality.reason>`, or `comparison_entity_coverage` — so the refusal can say *why*, not just *that*.
+- `insufficient_prompt(query, *, reason=None)` (`agent/prompt_templates.py`) gained the reason and an explicit "do not answer from prior knowledge, do not speculate, do not fabricate a citation" constraint. Default keeps every other caller unaffected.
+- `PromptManager.generate_prompt()` gained a keyword-only `capability_reason` parameter, threaded through to `insufficient_prompt()`. The two metrics this section flagged as recorded-and-discarded (`prompt_mode`, `prompt_budget_mode`) are unchanged — they now describe a prompt that actually gets used.
+- New `agent.output_validator.is_refusal(text)` — the safety gate. Accepts only non-empty, length-bounded (`MAX_REFUSAL_CHARS = 600`) text that matches no `CITATION_PATTERN`, reusing the existing citation regex rather than adding a second one. A "refusal" that cites a source is an answer that slipped past the honesty gate, not a refusal — reject it.
+- `execution_engine_streaming.py`'s STEP 7 `else:` branch now calls `chat_completion_streaming(prompt, max_tokens=200, on_chunk=on_token_callback)` (so the refusal still types out live in the UI, same as a real answer), runs the result through `is_refusal()`, and on any failure — empty output, a citation slipping through, an exception, cancellation aside — falls back to the static `INSUFFICIENT_REFUSAL` constant from §7's `engine/contracts.py`. `kpis["refusal_mode"]` records which happened (`"generated"` / `"static_fallback"` / `None` on the non-refusal path), and the `generation` stage's `"skipped"` data payload carries both `capability_reason` and `refusal_mode` for the UI's existing stage-detail rendering to pick up.
+- `kpis["llm_ran"]` deliberately stays `False` on this path — it means "an evidence-grounded answer was generated," and flipping it would silently change `task_success` and `answer_truncated` for every refusal in the eval set. Cost stays honest regardless: `_record_usage()` observes into the registry independent of `llm_ran`, so `kpis["cost_usd"]` still counts a generated refusal's call.
+
+No frontend change was needed: `StageGlyph` already has a default branch for unrecognized stage status, `stageDetail` already renders `data.reason` for a `"skipped"` generation stage, and the `done` event handler already prefers `parsed.final_answer` over locally accumulated tokens — so a generated refusal that gets rejected by `is_refusal()` after partially streaming still resolves to the correct static fallback text once `done` arrives.
+
+Tests: `tests/test_insufficient_refusal.py` (new, 7 tests) — a generated refusal that passes `is_refusal()` reaches `final_answer` with `refusal_mode == "generated"`; empty output, a citation-bearing "refusal," and a generation exception all fall back to `INSUFFICIENT_REFUSAL` with `refusal_mode == "static_fallback"`; `capability_reason` propagates into the prompt for all three `INSUFFICIENT` causes `CapabilityAssessor` can produce (using the real, unstubbed assessor); and `llm_ran`/`task_success` are `False` on every refusal path regardless of which one fired. Hermetic, no network. Fixed together with §7 — see the status update at the top of this file for why, and §7's Resolved note for the engine-collapse half both fixes share code with.
 
 ---
 

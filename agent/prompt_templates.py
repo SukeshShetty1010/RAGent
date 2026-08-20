@@ -220,11 +220,15 @@ def open_concise(capability: AnswerCapability) -> str:
 # Insufficient Prompt
 # ============================================================
 
-def insufficient_prompt(query: str) -> str:
+def insufficient_prompt(query: str, *, reason: str | None = None) -> str:
+    reason_line = f"\nINTERNAL REASON (for tone only, do not quote verbatim):\n{reason}\n" if reason else ""
     return (
         "The system does not have sufficient reliable information "
         "to answer the following request safely.\n\n"
-        f"USER QUERY:\n{query}\n\n"
+        f"USER QUERY:\n{query}\n"
+        f"{reason_line}\n"
         "Respond with a brief, honest refusal explaining that "
-        "the available evidence is insufficient."
+        "the available evidence is insufficient. Do not answer from "
+        "prior knowledge, do not speculate, and do not fabricate a "
+        "citation to satisfy the request."
     )

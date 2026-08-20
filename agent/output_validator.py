@@ -39,6 +39,12 @@ _MARKDOWN_TAGS = ("**", "_", "`")
 CITATION_FORMAT = "(Source: 'Exact Source Title')"
 CITATION_PATTERN = re.compile(r"\(Source:\s*'([^']+)'\)")
 
+# A generated refusal that cites a source is an answer wearing a
+# refusal's clothes -- reject it and fall back to the static constant
+# rather than ship a fabricated citation next to "I don't have enough
+# reliable information."
+MAX_REFUSAL_CHARS = 600
+
 
 class ValidationResult(BaseModel):
     is_valid: bool
@@ -130,3 +136,20 @@ def validate_answer(
         unmatched_citations=unmatched_citations,
         citation_count=len(cited_sources),
     )
+
+
+def is_refusal(text: str) -> bool:
+    """Safety gate for a generated INSUFFICIENT-capability refusal.
+
+    Accepts only text that is non-empty, length-bounded, and cites no
+    source -- a "refusal" bearing a citation is an answer that slipped
+    past the honesty gate, not a refusal. Callers fall back to the
+    static INSUFFICIENT_REFUSAL constant when this returns False.
+    """
+    if not text or not text.strip():
+        return False
+    if len(text) > MAX_REFUSAL_CHARS:
+        return False
+    if CITATION_PATTERN.search(text):
+        return False
+    return True

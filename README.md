@@ -223,8 +223,8 @@ The agentic layer provides **deterministic, intent-aware routing** that classifi
 | Bounded LLM Web-Search Decision | `agent/decisions/web_search_decision.py` | `decide_web_search()` — fail-soft, degrades to deterministic rule on any LLM/parse failure |
 | Web Search Fallback | `agent/tools/web_search.py` | `WebSearchTool.search()` via Tavily API |
 | Post-Generation Output Validation | `agent/output_validator.py` | `validate_answer()` — balanced Markdown + required PARTIAL section, fail-soft, never discards `final_answer` |
-| Execution Engine | `engine/execution_engine.py` | `RageEngine.run()` (7-step pipeline) |
-| Streaming Engine | `engine/execution_engine_streaming.py` | `StreamingRageEngine.run_streaming()` (SSE API), cancels at the next stage boundary on client disconnect |
+| Execution Engine | `engine/execution_engine_streaming.py` | `StreamingRageEngine.run_streaming()` — the one 7-step pipeline (SSE API), cancels at the next stage boundary on client disconnect |
+| Blocking Facade | `engine/execution_engine.py` | `RageEngine(StreamingRageEngine)` — thin subclass; `run()` is inherited, used by `evaluation/` and `KPI/` |
 | Pipeline Progress UI | `frontend/src/app/page.tsx` | `StageProgress` / `AgentDecisionsPanel` render the SSE `stage` events and `agent_decisions` live and per-message |
 
 

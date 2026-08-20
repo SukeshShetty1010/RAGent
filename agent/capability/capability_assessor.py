@@ -62,6 +62,8 @@ class CapabilityAssessor:
             # Absolute honesty checks
             # ----------------------------------------------------------
             if not evidence or quality_status == QualityStatus.QUALITY_EMPTY:
+                reason = "no_evidence" if not evidence else f"quality_empty:{quality.reason}"
+                MetricsRegistry.get().record("capability_reason", reason)
                 return AnswerCapability.INSUFFICIENT
 
             capability = AnswerCapability.FULL
@@ -76,6 +78,9 @@ class CapabilityAssessor:
                 entity_coverage = self._entity_coverage(evidence)
 
                 if entity_coverage < 2:
+                    MetricsRegistry.get().record(
+                        "capability_reason", "comparison_entity_coverage"
+                    )
                     return AnswerCapability.INSUFFICIENT
 
                 if self._is_unbalanced(evidence):

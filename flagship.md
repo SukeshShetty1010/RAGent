@@ -31,7 +31,7 @@ README's claims; the README is treated as an assertion to be checked, not as evi
 | Reranking | **Superseded 2026-08-17** (was: cross-encoder on Modal). Now provider-dispatched via `RERANKER_PROVIDER` — Cloudflare Workers AI `@cf/baai/bge-reranker-base` in production, in-process fastembed ONNX as the default/offline path. Still reorders into `rerank_score` with the RRF `score` preserved for the quality gate, still fail-soft to RRF order on error. Per-provider floors in `quality_gate._FLOORS`, `None` = uncalibrated ⇒ skip the ladder | `retriever/rag_retriever.py`, `retriever/reranker_provider.py`, `llm/cloudflare_rerank_client.py` |
 | Domain corpus | Gaming. Three source APIs (RAWG identity, IGDB relational metadata, GameSpot editorial), 5 Qdrant collections, editorial chunking under a written contract (~500 tok / 50 overlap, no-orphan rule) | `data/`, `ingest/`, `vector/create_schema.py`, `chunking/chunk_contract.md` |
 | Corpus volume | **100 games, 2791 `EditorialChunk` points, verified zero orphans and zero duplicate `unified_game_id`s** — full rebuild since the original audit, decoupled ingestion identity from RAWG, added Wikipedia + Steam editorial sources alongside GameSpot | `scripts/verify_corpus.py` (live run, 2026-08-09); commits `c595571`, `16079a2` |
-| Refusal path | `CapabilityAssessor.assess()` returns `INSUFFICIENT` on empty evidence or `QUALITY_EMPTY`; engine hard-guards generation behind `if capability != AnswerCapability.INSUFFICIENT:` | `agent/capability/capability_assessor.py:58-59`; `engine/execution_engine.py:185` |
+| Refusal path | `CapabilityAssessor.assess()` returns `INSUFFICIENT` on empty evidence or `QUALITY_EMPTY`; engine hard-guards generation behind `if capability != AnswerCapability.INSUFFICIENT:` | `agent/capability/capability_assessor.py:58-59`; `engine/execution_engine_streaming.py:327` (the only engine body since T7 — `execution_engine.py` is now a thin subclass) |
 | Citation attribution | Context blocks injected as `[Source: {title} | Type: {type}]`; every task template instructs "Cite sources"; frontend renders a "Sources (Evidence)" panel with `source_title` + snippet | `agent/prompt_templates.py:52-55, 105/121/138/152/167`; `frontend/src/app/page.tsx:257-267` |
 | Evaluation | **RAGAS + a 50-query golden set complete** (`evaluation/`): 20 factual, 10 comparison, 10 listicle, 10 deliberately unanswerable, drafted from live corpus payloads. Two full production-path runs completed (web-enabled and corpus-only). Refusal precision/recall, RAGAS context precision/faithfulness/answer relevancy (40/40 answerable queries, Modal-judged), and a 4-mode retrieval ablation (both precision@k and RAGAS context precision per mode) are all committed under `evaluation/results/`. See Phase 3 results below — the homegrown metrics in `tests/evaluation_metrics.py` remain as a separate, smaller diagnostic layer | `evaluation/build_golden_set.py`, `evaluation/run_eval.py`, `evaluation/refusal_metrics.py`, `evaluation/ragas_eval.py`, `evaluation/ablation.py`, `evaluation/modal_judge_llm.py`; `evaluation/results/*` |
 | Observability | Homegrown `MetricsRegistry` + `ProfileBlock` (thread-safe, nested wall-clock), **plus (2026-08-14) real Groq token/cost capture and an optional Langfuse trace layer mirroring every `ProfileBlock` span** — hard no-op with zero import cost unless both `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` are set. Verified live in production with a screenshot of a full trace | `utils/observability.py`, `utils/tracing.py`, `llm/pricing.py` |
@@ -94,7 +94,7 @@ These matter because the README publishes these numbers as headline achievements
 |---|---|---|
 | Hybrid dense + sparse, RRF-fused | **PRESENT (exceeds)** | `rag_retriever.py:121-147` + rerank stage `:188-221` |
 | Specific non-generic corpus | **PRESENT** | 3-API gaming corpus, 50+ games, 5 collections |
-| Explicit "insufficient information" handling | **PRESENT** | `capability_assessor.py:58-59` + hard guard `execution_engine.py:185` |
+| Explicit "insufficient information" handling | **PRESENT** | `capability_assessor.py:58-59` + hard guard `execution_engine_streaming.py:327` |
 | Source/citation attribution in outputs | **PRESENT (weak enforcement)** | Sources injected + rendered in UI; but no enforced citation format, and nothing validates that emitted citations match retrieved titles |
 | Quantified RAGAS-equivalent eval (context precision, faithfulness, answer relevancy) | **PRESENT** | 50-query golden set + RAGAS scoring vs a Groq 70B judge, committed under `evaluation/results/` — see Phase 3 results below. Full RAGAS scoring is still catching up on a Groq free-tier daily token quota (checkpoint-resumable); the golden set, both production-path runs, and the refusal + ablation metrics are complete |
 
@@ -454,6 +454,11 @@ then the GTA VI query producing a refusal. The refusal is the differentiator; sh
    only LLM path exercised across every one of the 100 golden-set query runs this session.
    `llm/modal_llm.py` (Gemma 3 12B) was not invoked. Recommend deleting it or clearly marking it
    experimental/unused rather than maintaining a third inconsistent claim in the README.
+   **Superseded (AUDIT_TASKS.md T7):** `engine/execution_engine.py` is now a thin `RageEngine`
+   subclass of `StreamingRageEngine`; `STEP 7` lives only in
+   `engine/execution_engine_streaming.py` and calls `chat_completion_streaming` (Gemini primary,
+   Groq fallback), not `chat_completion_remote`. A future eval/KPI re-run will exercise that path
+   instead of the one described above — noted, not re-run, since T17 is separately blocked on T3.
 3. **Answered by direct measurement, and the answer is "less than expected."** ~500 judge calls
    was the estimate; the actual constraint hit was Groq's **daily** token quota for the 70B
    judge model (100,000 TPD), not a per-minute rate limit — it was nearly exhausted after
