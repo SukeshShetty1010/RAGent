@@ -24,7 +24,9 @@ These two were fixed together, not independently, because they're causally coupl
 
 **T10 and T11 fixed** together (same day, follow-up pass), commit history on `main`. Causally coupled — both live in `agent/task_router.py` / `retriever/strategy_selector.py` and both concern the same underlying question: who owns the "can this query reach the web?" decision, and by what rule. `RouterDecision`'s three dead fields (`retrieval_strategy`, `web_search_allowed`, `max_results`) were deleted rather than consumed — a repo-wide grep confirmed nothing read them outside `strategy_selector.py`'s own unused test-harness fixtures, and the two independent derivations already disagreed. Separately, `StrategySelector.select()` now sets `allow_web_fallback=True` for COMPARISON, LISTICLE, and both FACTUAL branches whenever `IntentSignal.TEMPORAL` is present in `decision.intent_signals` (previously hardcoded `False`, reachable only via `TaskType.OPEN`), so a query like *"latest patch notes for Assassin's Creed Valhalla"* (`FACTUAL` + `TEMPORAL`) can now reach `orchestrator.py`'s temporal web-fallback gate. `quality_report.has_temporal_signal` (chunk-content-level, `retriever/quality_gate.py`) is a distinct signal from `IntentSignal.TEMPORAL` (query-level) and was intentionally left untouched — T11's fix only removes the task-type gate that blocked the temporal check from ever being evaluated for non-OPEN tasks. See the "Resolved" notes inside §10 and §11. Test suite now `201 passed, 3 skipped` (up from 190 — 11 net new tests in `tests/test_strategy_selector.py`, a file that did not exist before; the two pre-existing `live`-marked `test_qdrant_rebuild.py` failures are unrelated, no `.env`/Qdrant credentials in this environment).
 
-Remaining 15 tasks are unchanged from the original audit below.
+**T13 and T19 fixed** together, 2026-08-20. Causally coupled — the 7 `emit_stage()` call sites in `engine/execution_engine_streaming.py` are simultaneously the forward progress signal §13 needed and the natural backward cancellation checkpoints §19 needed, so fixing them separately would have meant touching the same functions twice. See the "Resolved" notes inside §13 and §19. Test suite now `209 passed, 3 skipped` (up from 201 passed, 3 skipped/deselected — 6 net new tests in `tests/test_streaming_cancellation.py`, a file that did not exist before; with `.env` now present the two `live`-marked `test_qdrant_rebuild.py` cases that previously failed for lack of credentials now pass as well, and all 5 `live`-marked tests in the suite pass end to end).
+
+Remaining 13 tasks are unchanged from the original audit below.
 
 ---
 
@@ -44,13 +46,13 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T10** — Either consume `RouterDecision`'s three dead fields or delete them (§10) — Fixed 2026-08-19
 - [x] **T11** — Decide whether web fallback should be reachable outside `TaskType.OPEN` (§11) — Fixed 2026-08-19
 - [ ] **T12** — Either send `insufficient_prompt()` to the LLM or delete it (§12)
-- [ ] **T13** — Render the `stage` SSE events in the UI (§13)
+- [x] **T13** — Render the `stage` SSE events in the UI (§13) — Fixed 2026-08-20
 - [ ] **T14** — Decide whether the product is multi-turn; wire history if so (§14)
 - [ ] **T15** — Delete `format_llama3_prompt()` (§15)
 - [ ] **T16** — Pin `fastembed` in the root `requirements.txt` (§16)
 - [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17)
 - [ ] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18)
-- [ ] **T19** — Cancel the engine thread when the SSE client disconnects (§19)
+- [x] **T19** — Cancel the engine thread when the SSE client disconnects (§19) — Fixed 2026-08-20
 - [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
 - [ ] **T21** — Fix stale comments and docs that describe retired infrastructure (§21)
 - [ ] **T22** — Drop the unused `transformers` dependency (§22)
@@ -705,6 +707,18 @@ Also unrendered: `agent_decisions` in the `done` payload — the quality report,
 
 **Fix:** render the stage stream as a progress list with per-stage timings. This is the single highest-value UI change available and requires no backend work.
 
+### Resolved — 2026-08-20
+
+Shipped as scoped: no backend changes were needed, since the events were already correctly serialized and forwarded — only `frontend/src/app/page.tsx` changed. The single comment this section quotes is now a real branch: `handleFrame`'s `stage` case upserts into a local `stageList` (by stage name, so the `started`→`completed` pair for one stage collapses into a single row that gains a duration rather than producing two rows), mirrored into a new `activeStages` state for live rendering. A new `StageProgress` component renders it as a vertical list — status glyph, label, one-line detail pulled from `stage.data`, and a right-aligned duration (`msShort()`, a sibling to the existing `ms()` KPI helper that shows `12 ms` instead of rounding a fast stage down to `0.01 s`) — mounted next to the bot avatar while `isStreaming`, so it stays visible through the full 106–122s retrieval window this section measured, not just until the first stage arrives.
+
+`agent_decisions` — the other half this section flagged as "computed, serialised, and dropped" — is now rendered too, via a new `AgentDecisionsPanel`: routing (task, signals, reason), retrieval strategy, the quality gate (status, confidence, evidence count, entity grounding, and `quality_pre_web` shown alongside it when a web rescue changed the verdict), the web-search decision (including `source`, so a `deterministic_fallback` — the visible symptom of open task T4 — is now visible in the UI instead of only in `MetricsRegistry`), and output validation (valid/invalid, issues, unmatched citations).
+
+Both the stage list and the decisions panel are also kept per-message (not just live): a collapsed `<details>` after the existing `KpiPanel`, summarising `Pipeline · N stages · total duration`, so every past answer's pipeline stays inspectable in scrollback rather than disappearing once the next message arrives.
+
+Fixed together with §19 — see the status update at the top of this file for why, and §19's Resolved note for the backend half.
+
+Verification: `npx tsc --noEmit`, `npm run lint` (only the 10 pre-existing `@typescript-eslint/no-explicit-any` errors in `markdownComponents`, confirmed unrelated via `git stash` diff), and `npm run build` (the static export the Dockerfile's first stage depends on) all pass. No JS test harness exists in this repo, so behavior was also checked against a real Cloudflare-reranked backend with a populated `.env`: a live `/api/chat` request streamed correctly ordered `routing`→`strategy`→`retrieval` stage frames with real per-stage timings before an unrelated Qdrant-connectivity issue in the sandbox interrupted retrieval — confirming the wire format and the frontend's parsing are correct even though a full answer could not be produced in that environment.
+
 ---
 
 ## §14 — No conversation history
@@ -850,6 +864,18 @@ The disconnect check only runs *between* queue items. Once execution reaches the
 Under any real concurrency on a free-tier container, that compounds.
 
 **Fix:** give `q.get` a timeout and re-check `is_disconnected()` each iteration; set a cancellation flag the engine can observe between stages. Full mid-stage cancellation is harder and probably not worth it — stopping at stage boundaries would recover most of the waste.
+
+### Resolved — 2026-08-20
+
+Shipped exactly the two-part fix this section recommended. `api/main.py`'s `event_generator` no longer calls `q.get()` unbounded; it polls with `q.get(timeout=1.0)`, catching `queue.Empty` and re-checking `request.is_disconnected()` each iteration, so a thread-pool worker is now parked for at most 1s instead of the full 106–122s retrieval. A `threading.Event` (`cancel`) is created per request and set in a `finally` around the generator, covering both the explicit disconnect break and the `GeneratorExit`/`CancelledError` sse_starlette raises when it notices the disconnect first.
+
+The cancellation flag itself is `cancel_event`, a new optional keyword argument on `StreamingRageEngine.run_streaming()` (defaulted to `None`, so `run()` and every CLI/KPI caller is unaffected). A `checkpoint(next_stage)` closure next to the existing `emit_stage` raises a new `RequestCancelled(next_stage)` when the event is set, and is called immediately before each of the 7 `emit_stage(..., "started")` sites — so a stage that never runs also never emits a spurious `started` event. Two traps flagged during planning were handled explicitly rather than left to the existing exception handling: an `except RequestCancelled: raise` guard was added ahead of STEP 7's inner `except Exception`, which otherwise would have reported "I could not generate a response at this time" for a cancellation; and a dedicated `except RequestCancelled as exc` handler was added ahead of the outer fatal-error handler, which otherwise would have logged "Fatal execution error" and set the internal-error answer. The token loop also checks the flag per chunk, so a disconnect mid-answer stops pumping tokens into a queue nobody drains — breaking out of `chat_completion_streaming` mid-iteration raises `GeneratorExit` inside it, a `BaseException` that passes cleanly through that function's `except Exception`, so no unwanted Groq fallback is triggered by a cancellation.
+
+Per this section's own scope note, mid-stage cancellation was deliberately not attempted — retrieval itself stays uninterruptible; what this buys is skipping everything *after* the stage boundary where the disconnect is next noticed. `kpis["cancelled"]` was added (`False` by default) so the KPI payload records whether a given run ended in cancellation rather than success or a genuine error.
+
+Fixed together with §13 — see the status update at the top of this file for why, and §13's Resolved note for the frontend half that consumes the same stage boundaries.
+
+Tests: `tests/test_streaming_cancellation.py` (new, 6 tests) — cancellation already signalled before `run_streaming` starts (nothing beyond the routing checkpoint runs), cancellation noticed mid-retrieval via a stub `orchestrator.run` that sets the event itself (the actual §19 scenario — retrieval completes, but nothing after the next checkpoint does), the default `cancel_event=None` path still runs the full pipeline, a genuine exception is still classified fatal and not cancelled (proves the exception ordering), and two API-level tests against a fake engine confirming `event: stage` frames precede `event: done` and that a stage arriving only after the 1s poll interval elapses is neither dropped nor causes the loop to spin. Full suite: `209 passed, 3 skipped` (see the status update at the top of this file).
 
 ---
 

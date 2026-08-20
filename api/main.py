@@ -107,7 +107,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
     - 'done': Final JSON with KPIs, evidence, and raw_metrics.
     """
     q = queue.Queue()
-    
+    cancel = threading.Event()
+
     def on_token(token: str):
         q.put({"type": "token", "data": token})
         
@@ -125,7 +126,8 @@ async def chat_endpoint(request: Request, body: ChatRequest):
             result = get_engine().run_streaming(
                 query=body.query,
                 on_token_callback=on_token,
-                on_stage_callback=on_stage
+                on_stage_callback=on_stage,
+                cancel_event=cancel,
             )
             # Make sure evidence is cleanly serializable
             safe_evidence = []
@@ -153,25 +155,43 @@ async def chat_endpoint(request: Request, body: ChatRequest):
 
     threading.Thread(target=run_engine, daemon=True).start()
 
-    async def event_generator():
-        while True:
-            # Check if client disconnected
-            if await request.is_disconnected():
-                break
+    POLL_INTERVAL_S = 1.0
 
-            # Await the blocking q.get in a thread pool
-            item = await asyncio.get_event_loop().run_in_executor(None, q.get)
-            
-            if item["type"] == "token":
-                yield {"event": "token", "data": json.dumps({"text": item["data"]})}
-            elif item["type"] == "stage":
-                yield {"event": "stage", "data": json.dumps(item["data"])}
-            elif item["type"] == "done":
-                yield {"event": "done", "data": json.dumps(item["data"])}
-                break
-            elif item["type"] == "error":
-                yield {"event": "error", "data": json.dumps({"error": item["data"]})}
-                break
+    def _next_item():
+        """Blocking get with a bound, so the loop can re-check disconnect."""
+        try:
+            return q.get(timeout=POLL_INTERVAL_S)
+        except queue.Empty:
+            return None
+
+    async def event_generator():
+        loop = asyncio.get_running_loop()
+        try:
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+
+                item = await loop.run_in_executor(None, _next_item)
+                if item is None:
+                    continue  # timed out waiting for the queue -- re-check disconnect
+
+                if item["type"] == "token":
+                    yield {"event": "token", "data": json.dumps({"text": item["data"]})}
+                elif item["type"] == "stage":
+                    yield {"event": "stage", "data": json.dumps(item["data"])}
+                elif item["type"] == "done":
+                    yield {"event": "done", "data": json.dumps(item["data"])}
+                    break
+                elif item["type"] == "error":
+                    yield {"event": "error", "data": json.dumps({"error": item["data"]})}
+                    break
+        finally:
+            # Covers both the explicit break above and the GeneratorExit /
+            # CancelledError sse_starlette raises when it detects the
+            # disconnect first. Harmless on the normal path: the engine has
+            # already finished by the time 'done' is dispatched.
+            cancel.set()
 
     return EventSourceResponse(event_generator())
 

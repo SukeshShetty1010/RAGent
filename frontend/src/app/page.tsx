@@ -29,12 +29,70 @@ type Kpis = {
   answer_model?: string | null;
 };
 
+// Mirrors the StreamingStage dataclass in
+// engine/execution_engine_streaming.py -- one entry per pipeline step,
+// emitted at "started" and again at "completed"/"skipped"/"cancelled".
+type Stage = {
+  name: string;
+  status: string; // started | completed | skipped | cancelled | failed
+  duration_ms: number | null;
+  data?: Record<string, unknown>;
+};
+
+// Mirrors agent_decisions as built in execution_engine_streaming.py.
+// Every field is optional -- the panel renders whatever the backend
+// actually populated for this query rather than assuming a fixed shape.
+type QualitySnapshot = {
+  status?: string;
+  confidence_score?: number;
+  has_temporal_signal?: boolean;
+  max_relevance?: number;
+  entity_grounded?: boolean;
+  evidence_count?: number;
+};
+
+type WebSearchDecision = {
+  should_search_web?: boolean;
+  reason?: string;
+  confidence?: number;
+  source?: string; // "llm" | "deterministic_fallback"
+};
+
+type OutputValidation = {
+  is_valid?: boolean;
+  issues?: string[];
+  has_required_section?: boolean;
+  cited_sources?: string[];
+  unmatched_citations?: string[];
+  citation_count?: number;
+};
+
+type AgentDecisions = {
+  task?: string;
+  intent_signals?: string[];
+  routing_reason?: string;
+  retrieval_strategy?: {
+    limit?: number;
+    use_query_decomposition?: boolean;
+    use_window_expansion?: boolean;
+    allow_web_fallback?: boolean;
+  };
+  merge_state?: string;
+  quality?: QualitySnapshot;
+  quality_pre_web?: QualitySnapshot;
+  web_search_decision?: WebSearchDecision;
+  answer_capability?: string;
+  output_validation?: OutputValidation;
+};
+
 type Message = {
   role: 'user' | 'assistant';
   content: string;
   kpis?: Kpis;
   evidence?: Evidence[];
   failed?: boolean;
+  stages?: Stage[];
+  agent_decisions?: AgentDecisions;
 };
 
 /* ── Avatar Components ────────────────────────────────── */
@@ -129,6 +187,13 @@ function Metric({ label, value, tone = 'default', className = '' }: { label: str
 
 const ms = (v: number | null | undefined) => (v == null ? '—' : `${(v / 1000).toFixed(2)} s`);
 
+// ms() rounds everything to seconds, which turns a 12ms routing stage
+// into "0.01 s" -- too coarse to tell a fast stage from a stalled one.
+const msShort = (v: number | null | undefined) => {
+  if (v == null) return '—';
+  return v < 1000 ? `${Math.round(v)} ms` : `${(v / 1000).toFixed(2)} s`;
+};
+
 // Tone only -- the label itself is whatever the backend sent, so a new
 // capability or gate status still renders rather than vanishing.
 function capabilityTone(v: string): 'good' | 'warn' | 'bad' | 'default' {
@@ -173,6 +238,213 @@ function KpiPanel({ kpis }: { kpis: Kpis }) {
         <Metric label="Answer Model" value={kpis.answer_model ?? '—'} className="col-span-2" />
       </div>
     </div>
+  );
+}
+
+/* ── Pipeline Stage Progress ──────────────────────────── */
+
+// Display names only. Which stages exist is the backend's call -- an
+// unrecognized stage name still renders via the fallback, same reasoning
+// as PROVIDER_LABELS above.
+const STAGE_LABELS: Record<string, string> = {
+  routing: 'Routing',
+  strategy: 'Strategy Selection',
+  retrieval: 'Retrieval',
+  capability: 'Capability Assessment',
+  context_assembly: 'Context Assembly',
+  prompt_construction: 'Prompt Construction',
+  generation: 'Generation',
+};
+
+function stageLabel(name: string): string {
+  return STAGE_LABELS[name] ?? name.replace(/_/g, ' ');
+}
+
+function stageDetail(stage: Stage): string | undefined {
+  const d = stage.data ?? {};
+  switch (stage.name) {
+    case 'routing': {
+      const signals = Array.isArray(d.signals) ? (d.signals as string[]) : [];
+      return d.task ? `${d.task}${signals.length ? ' · ' + signals.join(', ') : ''}` : undefined;
+    }
+    case 'strategy': {
+      const config = (d.config ?? {}) as Record<string, unknown>;
+      if (config.limit == null) return undefined;
+      return `limit ${config.limit}${config.allow_web_fallback ? ' · web fallback' : ''}`;
+    }
+    case 'retrieval':
+      if (d.chunks_found == null) return undefined;
+      return `${d.chunks_found} chunks · ${d.merge_state} · ${d.quality}`;
+    case 'capability':
+      return typeof d.capability === 'string' ? d.capability : undefined;
+    case 'context_assembly':
+      return d.chunks_assembled != null ? `${d.chunks_assembled} chunks` : undefined;
+    case 'prompt_construction':
+      return d.prompt_length != null ? `${d.prompt_length} chars` : undefined;
+    case 'generation':
+      if (stage.status === 'skipped') return typeof d.reason === 'string' ? d.reason : undefined;
+      return d.tokens_generated != null ? `${d.tokens_generated} tokens` : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function StageGlyph({ status }: { status: string }) {
+  if (status === 'started') {
+    return <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse flex-shrink-0" />;
+  }
+  if (status === 'completed') {
+    return <span className="text-emerald-400 flex-shrink-0">✓</span>;
+  }
+  if (status === 'skipped') {
+    return <span className="text-slate-500 flex-shrink-0">↷</span>;
+  }
+  if (status === 'cancelled' || status === 'failed') {
+    return <span className="text-red-400 flex-shrink-0">⨯</span>;
+  }
+  return <span className="text-slate-600 flex-shrink-0">•</span>;
+}
+
+function StageProgress({ stages, live = false }: { stages: Stage[]; live?: boolean }) {
+  if (stages.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      {stages.map((stage) => {
+        const detail = stageDetail(stage);
+        return (
+          <div
+            key={stage.name}
+            className="flex items-center gap-2.5 bg-slate-900/50 border border-slate-800 rounded-xl px-3 py-2 text-sm"
+          >
+            <StageGlyph status={stage.status} />
+            <span className="text-slate-200 font-medium">{stageLabel(stage.name)}</span>
+            {detail && <span className="text-slate-500 truncate">· {detail}</span>}
+            <span className="ml-auto text-slate-500 text-xs flex-shrink-0">{msShort(stage.duration_ms)}</span>
+          </div>
+        );
+      })}
+      {live && <TypingIndicatorDots />}
+    </div>
+  );
+}
+
+function TypingIndicatorDots() {
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1">
+      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+    </div>
+  );
+}
+
+/* ── Agent Decisions Panel ─────────────────────────────── */
+
+function AgentDecisionsPanel({ decisions }: { decisions: AgentDecisions }) {
+  const hasAnything =
+    decisions.task || decisions.retrieval_strategy || decisions.quality ||
+    decisions.web_search_decision || decisions.output_validation;
+  if (!hasAnything) return null;
+
+  return (
+    <div className="mt-2 space-y-3 text-sm">
+      {decisions.task && (
+        <div>
+          <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Routing</p>
+          <p className="text-slate-300">
+            <span className="text-slate-100 font-medium">{decisions.task}</span>
+            {decisions.intent_signals && decisions.intent_signals.length > 0 && (
+              <span className="text-slate-500"> · {decisions.intent_signals.join(', ')}</span>
+            )}
+          </p>
+          {decisions.routing_reason && <p className="text-slate-500 text-xs mt-0.5">{decisions.routing_reason}</p>}
+        </div>
+      )}
+
+      {decisions.retrieval_strategy && (
+        <div>
+          <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Retrieval Strategy</p>
+          <p className="text-slate-300">
+            limit {decisions.retrieval_strategy.limit}
+            {decisions.retrieval_strategy.use_query_decomposition && ' · query decomposition'}
+            {decisions.retrieval_strategy.use_window_expansion && ' · window expansion'}
+            {decisions.retrieval_strategy.allow_web_fallback && ' · web fallback allowed'}
+          </p>
+        </div>
+      )}
+
+      {decisions.quality && (
+        <div>
+          <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Quality Gate</p>
+          <p className="text-slate-300">
+            <span className={qualityTone(decisions.quality.status ?? '') === 'bad' ? 'text-red-400' : qualityTone(decisions.quality.status ?? '') === 'warn' ? 'text-amber-400' : 'text-emerald-400'}>
+              {decisions.quality.status}
+            </span>
+            {decisions.quality.confidence_score != null && ` · ${(decisions.quality.confidence_score * 100).toFixed(1)}% confidence`}
+            {decisions.quality.evidence_count != null && ` · ${decisions.quality.evidence_count} evidence`}
+            {decisions.quality.entity_grounded === false && ' · not entity-grounded'}
+          </p>
+          {decisions.quality_pre_web && (
+            <p className="text-slate-500 text-xs mt-0.5">
+              Before web rescue: {decisions.quality_pre_web.status}
+              {decisions.quality_pre_web.confidence_score != null && ` (${(decisions.quality_pre_web.confidence_score * 100).toFixed(1)}%)`}
+            </p>
+          )}
+        </div>
+      )}
+
+      {decisions.web_search_decision && (
+        <div>
+          <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Web Search Decision</p>
+          <p className="text-slate-300">
+            {decisions.web_search_decision.should_search_web ? 'Searched the web' : 'Did not search the web'}
+            {decisions.web_search_decision.confidence != null && ` · ${(decisions.web_search_decision.confidence * 100).toFixed(0)}% confidence`}
+            {decisions.web_search_decision.source && (
+              <span className="text-slate-500"> · {decisions.web_search_decision.source}</span>
+            )}
+          </p>
+          {decisions.web_search_decision.reason && (
+            <p className="text-slate-500 text-xs mt-0.5">{decisions.web_search_decision.reason}</p>
+          )}
+        </div>
+      )}
+
+      {decisions.output_validation && (
+        <div>
+          <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Output Validation</p>
+          <p className={decisions.output_validation.is_valid ? 'text-emerald-400' : 'text-amber-400'}>
+            {decisions.output_validation.is_valid ? 'Valid' : 'Issues found'}
+            {decisions.output_validation.citation_count != null && ` · ${decisions.output_validation.citation_count} citations`}
+          </p>
+          {decisions.output_validation.issues && decisions.output_validation.issues.length > 0 && (
+            <ul className="text-slate-500 text-xs mt-0.5 list-disc list-inside">
+              {decisions.output_validation.issues.map((issue, i) => <li key={i}>{issue}</li>)}
+            </ul>
+          )}
+          {decisions.output_validation.unmatched_citations && decisions.output_validation.unmatched_citations.length > 0 && (
+            <p className="text-slate-500 text-xs mt-0.5">
+              Unmatched citations: {decisions.output_validation.unmatched_citations.join(', ')}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PipelinePanel({ stages, decisions }: { stages: Stage[]; decisions?: AgentDecisions }) {
+  if (stages.length === 0) return null;
+  const totalMs = stages.reduce((sum, s) => sum + (s.duration_ms ?? 0), 0);
+  return (
+    <details className="mt-3 group">
+      <summary className="cursor-pointer text-xs text-slate-500 font-semibold uppercase tracking-wider select-none hover:text-slate-400">
+        Pipeline · {stages.length} stages · {msShort(totalMs)}
+      </summary>
+      <div className="mt-2 space-y-3">
+        <StageProgress stages={stages} />
+        {decisions && <AgentDecisionsPanel decisions={decisions} />}
+      </div>
+    </details>
   );
 }
 
@@ -342,6 +614,7 @@ export default function ChatApp() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaitingForFirstToken, setIsWaitingForFirstToken] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
+  const [activeStages, setActiveStages] = useState<Stage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -376,6 +649,18 @@ export default function ChatApp() {
       const decoder = new TextDecoder();
       let assistantContent = '';
       let addedAssistant = false;
+
+      // Stages start arriving before the assistant message exists --
+      // routing completes long before the first token -- so they can't
+      // ride along on updateAssistant. Mirrored into state via
+      // upsertStage so the live view re-renders as each one lands.
+      const stageList: Stage[] = [];
+      const upsertStage = (s: Stage) => {
+        const i = stageList.findIndex((x) => x.name === s.name);
+        if (i === -1) stageList.push(s);
+        else stageList[i] = { ...stageList[i], ...s };
+        setActiveStages([...stageList]);
+      };
 
       const ensureAssistant = () => {
         if (addedAssistant) return;
@@ -425,15 +710,19 @@ export default function ChatApp() {
             content: parsed.final_answer ?? assistantContent,
             kpis: parsed.kpis,
             evidence: parsed.evidence,
+            stages: [...stageList],
+            agent_decisions: parsed.agent_decisions,
           });
         } else if (event === 'error') {
           ensureAssistant();
           updateAssistant({
             content: `Request failed: ${parsed.error}`,
             failed: true,
+            stages: [...stageList],
           });
+        } else if (event === 'stage') {
+          upsertStage(parsed);
         }
-        // 'stage' events are progress only -- nothing to render yet.
       };
 
       let buffer = '';
@@ -462,6 +751,7 @@ export default function ChatApp() {
     } finally {
       setIsStreaming(false);
       setIsWaitingForFirstToken(false);
+      setActiveStages([]);
     }
   };
 
@@ -527,6 +817,7 @@ export default function ChatApp() {
                 {msg.role === 'assistant' && msg.kpis && (
                   <>
                     <KpiPanel kpis={msg.kpis} />
+                    {msg.stages && <PipelinePanel stages={msg.stages} decisions={msg.agent_decisions} />}
 
                     {msg.evidence && msg.evidence.length > 0 && (
                       <div className="mt-3 space-y-2">
@@ -550,8 +841,20 @@ export default function ChatApp() {
             </div>
           ))}
 
-          {/* Animated loading indicator while waiting for first token */}
-          {isWaitingForFirstToken && <TypingIndicator />}
+          {/* Live pipeline progress -- stays mounted while tokens stream,
+              since the "generation" stage only completes after the
+              stream ends. Falls back to the bouncing dots for the brief
+              gap before the first stage event arrives. */}
+          {isStreaming && activeStages.length > 0 ? (
+            <div className="flex items-start gap-3 py-2">
+              <BotAvatar />
+              <div className="flex-1 max-w-[85%]">
+                <StageProgress stages={activeStages} live />
+              </div>
+            </div>
+          ) : (
+            isWaitingForFirstToken && <TypingIndicator />
+          )}
 
           <div ref={messagesEndRef} />
         </div>

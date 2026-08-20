@@ -31,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Dict, List, Any, Optional, Callable, Generator
 from dataclasses import dataclass, field
@@ -68,6 +69,14 @@ class StreamingStage:
     status: str  # "started", "completed", "failed"
     data: Dict[str, Any] = field(default_factory=dict)
     duration_ms: Optional[float] = None
+
+
+class RequestCancelled(Exception):
+    """Raised at a stage boundary when the client has gone away.
+
+    Carries the name of the stage that was about to start. Caught by
+    run_streaming() itself -- never propagates to the caller.
+    """
 
 
 @dataclass
@@ -114,16 +123,19 @@ class StreamingRageEngine:
         on_token_callback: Optional[Callable[[str], None]] = None,
         on_stage_callback: Optional[Callable[[StreamingStage], None]] = None,
         options: Optional[Dict[str, Any]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> StreamingResult:
         """
         Execute RAG pipeline with streaming callbacks.
-        
+
         Args:
             query: User query string
             on_token_callback: Called for each generated token/chunk
             on_stage_callback: Called when pipeline stages start/complete
             options: Additional execution options
-        
+            cancel_event: When set, run_streaming stops at the next stage
+                boundary (or the next generated chunk) instead of continuing.
+
         Returns:
             StreamingResult with full execution data
         """
@@ -138,6 +150,7 @@ class StreamingRageEngine:
         llm_ran = False
         llm_latency_ms: Optional[float] = None
         answer_model_used: Optional[str] = None
+        cancelled = False
 
         agent_decisions: Dict[str, Any] = {}
         assembled_chunks: List[Dict[str, Any]] = []
@@ -158,12 +171,17 @@ class StreamingRageEngine:
             if on_stage_callback:
                 on_stage_callback(stage)
 
+        def checkpoint(next_stage: str) -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise RequestCancelled(next_stage)
+
         try:
             with tracing.trace_request(query), ProfileBlock("REQUEST_TOTAL"):
 
                 # ------------------------------------------------
                 # STEP 1: ROUTING
                 # ------------------------------------------------
+                checkpoint("routing")
                 emit_stage("routing", "started")
                 step_start = time.perf_counter()
                 
@@ -186,6 +204,7 @@ class StreamingRageEngine:
                 # ------------------------------------------------
                 # STEP 2: STRATEGY SELECTION
                 # ------------------------------------------------
+                checkpoint("strategy")
                 emit_stage("strategy", "started")
                 step_start = time.perf_counter()
                 
@@ -205,6 +224,7 @@ class StreamingRageEngine:
                 # ------------------------------------------------
                 # STEP 3: RETRIEVAL
                 # ------------------------------------------------
+                checkpoint("retrieval")
                 emit_stage("retrieval", "started")
                 step_start = time.perf_counter()
                 
@@ -243,6 +263,7 @@ class StreamingRageEngine:
                 # ------------------------------------------------
                 # STEP 4: CAPABILITY ASSESSMENT
                 # ------------------------------------------------
+                checkpoint("capability")
                 emit_stage("capability", "started")
                 step_start = time.perf_counter()
                 
@@ -268,6 +289,7 @@ class StreamingRageEngine:
                 # ------------------------------------------------
                 # STEP 5: CONTEXT ASSEMBLY
                 # ------------------------------------------------
+                checkpoint("context_assembly")
                 emit_stage("context_assembly", "started")
                 step_start = time.perf_counter()
                 
@@ -283,6 +305,7 @@ class StreamingRageEngine:
                 # ------------------------------------------------
                 # STEP 6: PROMPT CONSTRUCTION
                 # ------------------------------------------------
+                checkpoint("prompt_construction")
                 emit_stage("prompt_construction", "started")
                 step_start = time.perf_counter()
                 
@@ -301,22 +324,28 @@ class StreamingRageEngine:
                 # STEP 7: LLM GENERATION (WITH STREAMING)
                 # ------------------------------------------------
                 if capability != AnswerCapability.INSUFFICIENT:
+                    checkpoint("generation")
                     emit_stage("generation", "started")
                     step_start = time.perf_counter()
-                    
+
                     try:
                         # Try streaming generation first
                         from llm.ragent_client_streaming import chat_completion_streaming
-                        
+
                         accumulated = []
                         for chunk in chat_completion_streaming(
                             prompt,
                             on_chunk=on_token_callback
                         ):
                             accumulated.append(chunk)
-                        
+                            if cancel_event is not None and cancel_event.is_set():
+                                raise RequestCancelled("generation")
+
                         final_answer = "".join(accumulated).strip()
                         llm_ran = True
+
+                    except RequestCancelled:
+                        raise
 
                     except ImportError:
                         # Fall back to blocking generation
@@ -395,6 +424,13 @@ class StreamingRageEngine:
                         "reason": "insufficient_capability"
                     })
 
+        except RequestCancelled as exc:
+            cancelled = True
+            logger.info(f"Request cancelled by client before stage: {exc}")
+            emit_stage(str(exc), "cancelled", {"reason": "client_disconnected"})
+            MetricsRegistry.get().inc("requests_cancelled")
+            tracing.set_trace_attributes(cancelled=True)
+
         except Exception:
             logger.exception("Fatal execution error")
             final_answer = (
@@ -419,6 +455,7 @@ class StreamingRageEngine:
                 llm_ran and capability != AnswerCapability.INSUFFICIENT
             ),
             "answer_model": answer_model_used,
+            "cancelled": cancelled,
         }
 
         raw_metrics = registry.generate_report()
