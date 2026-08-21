@@ -9,7 +9,11 @@
 
 # ---------- Vector Database ----------
 qdrant-client>=1.17.0
-fastembed                       # BM25 sparse vector generation + in-process cross-encoder reranking (CPU, ONNX)
+# Pinned to the exact build hf_space/requirements.txt runs (its whole
+# purpose is score parity with this in-process path). quality_gate's
+# _FLOORS are calibrated on 0.7.4's raw cross-encoder logits; an
+# ONNX/tokenizer change across versions could silently shift them.
+fastembed==0.7.4                # BM25 sparse vector generation + in-process cross-encoder reranking (CPU, ONNX)
 
 # ---------- Caching ----------
 diskcache
@@ -19,7 +23,6 @@ requests
 python-dotenv
 
 # ---------- NLP / Text Processing ----------
-transformers                    # Tokenizers for chunking
 # sentence-transformers/torch intentionally absent — cross-encoder
 # reranking runs via fastembed's ONNX TextCrossEncoder instead, to stay
 # under Render's 512MB free-tier RAM limit.

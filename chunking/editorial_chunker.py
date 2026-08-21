@@ -10,26 +10,29 @@ from uuid import UUID, uuid5
 CHUNK_NAMESPACE = UUID("12345678-1234-5678-1234-567812345678")
 
 
-class LocalTokenizer:
+class WordSplitter:
     """
-    Robust local tokenizer.
+    Robust whitespace word splitter.
 
     - Splits on ANY whitespace (spaces, tabs, newlines, unicode)
+    - Returns words, not model tokens — there is no tokenizer here
     """
 
     @staticmethod
-    def encode(text: str) -> List[str]:
+    def split(text: str) -> List[str]:
         if not text:
             return []
         return re.split(r"\s+", text.strip())
 
 
 class EditorialChunker:
-    def __init__(self, chunk_size: int = 500, overlap: int = 50):
-        assert overlap < chunk_size, "overlap must be smaller than chunk_size"
-        self.chunk_size = chunk_size
-        self.overlap = overlap
-        self.tokenizer = LocalTokenizer()
+    def __init__(self, chunk_words: int = 500, overlap_words: int = 50):
+        # The 500 default is not the production value — the only caller
+        # (embed/prepare_editorial_payloads.py) passes chunk_words=300.
+        assert overlap_words < chunk_words, "overlap_words must be smaller than chunk_words"
+        self.chunk_words = chunk_words
+        self.overlap_words = overlap_words
+        self.splitter = WordSplitter()
 
     # --------------------------------------------------
     # Public API
@@ -87,25 +90,25 @@ class EditorialChunker:
             return []
 
         body = self._normalize_text(body)
-        tokens = self.tokenizer.encode(body)
+        words = self.splitter.split(body)
 
-        if not tokens:
+        if not words:
             return []
 
         chunks: List[Dict] = []
         start = 0
         index = 0
-        total_tokens = len(tokens)
+        total_words = len(words)
 
-        while start < total_tokens:
-            end = min(start + self.chunk_size, total_tokens)
-            window_tokens = tokens[start:end]
+        while start < total_words:
+            end = min(start + self.chunk_words, total_words)
+            window_words = words[start:end]
 
-            # SAFETY: pathological single-token guard
-            if len(window_tokens) == 1 and len(window_tokens[0]) > 2000:
-                window_tokens = [window_tokens[0][:2000]]
+            # SAFETY: pathological single-word guard
+            if len(window_words) == 1 and len(window_words[0]) > 2000:
+                window_words = [window_words[0][:2000]]
 
-            content = " ".join(window_tokens)
+            content = " ".join(window_words)
 
             if title:
                 content = f"{title}\n\n{content}"
@@ -126,7 +129,7 @@ class EditorialChunker:
             )
 
             index += 1
-            start += self.chunk_size - self.overlap
+            start += self.chunk_words - self.overlap_words
 
         return chunks
 

@@ -83,7 +83,7 @@ def generate_chunk_payloads(game_name: str, canonical_uuid: str) -> List[Dict]:
     """
     containers = fetch_all_editorial_containers(game_name, canonical_uuid)
 
-    chunker = EditorialChunker(chunk_size=300, overlap=50)
+    chunker = EditorialChunker(chunk_words=300, overlap_words=50)
     raw_chunks: List[Dict] = []
     for container in containers:
         source = container["properties"].get("source", container.get("class", "unknown"))

@@ -201,7 +201,7 @@ The retrieval layer implements **hybrid search** combining BM25 keyword matching
 | Vector DB Schema Design | `vector/create_schema.py` | 6 collections: EditorialChunk, Game, PlatformSpec, IGDB_Game, GameSpot_Game, UsageCounter |
 | Hybrid Search (BM25 + Vector) | `retriever/rag_retriever.py` | `RAGRetriever.retrieve()` with `FusionQuery(fusion=Fusion.RRF)` over `dense` + `bm25` sparse |
 | Pluggable Cross-Encoder Reranking | `retriever/rag_retriever.py`, `retriever/reranker_provider.py` | `_rerank_scores()` dispatches on `RERANKER_PROVIDER`; reorders fused candidates into `rerank_score` (original RRF `score` preserved for the quality gate) |
-| Word-Based Chunking | `chunking/editorial_chunker.py` | `EditorialChunker` (500 tokens, 50 overlap) |
+| Word-Based Chunking | `chunking/editorial_chunker.py` | `EditorialChunker` (300 words, 50 overlap) |
 | Embedding Service | `llm/gemini_client.py` | `embed_texts()` — `gemini-embedding-001` at 768-dim, L2-normalized, batched with 429 backoff |
 
 

@@ -6,6 +6,7 @@ fallback). Fully local — no network calls, no API keys required.
 """
 
 import pathlib
+import re
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -52,15 +53,23 @@ def test_reranker_model_matches_calibration():
     Xenova/ms-marco-MiniLM-L-6-v2's raw logits — the in-process reranker
     must use that exact model, not a substitute. Only applies on the
     local path; under RERANKER_PROVIDER=voyage the ONNX model is
-    deliberately never constructed."""
-    from retriever.reranker_provider import resolve_reranker_provider
+    deliberately never constructed.
 
-    if resolve_reranker_provider() != "local":
+    Both the skip check and the assertion below read
+    retriever.rag_retriever's own frozen RERANKER_PROVIDER/reranker --
+    not a fresh resolve_reranker_provider() call. That module resolves
+    the provider once at import time (deliberately, per its own
+    comment), so whichever test in the session imports it first pins
+    `reranker` for the rest of the process; re-resolving the env var
+    live here could disagree with that frozen state and make this test
+    contradict its own skip condition depending on suite order."""
+    from retriever import rag_retriever
+
+    if rag_retriever.RERANKER_PROVIDER != "local":
         pytest.skip("RERANKER_PROVIDER is not 'local'")
 
-    from retriever.rag_retriever import reranker
-    assert reranker is not None
-    assert reranker.model_name == "Xenova/ms-marco-MiniLM-L-6-v2"
+    assert rag_retriever.reranker is not None
+    assert rag_retriever.reranker.model_name == "Xenova/ms-marco-MiniLM-L-6-v2"
 
 
 def test_reranker_provider_defaults_to_local(monkeypatch):
@@ -124,3 +133,19 @@ def test_hf_space_pins_the_calibrated_model_and_fastembed():
 
     assert 'MODEL_NAME = "Xenova/ms-marco-MiniLM-L-6-v2"' in space_app
     assert "fastembed==" in space_reqs
+
+
+def test_root_fastembed_pin_matches_hf_space():
+    """quality_gate's _FLOORS["hfspace"] == _FLOORS["local"] rests on both
+    services running the identical fastembed build. That invariant is
+    only enforceable if both requirements files pin the same version --
+    a floating root pin would let the two drift apart silently."""
+    root_reqs = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+    space_reqs = (REPO_ROOT / "hf_space" / "requirements.txt").read_text(encoding="utf-8")
+
+    root_match = re.search(r"^fastembed==(\S+)", root_reqs, re.MULTILINE)
+    space_match = re.search(r"^fastembed==(\S+)", space_reqs, re.MULTILINE)
+
+    assert root_match, "requirements.txt must pin fastembed==<version>, not float it"
+    assert space_match, "hf_space/requirements.txt must pin fastembed==<version>"
+    assert root_match.group(1) == space_match.group(1)

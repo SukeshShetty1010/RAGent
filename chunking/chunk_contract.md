@@ -7,7 +7,8 @@ content (reviews and articles) associated with a canonical Game.
 
 Chunks are:
 - Semantically self-contained
-- Token-bounded for embedding compatibility
+- Word-bounded for embedding compatibility (whitespace-delimited words,
+  not model tokens — see "Tokenization Guarantees" below)
 - Always scoped to a specific Game (no orphan text)
 - Deterministically reproducible from source content
 
@@ -18,13 +19,13 @@ across ingestion, embedding, and search layers.
 
 ## Chunk Identity Rules
 
-- One chunk corresponds to a contiguous span of tokens from a single
+- One chunk corresponds to a contiguous span of words from a single
   editorial body.
 - Chunk boundaries are deterministic given:
   - normalized text
-  - tokenizer
-  - chunk size
-  - overlap
+  - word splitter
+  - chunk size (in words)
+  - overlap (in words)
 - Chunks never mix content from different editorials.
 
 ---
@@ -34,7 +35,7 @@ across ingestion, embedding, and search layers.
 | Field Name               | Type   | Description |
 |--------------------------|--------|-------------|
 | `chunk_id`               | UUID   | Deterministic UUID derived from content hash |
-| `content`                | Text   | The chunk text (token-bounded) |
+| `content`                | Text   | The chunk text (word-bounded) |
 | `game_uuid`              | UUID   | Canonical Game UUID |
 | `parent_editorial_uuid`  | UUID   | UUID of the source editorial container object |
 | `source`                 | Text   | One of: `"gamespot"`, `"wikipedia"`, `"steam"` |
@@ -46,10 +47,14 @@ across ingestion, embedding, and search layers.
 
 ## Tokenization Guarantees
 
-- Chunk size targets ~500 tokens
-- Overlap of ~50 tokens between adjacent chunks
-- Token counts are computed using a **local tokenizer**
-- Token windows must never exceed the configured maximum
+- Chunk size is measured in **whitespace-delimited words**, not model
+  tokens — there is no tokenizer in this path, only a word splitter
+  (`chunking/editorial_chunker.py`'s `WordSplitter`)
+- Production configuration is 300 words per chunk, 50 words of overlap
+  (`embed/prepare_editorial_payloads.py`) — roughly 150-200 real model
+  tokens, since English averages under a word per token
+- Word counts are computed using the **local word splitter**
+- Word windows must never exceed the configured maximum
 
 ---
 

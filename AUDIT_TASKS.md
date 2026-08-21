@@ -30,7 +30,17 @@ These two were fixed together, not independently, because they're causally coupl
 
 **T18 and T14 fixed** together, 2026-08-20 (T4 folded in as a one-line freebie). Selected over the other 9 open tasks because T18 was the last unblocked Part-A defect with a live false-refusal path — T1/T3/T17/T23 are one scheduling chain blocked on the Gemini free-tier daily embedding quota, and T15/T16/T21/T22 are one-line hygiene with no behavioral stakes. Tracing §18 more precisely than it documents: `is_noise()`-dropped local chunks were never actually removed from the LLM's context (`orchestrator.run()` returns `local_chunks` unfiltered, and `execution_engine_streaming.py` assembles from `raw_chunks`) — the live harm was that a dropped chunk's `source_title` disappeared from `assess_grounding()`'s title-drift fallback, producing a false `QUALITY_EMPTY` refusal on fully-ingested games (e.g. a "Far Cry 5 combat" query, whose only titled chunk happens to mention "a great deal of freedom"). Per §1, entity grounding is currently the *only* live refusal path, so this was the entire refusal surface. `NOISE_KEYWORDS` is now split: `SOURCE_NOISE_KEYWORDS` matches only `source_title` + `source_url` (a storefront/forum is a source-shaped signal), and content only trips noise on a density rule (≥3 distinct keyword hits, not one incidental mention) — chosen to keep the existing 4-keyword storefront-blob fixture green unmodified. `MetricsRegistry.inc("chunks_dropped_as_noise")` makes the loss measurable, surfaced in the `retrieval` stage payload and the UI's pipeline detail line. T14 shipped as query condensation, not history-in-the-prompt: a new STEP 0 (`agent/decisions/query_rewrite.py`, modeled on `web_search_decision.py`) resolves anaphora into a standalone query before routing/retrieval/grounding ever run, with a deterministic pre-check that skips the LLM entirely for self-contained queries or empty history, and fails soft to the original query on any error. `history` is a per-call keyword argument on `run_streaming()`, defaulting to `None`/unaffecting every eval/KPI caller — never engine state — preserving `tests/verify_engine.py`'s statelessness contract. T4's fix (delete the `max_tokens=150` override in `web_search_decision.py`) was folded in since T14 added a sibling module reusing the same `chat_completion_decision()` default. See the "Resolved" notes inside §4, §14, and §18 for what shipped. Test suite now `239 passed, 3 skipped` (up from 224 — 15 net new tests across `tests/test_quality_gate.py`, `tests/test_query_rewrite.py` (new file), `tests/test_engine_contract.py`, `tests/test_web_search_decision.py`, and `tests/test_api.py`). The real-corpus drop-rate measurement §18's fix note calls for could not be run in this environment — no network path to the Qdrant Cloud cluster from this sandbox (connection refused/timeout on every attempt); `tests/regression_suite.py`, which also depends on a live Qdrant query, fails the same way and is unrelated to this change (confirmed: the timeout occurs inside `VectorQuery`, before any `is_noise()` code runs).
 
-Remaining 9 tasks are unchanged from the original audit below.
+**T16 and T22 fixed** together, 2026-08-21. Selected over the other 7 open tasks because T1/T3/T17/T23 are one scheduling chain blocked on the Gemini free-tier daily embedding quota and a live Qdrant path (T3 must land before T1 can calibrate against the migrated corpus; T17/T23 both follow T1); T15 is a dead CLI-only function with zero production stakes; T21 turned out to be partly unfixable as written — `CLAUDE.md` is gitignored *and absent from disk* in this checkout, so one of its five rows has no target, and its live equivalent claims have migrated into `README.md`, which deserves its own scope decision rather than being force-fit here. T16 and T22 were done together because both edit the same block of `requirements.txt`, both change what the Docker image installs, and both are verified by the same pass — splitting them would have meant touching the dependency set twice. T16 was also treated as the higher-stakes half: it's a prerequisite for T1, since calibrating floors against a floating `fastembed` fits them to a build nothing pins.
+
+Before touching anything, §16's risk was measured rather than assumed: the working interpreter in this environment (`py -3.10`) had **fastembed 0.8.0** installed against `hf_space/requirements.txt`'s pin of `0.7.4` — the drift §16 warns about had already happened here, undetected, because `test_hfspace_shares_local_floors` checks the floor values, not the version that produced them. A fixed query against 10 documents was scored with `TextCrossEncoder` directly under both 0.8.0 and 0.7.4 (bypassing `retriever.rag_retriever`, which never constructs the local encoder while `.env` sets `RERANKER_PROVIDER=cloudflare`): **scores were bit-identical** (max abs diff `0.0`) across all 10. The pin therefore closes a real, already-occurred drift risk rather than a hypothetical one, even though this particular version bump happened not to move the scores — a future one is not guaranteed to be as kind, and nothing before this fix could have told the difference.
+
+§22 turned out to understate its own finding: the `500`-word default in `EditorialChunker` was never the production value — `embed/prepare_editorial_payloads.py:86` has always passed `chunk_size=300` explicitly — while `chunking/chunk_contract.md` ("~500 tokens") and `README.md` ("500 tokens, 50 overlap") both documented the unused default as if it were live *and* as if it were measured in model tokens rather than whitespace words. Real production chunks are ~300 words, roughly 150–200 model tokens — the written contract was off by about 3.3× from what ships. `LocalTokenizer`/`chunk_size`/`overlap`/`.tokenizer` were renamed to `WordSplitter`/`chunk_words`/`overlap_words`/`.splitter` throughout `chunking/editorial_chunker.py` (a pure rename — content hashing is unaffected, verified by generating chunk IDs for the same input body before and after the rename and confirming byte-for-byte match), and both docs now state the true unit and the true production value.
+
+See the "Resolved" notes inside §16 and §22 for what shipped. Test suite now `257 passed, 3 skipped` (hermetic `-m unit` subset: `246 passed, 3 skipped` — up from 239 — 7 net new tests: `tests/test_editorial_chunker.py`, a file that did not exist before, plus two new/changed tests in `tests/test_llm_config.py`).
+
+While verifying, a pre-existing, order-dependent failure was found in `tests/test_llm_config.py::test_reranker_model_matches_calibration` — unrelated to T16/T22 (confirmed via `git stash` that it failed identically on `main` beforehand) but fixed anyway since the root cause was cheap to isolate and fix. The test's skip check called `resolve_reranker_provider()`, a *live* read of `RERANKER_PROVIDER`, while its assertion read `retriever.rag_retriever.reranker`, an object frozen at whichever moment that module was *first imported* in the test process — deliberately, per that module's own comment, so a local reranker never gets dispatched to after having been decided against at boot. Those two sources of truth can disagree depending on which test in the session happens to trigger the first import while a `monkeypatch.setenv("RERANKER_PROVIDER", ...)` from an unrelated test is active, which is exactly what made the test fail in isolation but pass inside the full suite. Fixed by making both the skip check and the assertion read the same frozen `rag_retriever.RERANKER_PROVIDER` / `rag_retriever.reranker` state, so the test can no longer contradict itself — verified stable across isolated, `-k`-filtered, and full-suite runs.
+
+Remaining 7 tasks are unchanged from the original audit below.
 
 ---
 
@@ -53,13 +63,13 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T13** — Render the `stage` SSE events in the UI (§13) — Fixed 2026-08-20
 - [x] **T14** — Decide whether the product is multi-turn; wire history if so (§14) — Fixed 2026-08-20
 - [ ] **T15** — Delete `format_llama3_prompt()` (§15)
-- [ ] **T16** — Pin `fastembed` in the root `requirements.txt` (§16)
+- [x] **T16** — Pin `fastembed` in the root `requirements.txt` (§16) — Fixed 2026-08-21
 - [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17)
 - [x] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18) — Fixed 2026-08-20
 - [x] **T19** — Cancel the engine thread when the SSE client disconnects (§19) — Fixed 2026-08-20
 - [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
 - [ ] **T21** — Fix stale comments and docs that describe retired infrastructure (§21)
-- [ ] **T22** — Drop the unused `transformers` dependency (§22)
+- [x] **T22** — Drop the unused `transformers` dependency (§22) — Fixed 2026-08-21
 - [ ] **T23** — Invert the two "uncalibrated placeholder" tests once T1 lands (§23)
 
 ---
@@ -835,6 +845,12 @@ Also relevant: `Dockerfile` bakes the models into the image at build time via `F
 
 **Fix:** `fastembed==0.7.4` in the root requirements. Bump both files together, deliberately, and re-calibrate when you do.
 
+### Resolved — 2026-08-21
+
+`requirements.txt:12` now reads `fastembed==0.7.4`, with a comment naming why (score parity + calibrated floors) and pointing at `hf_space/requirements.txt` as its twin. `tests/test_llm_config.py::test_root_fastembed_pin_matches_hf_space` parses both files with a regex and asserts they pin the same version — not hardcoded to `0.7.4`, so a deliberate joint bump stays green without touching the test.
+
+Parity was measured, not assumed, before the pin was applied: this environment actually had 0.8.0 installed against the 0.7.4 reference. A fixed query/10-document set scored bit-identically (`0.0` max diff) under both versions via `TextCrossEncoder` constructed directly. The floors were not, in fact, silently invalidated in this instance — but nothing before this fix could have told you that, which was the actual problem.
+
 ---
 
 ## §17 — Every stored evaluation result predates the current system
@@ -1026,6 +1042,16 @@ Two consequences:
 2. `chunk_size=500` means **500 whitespace-delimited words**, not 500 model tokens. The measured corpus confirms it: median 1507 characters ≈ 250–300 real tokens, roughly half the nominal figure. Any budgeting reasoning that assumed 500-token chunks was working from a number twice the truth.
 
 **Fix:** remove the dependency. Separately, decide whether `chunk_size` should mean tokens — if so, it needs a real tokenizer and re-chunking; if not, rename the parameter to `chunk_words` so nobody re-derives the wrong budget from it.
+
+### Resolved — 2026-08-21
+
+`transformers` deleted from `requirements.txt` (kept the adjacent sentence-transformers/torch-absence note — still true, still load-bearing). Decided against the tokens option: `chunking/editorial_chunker.py`'s `LocalTokenizer`/`encode()`/`chunk_size`/`overlap`/`self.tokenizer` are now `WordSplitter`/`split()`/`chunk_words`/`overlap_words`/`self.splitter`, and the docstring states plainly that it returns words, not model tokens. The `500` default was left as-is (not changed to `300`) but now carries a comment that the only caller passes `300` explicitly, so the default no longer misdescribes production.
+
+This section understated its own finding: `embed/prepare_editorial_payloads.py:86` has always passed `chunk_size=300`, not the `500` default the docs describe. `chunking/chunk_contract.md` and `README.md:204` both said "500 tokens" — wrong on the unit (words, not tokens) and wrong on the value (300, not 500) at once. Both now say "300 words, 50 overlap" with the ~150–200-token approximation noted in `chunk_contract.md`.
+
+This is a pure rename — `_deterministic_uuid` hashes chunk content, not parameter names, and no chunk boundary moved. Verified directly: chunk IDs generated for an identical input body from the pre-rename code (`git show HEAD:chunking/editorial_chunker.py`) and the post-rename code matched byte-for-byte across all 4 chunks of a 1000-word test body. No re-chunk or re-embed was needed.
+
+New test file `tests/test_editorial_chunker.py` (none existed for this module before) covers `WordSplitter.split()` word counting, chunk count/stride at a small window, that `chunk_words` is honored as a word count rather than a char/token count, the `overlap_words >= chunk_words` assert, and that the production configuration (`chunk_words=300, overlap_words=50`) constructs and chunks correctly.
 
 ---
 
