@@ -1,0 +1,487 @@
+{
+  "generated": "2026-08-21",
+  "reranker_provider": "cloudflare",
+  "total_queries": 50,
+  "scored": 50,
+  "errored": 0,
+  "should_refuse_relevance": {
+    "count": 10,
+    "min": 0.003559,
+    "max": 0.901907,
+    "mean": 0.212406
+  },
+  "answerable_relevance": {
+    "count": 40,
+    "min": 0.024853,
+    "max": 0.999964,
+    "mean": 0.932788
+  },
+  "best_split_relevance_only": {
+    "threshold": 0.646953,
+    "precision": 0.8181818181818182,
+    "recall": 0.9,
+    "f1": 0.8571428571428572,
+    "tp": 9,
+    "fp": 2,
+    "fn": 1,
+    "tn": 38
+  },
+  "entity_grounding_on_unanswerable": {
+    "false": 7,
+    "none": 1,
+    "true": 2,
+    "total": 10
+  },
+  "per_query": [
+    {
+      "id": "g001",
+      "query": "When was Fortnite released?",
+      "should_refuse": false,
+      "max_relevance": 0.999065,
+      "mean_relevance": 0.625579,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g002",
+      "query": "When was Final Fantasy XIV Online released?",
+      "should_refuse": false,
+      "max_relevance": 0.99677,
+      "mean_relevance": 0.699621,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g003",
+      "query": "When was The Legend of Zelda: Breath of the Wild released?",
+      "should_refuse": false,
+      "max_relevance": 0.999941,
+      "mean_relevance": 0.95455,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g004",
+      "query": "When was Baldur's Gate 3: Digital Deluxe Edition released?",
+      "should_refuse": false,
+      "max_relevance": 0.99316,
+      "mean_relevance": 0.846168,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g005",
+      "query": "When was PUBG: Battlegrounds released?",
+      "should_refuse": false,
+      "max_relevance": 0.999904,
+      "mean_relevance": 0.987136,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g006",
+      "query": "When was Half-Life 2 released?",
+      "should_refuse": false,
+      "max_relevance": 0.999946,
+      "mean_relevance": 0.987841,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g007",
+      "query": "When was Age of Empires IV released?",
+      "should_refuse": false,
+      "max_relevance": 0.999683,
+      "mean_relevance": 0.830917,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g008",
+      "query": "When was Red Dead Redemption 2 released?",
+      "should_refuse": false,
+      "max_relevance": 0.999938,
+      "mean_relevance": 0.998507,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g009",
+      "query": "When was Call of Duty: Warzone released?",
+      "should_refuse": false,
+      "max_relevance": 0.999911,
+      "mean_relevance": 0.992594,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g010",
+      "query": "When was Spider-Man released?",
+      "should_refuse": false,
+      "max_relevance": 0.988823,
+      "mean_relevance": 0.760369,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g011",
+      "query": "When was Resident Evil Village released?",
+      "should_refuse": false,
+      "max_relevance": 0.999754,
+      "mean_relevance": 0.983492,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g012",
+      "query": "When was BioShock Infinite released?",
+      "should_refuse": false,
+      "max_relevance": 0.998795,
+      "mean_relevance": 0.960314,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g013",
+      "query": "When was Honkai: Star Rail - Then Wake to Weep released?",
+      "should_refuse": false,
+      "max_relevance": 0.99969,
+      "mean_relevance": 0.828012,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g014",
+      "query": "When was It Takes Two released?",
+      "should_refuse": false,
+      "max_relevance": 0.986438,
+      "mean_relevance": 0.957804,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g015",
+      "query": "When was Resident Evil 4 released?",
+      "should_refuse": false,
+      "max_relevance": 0.999926,
+      "mean_relevance": 0.884996,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g016",
+      "query": "When was Ghost of Tsushima released?",
+      "should_refuse": false,
+      "max_relevance": 0.999459,
+      "mean_relevance": 0.993539,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g017",
+      "query": "When was Grand Theft Auto V released?",
+      "should_refuse": false,
+      "max_relevance": 0.999964,
+      "mean_relevance": 0.989156,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g018",
+      "query": "When was The Legend of Zelda: Tears of the Kingdom released?",
+      "should_refuse": false,
+      "max_relevance": 0.999828,
+      "mean_relevance": 0.984449,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g019",
+      "query": "When was Rust released?",
+      "should_refuse": false,
+      "max_relevance": 0.024853,
+      "mean_relevance": 0.015589,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g020",
+      "query": "When was Fallout 4 released?",
+      "should_refuse": false,
+      "max_relevance": 0.9999,
+      "mean_relevance": 0.999679,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g021",
+      "query": "What are the differences between Doom Eternal and Crusader Kings III?",
+      "should_refuse": false,
+      "max_relevance": 0.993662,
+      "mean_relevance": 0.969663,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g022",
+      "query": "What are the differences between Dragon's Dogma II and Valheim?",
+      "should_refuse": false,
+      "max_relevance": 0.999363,
+      "mean_relevance": 0.982868,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g023",
+      "query": "What are the differences between Starfield and Hades?",
+      "should_refuse": false,
+      "max_relevance": 0.989842,
+      "mean_relevance": 0.971791,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g024",
+      "query": "What are the differences between Subnautica and Death Stranding?",
+      "should_refuse": false,
+      "max_relevance": 0.998748,
+      "mean_relevance": 0.85588,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g025",
+      "query": "What are the differences between Terraria and EA Sports FC 24?",
+      "should_refuse": false,
+      "max_relevance": 0.998882,
+      "mean_relevance": 0.976082,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g026",
+      "query": "What are the differences between Assassin's Creed Valhalla and Gran Turismo 7?",
+      "should_refuse": false,
+      "max_relevance": 0.987309,
+      "mean_relevance": 0.905148,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g027",
+      "query": "What are the differences between Minecraft and No Man's Sky?",
+      "should_refuse": false,
+      "max_relevance": 0.992115,
+      "mean_relevance": 0.940429,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g028",
+      "query": "What are the differences between RimWorld and Genshin Impact: Blades Weaving Betwixt Brocade?",
+      "should_refuse": false,
+      "max_relevance": 0.995754,
+      "mean_relevance": 0.987483,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g029",
+      "query": "What are the differences between Warframe and Halo Infinite?",
+      "should_refuse": false,
+      "max_relevance": 0.998349,
+      "mean_relevance": 0.994518,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g030",
+      "query": "What are the differences between Super Smash Bros. Ultimate and Borderlands 3?",
+      "should_refuse": false,
+      "max_relevance": 0.998917,
+      "mean_relevance": 0.994568,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g031",
+      "query": "What is Fall Guys best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.994858,
+      "mean_relevance": 0.407311,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g032",
+      "query": "What is Cyberpunk 2077 best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.960075,
+      "mean_relevance": 0.878617,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g033",
+      "query": "What is Far Cry 5 best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.889683,
+      "mean_relevance": 0.611165,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g034",
+      "query": "What is Final Fantasy VII Remake best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.99094,
+      "mean_relevance": 0.862324,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g035",
+      "query": "What is Control Resonant best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.48741,
+      "mean_relevance": 0.27947,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g036",
+      "query": "What is Palworld best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.879346,
+      "mean_relevance": 0.623136,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g037",
+      "query": "What is Mortal Kombat 11 best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.646953,
+      "mean_relevance": 0.501216,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g038",
+      "query": "What is Monster Hunter: World best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.85706,
+      "mean_relevance": 0.6682,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g039",
+      "query": "What is Assassin's Creed Odyssey best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.84712,
+      "mean_relevance": 0.500163,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g040",
+      "query": "What is Elden Ring best known for?",
+      "should_refuse": false,
+      "max_relevance": 0.819378,
+      "mean_relevance": 0.703788,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g041",
+      "query": "What's the plot of Disco Elysium?",
+      "should_refuse": true,
+      "max_relevance": 0.012457,
+      "mean_relevance": 0.00588,
+      "entity_grounded": false,
+      "evidence_count": 5
+    },
+    {
+      "id": "g042",
+      "query": "What's the plot of Untitled Goose Game?",
+      "should_refuse": true,
+      "max_relevance": 0.003559,
+      "mean_relevance": 0.002608,
+      "entity_grounded": false,
+      "evidence_count": 5
+    },
+    {
+      "id": "g043",
+      "query": "What's the plot of Outer Wilds?",
+      "should_refuse": true,
+      "max_relevance": 0.038501,
+      "mean_relevance": 0.009739,
+      "entity_grounded": false,
+      "evidence_count": 5
+    },
+    {
+      "id": "g044",
+      "query": "What's the plot of Return of the Obra Dinn?",
+      "should_refuse": true,
+      "max_relevance": 0.004959,
+      "mean_relevance": 0.001613,
+      "entity_grounded": false,
+      "evidence_count": 5
+    },
+    {
+      "id": "g045",
+      "query": "What platforms can I play Grand Theft Auto VI on?",
+      "should_refuse": true,
+      "max_relevance": 0.901907,
+      "mean_relevance": 0.370647,
+      "entity_grounded": false,
+      "evidence_count": 5
+    },
+    {
+      "id": "g046",
+      "query": "What platforms can I play The Elder Scrolls VI on?",
+      "should_refuse": true,
+      "max_relevance": 0.61389,
+      "mean_relevance": 0.275236,
+      "entity_grounded": false,
+      "evidence_count": 5
+    },
+    {
+      "id": "g047",
+      "query": "What platforms can I play Beyond Good and Evil 2 on?",
+      "should_refuse": true,
+      "max_relevance": 0.334698,
+      "mean_relevance": 0.181531,
+      "entity_grounded": true,
+      "evidence_count": 5
+    },
+    {
+      "id": "g048",
+      "query": "What is the capital of France?",
+      "should_refuse": true,
+      "max_relevance": 0.106841,
+      "mean_relevance": 0.032097,
+      "entity_grounded": false,
+      "evidence_count": 5
+    },
+    {
+      "id": "g049",
+      "query": "What's a good recipe for chocolate chip cookies?",
+      "should_refuse": true,
+      "max_relevance": 0.010364,
+      "mean_relevance": 0.002268,
+      "entity_grounded": null,
+      "evidence_count": 5
+    },
+    {
+      "id": "g050",
+      "query": "Who won the 2024 US presidential election?",
+      "should_refuse": true,
+      "max_relevance": 0.096881,
+      "mean_relevance": 0.049414,
+      "entity_grounded": true,
+      "evidence_count": 5
+    }
+  ]
+}

@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from agent.task_router import TaskType
 from retriever.quality_gate import QualityReport, QualityStatus
+from retriever.reranker_provider import describe_score_scale
 from llm.ragent_client import chat_completion_decision
 
 logger = logging.getLogger("WEB_SEARCH_DECISION")
@@ -44,7 +45,7 @@ Decide whether the system should attempt a WEB SEARCH to supplement local eviden
 Query: {query}
 Task type: {task}
 Local evidence quality: {quality_status} (reason: {quality_reason})
-Local evidence relevance score (cross-encoder logit, unbounded — higher is better, roughly: <0 weak, >3 strong): {confidence_score}
+Local evidence relevance score ({score_scale}): {confidence_score}
 Query has temporal signal (asks about recent/dated info): {has_temporal_signal}
 Web fallback allowed by routing policy: {allow_web_fallback}
 Top local evidence (titles + relevance scores):
@@ -104,6 +105,7 @@ def decide_web_search(
             quality_status=quality_report.status.value,
             quality_reason=quality_report.reason,
             confidence_score=quality_report.confidence_score,
+            score_scale=describe_score_scale(),
             has_temporal_signal=quality_report.has_temporal_signal,
             allow_web_fallback=allow_web_fallback,
             evidence_lines=evidence_lines,

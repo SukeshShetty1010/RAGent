@@ -50,7 +50,21 @@ Two new regression tests guard three of the five claims against drifting again: 
 
 Test suite now `263 passed, 3 skipped` (hermetic `-m unit` subset: `252 passed, 3 skipped` — up from 246 — 6 net new tests). The CLI smoke test (`py -3.10 -m retriever.rag_retriever --query "..."`) cannot pass in this environment: it fails inside `RAGRetriever.retrieve()`'s `query_points` call (not at `__init__`, which succeeds without touching the network) with the same `ResponseHandlingException: timed out` as the Qdrant probe above — the wiring at that one call site is unverified end to end, though `_build_cli_prompt`'s unit tests cover everything downstream of retrieval. `py -3.10 -m tests.verify_engine` still reports `✅ ENGINE READY FOR UI` (fail-soft, degraded retrieval), unchanged from before.
 
-Remaining 4 tasks (T1, T3, T17, T23) are unchanged from the original audit below — still blocked on the same Qdrant/quota chain.
+**T3, T1, and T23 fixed together, 2026-08-21.** The "blocked on the Qdrant/quota chain" conclusion recorded above (and in the T15/T21 status entry before it) was itself wrong, and cost three sessions before this one caught it. `qdrant_client.QdrantClient` appends port **6333** to `QDRANT_URL` when the string carries no explicit port; this network environment blocks 6333 while allowing 443 on the exact same host. `ResponseHandlingException: timed out` was that port block, not an absent network path — appending `:443` to the local `.env`'s `QDRANT_URL` connected in 0.5s and every previously-"blocked" live check (Qdrant scroll/query, Gemini embedding, Cloudflare rerank, the full `live`-marked test subset, the CLI smoke test flagged unverified in the T15/T21 entry) now runs end to end. This is a local `.env` value fix only — every one of the ~20 call sites reads `QDRANT_URL` uniformly, and Render's own deployed `QDRANT_URL` already reaches 6333 fine, so production was never affected.
+
+§3's prescribed fix (`--resume`) could not actually have worked even with network access: `.migration_checkpoint_gemini_embed.json` is gitignored *and absent from disk* in this checkout (same situation `CLAUDE.md` was in for T21), so `--resume` would have loaded an empty done-set and re-embedded all 2791 points instead of the 91 remaining. Built a self-detecting `--repair` mode instead (`scripts/migrate_embeddings_to_gemini.py`): E5 and Gemini vectors are both 768-dim and both L2-normalized, so neither shape nor norm tells them apart, but cosine-to-centroid does — a clean 0.65-wide empty gap separated 91 E5 outliers from 2700 Gemini inliers, exactly matching §3's recorded state. Direction (which cluster is "already migrated") is verified by re-embedding a small sample from each side and checking `self_gemini_cos ≈ 1.0`, rather than assumed from cluster size — the common failure mode once the unmigrated points are the majority. Ran live: found the predicted 91/2700 split, repaired all 91 (surviving one active 429 rate-limit wall via the existing retry/backoff), and a follow-up `--repair --dry-run` scan confirms 0 outliers remain. `tests/test_migrate_repair.py` (new, 5 hermetic tests) covers the gap-split detector and the majority-inversion case with synthetic vectors.
+
+With the corpus uniform, ran `evaluation/calibrate_relevance.py` against `RERANKER_PROVIDER=cloudflare` (`evaluation/results/relevance_calibration_cloudflare_2026-08-21.json`, all 50 golden-set queries scored, 0 errors). Contrary to this file's own prediction that Cloudflare's scores would be "heavily saturated toward both ends," the measured distribution has real signal in the 0.3–0.9 middle (e.g. a real-but-off-topic Game identity scored 0.33) — the saturation comment in `llm/cloudflare_rerank_client.py` was written from a 2-document probe, not the calibration run. Derived `REFUSE_FLOOR=0.02` (strictly below the answerable group's minimum, 0.0249 for "Rust" — zero false refusals on the golden set, the same conservative rule `local`'s `-3.0` was derived by) and `WEAK_FLOOR=0.90` (sitting in a genuine gap in the answerable distribution, between 0.8897 and 0.9601 — lands exactly 8/40 = 20% of answerable queries `QUALITY_WEAK` and 0 `QUALITY_EMPTY`, the top of the 10–20% band targeted). Set in `retriever/quality_gate.py`'s `_FLOORS["cloudflare"]`, with the block comment above it rewritten to record the measured numbers, matching the format `local`'s entry already uses. Net effect on the 10 `should_refuse` golden queries: 7 were already caught by entity grounding (unchanged, that path runs before the floor), 1 more (`g049`, "chocolate chip cookies recipe") is now caught by `REFUSE_FLOOR`, and the remaining 2 (`g047` "Beyond Good and Evil 2" — a real Game identity with no editorial content, `g050` "2024 US presidential election") land `QUALITY_WEAK` rather than falsely-confident `QUALITY_OK` — the same accepted single-signal bound this file already documented for `g047` under the old local-scale numbers, now confirmed under Cloudflare's.
+
+One coupled defect not listed anywhere in this file was caught and fixed in the same pass: `agent/decisions/web_search_decision.py`'s prompt hardcoded a description of the *local* cross-encoder's raw-logit scale ("<0 weak, >3 strong") into the LLM prompt that quotes `confidence_score`. That was harmless only because `QUALITY_WEAK` was unreachable before this fix, so `decide_web_search()` almost never ran. Turning the ladder on for Cloudflare means that function now runs on every `QUALITY_WEAK` query with a 0..1 score read against local's logit thresholds — a 0.33 match would misread as "<0 weak" under the old text. Added `describe_score_scale()` to `retriever/reranker_provider.py` (the existing provider single-source-of-truth module) and wired the prompt to it, so the description is correct for whichever provider is actually active. Verified live end to end: a real `decide_web_search()` call against the `g047` evidence now reports `score_scale: "normalized 0.0-1.0 — higher is better"` and returns a real LLM decision (`should_search_web=True`, `source="llm"`, not the deterministic fallback).
+
+Turning the gate on activated the four paths this file's §1 documented as dead: `py -3.10 -m tests.verify_engine` and a live `retriever.rag_retriever` CLI run now show `Quality Gate: QUALITY_OK (..., Confidence: 1.00, ...)` with a real `max_relevance` (previously always "relevance floor skipped"); a query built from the golden set's weakest evidence (`g047`) now reaches `Capability: partial | Quality: quality_weak` and the LLM's answer includes a live `"Unsupported or Missing Parts:"` section — both previously unreachable in production. The UI's `Confidence` tile (`frontend/src/app/page.tsx:240`) required no change: it now renders a genuine 0..1 relevance score instead of a mean RRF fusion score, automatically.
+
+§23's fix landed as part of the same pass, not separately, since it is a direct consequence: `tests/test_llm_config.py::test_cloudflare_floors_are_uncalibrated_placeholder` (asserted `_FLOORS["cloudflare"] is None`) is now `test_cloudflare_floors_are_calibrated` (asserts the floors exist, are ordered `refuse < weak`, and sit inside `0..1`). `test_voyage_floors_are_uncalibrated_placeholder` is untouched — Voyage is still genuinely uncalibrated. Added the meta-test §23 asked for: `test_active_provider_floors_are_calibrated` fails whenever `RERANKER_PROVIDER` names a provider with a `None` `_FLOORS` entry — deliberately red under `RERANKER_PROVIDER=voyage`, so "the gate is off for the active provider" can never again be an invisible state.
+
+Test suite now `269 passed, 3 skipped` full run including all `live`-marked tests (up from the `263 passed, 3 skipped` recorded above — hermetic `-m unit` subset `258 passed, 3 skipped`, up from 252 — 6 net new tests: `tests/test_migrate_repair.py` (new file, 5 tests) plus `test_active_provider_floors_are_calibrated` in `tests/test_llm_config.py`). `py -3.10 -m tests.verify_engine` reports `✅ ENGINE READY FOR UI`. The two `test_qdrant_rebuild.py` and `regression_suite.py` failures recorded as "unrelated, no `.env`/Qdrant credentials" in earlier status entries were this same port issue — they now pass.
+
+Remaining task: **T17** (re-run the evaluation suite) is deliberately left for a future session — it should measure the system *after* this pass, not before, and it is a separate multi-script measurement effort rather than a code fix.
 
 ---
 
@@ -58,9 +72,9 @@ Remaining 4 tasks (T1, T3, T17, T23) are unchanged from the original audit below
 
 Ordered by impact. Items 1–3 are the ones that change what the user actually receives.
 
-- [ ] **T1** — Calibrate the Cloudflare reranker floors; the honesty gate is currently switched off (§1)
+- [x] **T1** — Calibrate the Cloudflare reranker floors; the honesty gate is currently switched off (§1) — Fixed 2026-08-21
 - [x] **T2** — Order assembled context by `rerank_score`, not the RRF `score` (§2) — Fixed 2026-08-19
-- [ ] **T3** — Finish the last 91 chunks of the Gemini embedding migration (§3)
+- [x] **T3** — Finish the last 91 chunks of the Gemini embedding migration (§3) — Fixed 2026-08-21
 - [x] **T4** — Remove the `max_tokens=150` override in `decide_web_search` (§4) — Fixed 2026-08-20
 - [x] **T5** — Scope `MetricsRegistry` per request, or accept cross-request KPI contamination (§5) — Fixed 2026-08-19
 - [x] **T6** — Fix `last_used_model()` to report the model that served the *answer* (§6) — Fixed 2026-08-19
@@ -80,7 +94,7 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
 - [x] **T21** — Fix stale comments and docs that describe retired infrastructure (§21) — Fixed 2026-08-21
 - [x] **T22** — Drop the unused `transformers` dependency (§22) — Fixed 2026-08-21
-- [ ] **T23** — Invert the two "uncalibrated placeholder" tests once T1 lands (§23)
+- [x] **T23** — Invert the two "uncalibrated placeholder" tests once T1 lands (§23) — Fixed 2026-08-21
 
 ---
 
@@ -157,6 +171,10 @@ python -m evaluation.calibrate_relevance
 Read the max-F1 split point out of `evaluation/results/relevance_calibration_<date>.json` and set `_FLOORS["cloudflare"] = (refuse, weak)`. Expect the signal in the tails, not a smooth spread — measured Cloudflare scores are ~0.99990 for a match and ~3.7e-05 for a miss, so the two floors will sit much closer together than the local model's do.
 
 **Do this after §3** — calibrating against a corpus that is 3% still in the old embedding space would bake that mismatch into the floors.
+
+### Resolved — 2026-08-21
+
+See the status update at the top of this file (T3 + T1 + T23) for the full account, including the earlier sessions' mistaken "blocked on Qdrant/quota" conclusion. Summary specific to this section: ran `evaluation/calibrate_relevance.py` against the fully-migrated corpus; the predicted saturation at the scale's extremes did not hold (real signal in 0.3–0.9), so `REFUSE_FLOOR=0.02` / `WEAK_FLOOR=0.90` were derived from the measured distribution rather than the prediction. `_FLOORS["cloudflare"]` is set in `retriever/quality_gate.py`, with the block comment above it rewritten to record the measurement. `agent/decisions/web_search_decision.py`'s prompt (a coupled defect this section didn't list) now describes the active provider's actual score scale instead of hardcoding local's raw-logit one. Test: `tests/test_llm_config.py::test_cloudflare_floors_are_calibrated` (replaces the old placeholder test, see §23).
 
 ---
 
@@ -270,6 +288,10 @@ RAG_env\Scripts\python.exe -m scripts.migrate_embeddings_to_gemini --resume
 ```
 
 91 chunks is 2 scroll batches; it will finish in under a minute if the quota is clear. Then delete the checkpoint file, and **re-run any calibration or evaluation after this**, not before.
+
+### Resolved — 2026-08-21
+
+The prescribed `--resume` fix could not have worked as written: `.migration_checkpoint_gemini_embed.json` is gitignored and was absent from disk in the checkout that fixed this, so `--resume` would have re-embedded all 2791 points, not the 91 remaining. Shipped a self-detecting `--repair` mode instead (`scripts/migrate_embeddings_to_gemini.py`) that finds the leftover E5 cluster by cosine-to-centroid gap-splitting (no checkpoint needed) and verifies direction by re-embedding a sample from each cluster rather than assuming the majority cluster is the migrated one. Also root-caused the "no network path to Qdrant" conclusion recorded in the §15/§18/§21 status entries above: `qdrant_client` defaults to port 6333, this network blocks 6333 but not 443, and appending `:443` to the local `.env`'s `QDRANT_URL` was the actual fix — see the status update at the top of this file. Ran live: found the predicted 91/2700 split, repaired all 91, confirmed 0 outliers remain on a follow-up scan. Tests: `tests/test_migrate_repair.py` (new, hermetic, 5 tests).
 
 ---
 
@@ -1104,6 +1126,10 @@ But the effect today is that the suite goes green while **asserting that the pro
 
 **Fix:** when §1 lands, invert `test_cloudflare_floors_are_uncalibrated_placeholder` into an assertion that the floors exist, are a 2-tuple, are ordered `refuse < weak`, and sit inside the provider's actual score range (0..1 for Cloudflare). Keep the Voyage test as-is until Voyage is calibrated. Consider adding a meta-test that fails whenever `RERANKER_PROVIDER` names a provider whose `_FLOORS` entry is `None` — that turns "the gate is off" from an invisible state into a red build.
 
+### Resolved — 2026-08-21
+
+Landed together with §1 (see the status update at the top of this file), not separately — this section's fix is a direct, necessary consequence of §1 shipping. `test_cloudflare_floors_are_uncalibrated_placeholder` is now `test_cloudflare_floors_are_calibrated`: asserts the floors exist, are ordered `refuse < weak`, and sit inside `0..1`. `test_voyage_floors_are_uncalibrated_placeholder` is untouched — Voyage is still genuinely uncalibrated. Added the suggested meta-test as `test_active_provider_floors_are_calibrated`: reads `resolve_reranker_provider()` live and fails if that provider's `_FLOORS` entry is `None` — deliberately red under `RERANKER_PROVIDER=voyage`.
+
 ---
 
 # Summary
@@ -1112,10 +1138,10 @@ But the effect today is that the suite goes green while **asserting that the pro
 
 The three that change what users receive:
 
-1. **§1 — the honesty gate is off.** An uncalibrated `None` disables the relevance ladder for the active reranker, so every query with any evidence is graded `QUALITY_OK`, PARTIAL is nearly unreachable, and the weak-evidence web-search path is dead. Tooling to fix it is written and has never been run.
+1. **§1 — the honesty gate is off.** *(Fixed 2026-08-21, together with §3 and §23 — see status update at the top of this file.)* An uncalibrated `None` disabled the relevance ladder for the active reranker, so every query with any evidence was graded `QUALITY_OK`, PARTIAL was nearly unreachable, and the weak-evidence web-search path was dead. `_FLOORS["cloudflare"] = (0.02, 0.90)`, measured against the fully-migrated corpus.
 2. **§2 — reranking is thrown away.** *(Fixed 2026-08-19, together with §20 — see status update at the top of this file.)* Context assembly re-sorts by the RRF score, then a 4000-char budget admits 2–3 of the ~1500-char chunks. The cross-encoder pays full cost and barely influences the prompt.
-3. **§3 — the migration is 91 chunks short.** Those chunks are being searched with mismatched embedding spaces right now.
+3. **§3 — the migration is 91 chunks short.** *(Fixed 2026-08-21 — see status update at the top of this file.)* Those chunks were being searched with mismatched embedding spaces; a self-detecting `--repair` mode found and re-embedded all 91, confirmed by a follow-up 0-outlier scan.
 
-**Order of operations matters:** §3 → §1 → §17. Calibrating or evaluating before the corpus is uniform bakes the mismatch into the floors and into every published number.
+**Order of operations mattered:** §3 → §1 → §17. Calibrating or evaluating before the corpus is uniform bakes the mismatch into the floors and into every published number. §3 and §1 are done, in that order; §17 (re-running the evaluation suite against the now-fixed system) is the remaining step.
 
 The recurring theme in Part B is a pipeline that computes more than it consumes — routing fields nobody reads, prompts built and discarded, stage events streamed and ignored, an agentic decision that cannot be reached. Each is individually small. Together they mean the system's observable behaviour is substantially simpler than its architecture implies, and the difference is not visible from the outside.

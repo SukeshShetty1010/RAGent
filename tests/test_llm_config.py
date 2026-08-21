@@ -102,13 +102,36 @@ def test_voyage_floors_are_uncalibrated_placeholder():
     assert RetrievalQualityGate._FLOORS["voyage"] is None
 
 
-def test_cloudflare_floors_are_uncalibrated_placeholder():
-    """bge-reranker-base emits raw logits of a similar magnitude to
-    ms-marco's, which makes borrowing local's floors look reasonable and
-    be wrong. It must stay None until it has its own calibration run."""
+def test_cloudflare_floors_are_calibrated():
+    """bge-reranker-base emits a normalized 0..1 score, a different scale
+    from ms-marco's raw logits — its floors must be its own calibration
+    (evaluation/calibrate_relevance.py against the fully-migrated corpus),
+    never borrowed from "local", and must sit inside the 0..1 range that
+    scale actually produces."""
     from retriever.quality_gate import RetrievalQualityGate
 
-    assert RetrievalQualityGate._FLOORS["cloudflare"] is None
+    floors = RetrievalQualityGate._FLOORS["cloudflare"]
+    assert floors is not None
+    refuse_floor, weak_floor = floors
+    assert refuse_floor < weak_floor
+    assert 0.0 <= refuse_floor <= 1.0
+    assert 0.0 <= weak_floor <= 1.0
+
+
+def test_active_provider_floors_are_calibrated():
+    """§23: the honesty gate must not be silently switched off for
+    whichever provider is actually running. Deliberately red under
+    RERANKER_PROVIDER=voyage (still uncalibrated) — that failure IS the
+    signal this test exists to raise."""
+    from retriever.quality_gate import RetrievalQualityGate
+    from retriever.reranker_provider import resolve_reranker_provider
+
+    active = resolve_reranker_provider()
+    assert RetrievalQualityGate._FLOORS[active] is not None, (
+        f"RERANKER_PROVIDER={active!r} has no calibrated relevance floors — "
+        "the honesty gate silently no-ops for every request. Run "
+        "evaluation/calibrate_relevance.py and set _FLOORS accordingly."
+    )
 
 
 def test_hfspace_shares_local_floors():

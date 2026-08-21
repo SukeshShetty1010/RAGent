@@ -12,7 +12,7 @@ models into every hermetic unit test that touches the quality gate.
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import Literal, Optional
 
 RerankerProvider = Literal["local", "hfspace", "cloudflare", "voyage"]
 
@@ -45,3 +45,24 @@ def resolve_reranker_provider() -> str:
     if raw not in VALID_PROVIDERS:
         return DEFAULT_PROVIDER
     return raw
+
+
+# Human-readable rerank_score scale, per provider, for quoting inside LLM
+# prompts (see agent/decisions/web_search_decision.py). Providers sharing
+# a model share a description, same as they share quality_gate.py floors.
+_SCALE_DESCRIPTIONS: dict[str, str] = {
+    "local": "cross-encoder logit, unbounded — higher is better, roughly: <0 weak, >3 strong",
+    "hfspace": "cross-encoder logit, unbounded — higher is better, roughly: <0 weak, >3 strong",
+    "cloudflare": "normalized 0.0-1.0 — higher is better",
+    "voyage": "normalized 0.0-1.0 — higher is better",
+}
+
+
+def describe_score_scale(provider: Optional[str] = None) -> str:
+    """Short description of the active (or given) provider's rerank_score
+    scale, for embedding in an LLM prompt. A prompt that hardcodes one
+    provider's scale silently misdescribes another once the active
+    provider changes — this keeps the description provider-aware instead.
+    """
+    p = provider if provider in VALID_PROVIDERS else resolve_reranker_provider()
+    return _SCALE_DESCRIPTIONS.get(p, "provider-specific scale — see retriever/quality_gate.py")

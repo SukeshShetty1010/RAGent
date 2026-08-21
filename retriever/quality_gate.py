@@ -140,14 +140,33 @@ class RetrievalQualityGate:
     #               Space's model or fastembed version ever diverges
     #               from hf_space/requirements.txt, this entry stops
     #               being valid and must go back to None.
-    #   "cloudflare" — @cf/baai/bge-reranker-base on Workers AI, which
-    #               applies the sigmoid server-side: 0..1, heavily
-    #               saturated (measured 0.99990 for a match, 3.7e-05 for
-    #               a miss). Same scale-collapse problem as Voyage — the
-    #               local floors would refuse everything — and its
-    #               saturation means calibration should expect the signal
-    #               in the tails rather than a smooth spread. Stays None
-    #               until calibrated.
+    #   "cloudflare" — @cf/baai/bge-reranker-base on Workers AI, applying
+    #               the sigmoid server-side: 0..1. Calibrated 2026-08-21
+    #               against the fully-migrated corpus (see §3/§1 in
+    #               AUDIT_TASKS.md) via evaluation/calibrate_relevance.py.
+    #               See evaluation/results/relevance_calibration_cloudflare_2026-08-21.json:
+    #                 should_refuse group max_relevance: min=0.0036 max=0.9019 mean=0.2124
+    #                 answerable group max_relevance:    min=0.0249 max=0.9999 mean=0.9328
+    #               Contrary to §1's original prediction, the scale is NOT
+    #               saturated at the extremes on this corpus — genuine
+    #               partial matches populate the 0.3-0.9 middle (e.g. a
+    #               real-but-off-topic Game identity scored 0.33).
+    #               REFUSE_FLOOR=0.02 sits strictly below the answerable
+    #               group's minimum (0.0249, "Rust") — a conservative
+    #               choice mirroring "local"'s derivation above: zero
+    #               false refusals on the golden set, at the cost of not
+    #               catching two unanswerable queries whose scores (0.10,
+    #               0.33) sit above it — both land QUALITY_WEAK instead of
+    #               refused, which entity grounding does not catch either
+    #               (one has a real Game identity — "Beyond Good and Evil
+    #               2" — with no editorial content; see quality_gate.py's
+    #               entity-grounding note above). WEAK_FLOOR=0.90 sits in
+    #               a genuine gap in the answerable distribution (next
+    #               values: 0.8897 below, 0.9601 above), landing exactly
+    #               8/40 (20%) of answerable golden queries WEAK and 0
+    #               EMPTY — the top of the 10-20% band targeted when this
+    #               was calibrated, chosen for sitting on real data
+    #               structure rather than an arbitrary percentile.
     #   "voyage"  — a DIFFERENT model emitting normalized 0..1. Applying
     #               the local floors there would make the weak floor of
     #               2.0 unreachable (every query WEAK) and the refuse
@@ -163,7 +182,7 @@ class RetrievalQualityGate:
         # provider: (REFUSE_FLOOR, WEAK_FLOOR)
         "local": (-3.0, 2.0),    # ms-marco raw logits, calibrated 2026-08-12
         "hfspace": (-3.0, 2.0),  # same model, same scale — shares that calibration
-        "cloudflare": None,      # bge-reranker-base logits — needs its own calibration
+        "cloudflare": (0.02, 0.90),  # bge-reranker-base 0..1, calibrated 2026-08-21
         "voyage": None,          # 0..1 normalized — needs its own calibration
     }
 
