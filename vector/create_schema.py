@@ -36,7 +36,7 @@ QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 
 # Dense vector size (must match Gemini gemini-embedding-001 outputDimensionality)
-E5_VECTOR_SIZE = 768
+DENSE_VECTOR_SIZE = 768
 
 
 # -------------------------------------------------------------------
@@ -48,7 +48,7 @@ def create_all_collections(client: QdrantClient) -> None:
     Create or recreate all Qdrant collections for RAGent.
 
     EditorialChunk:
-        - "dense": E5-base-v2 (768-dim, cosine)
+        - "dense": Gemini gemini-embedding-001 (768-dim, cosine)
         - "bm25":  BM25 sparse with server-side IDF scoring
 
     Game, PlatformSpec, IGDB_Game, GameSpot_Game:
@@ -66,7 +66,7 @@ def create_all_collections(client: QdrantClient) -> None:
             collection_name="EditorialChunk",
             vectors_config={
                 "dense": models.VectorParams(
-                    size=E5_VECTOR_SIZE,
+                    size=DENSE_VECTOR_SIZE,
                     distance=models.Distance.COSINE,
                 ),
             },

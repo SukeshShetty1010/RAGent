@@ -5,9 +5,10 @@ Hybrid Search (BM25 Sparse + Dense Vector) via Qdrant
 with Reciprocal Rank Fusion (RRF), followed by a reranking
 pass over the fused candidates.
 
-Reranking is provider-dispatched (RERANKER_PROVIDER): the in-process
-fastembed cross-encoder, or Voyage's rerank HTTP API. See
-_rerank_scores() below.
+Reranking is provider-dispatched via RERANKER_PROVIDER ("local",
+"hfspace", "cloudflare", or "voyage"). See retriever/reranker_provider.py
+for the full provider list and their score scales, and _rerank_scores()
+below for the dispatch itself.
 
 Instrumentation added for:
 - Embedding generation
@@ -22,7 +23,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional, Literal, Tuple, TYPE_CHECKING
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -34,6 +35,11 @@ from fastembed.rerank.cross_encoder import TextCrossEncoder
 from utils.observability import ProfileBlock, MetricsRegistry
 from llm.gemini_client import embed_text
 from retriever.reranker_provider import resolve_reranker_provider
+
+if TYPE_CHECKING:
+    from agent.task_router import TaskType
+    from agent.capability.capability_types import AnswerCapability
+    from retriever.quality_gate import QualityReport
 
 logger = logging.getLogger("RAG_RETRIEVER")
 if not logger.handlers:
@@ -457,35 +463,54 @@ class RAGRetriever:
 
 
 # ---------------------------------------------------------------------
-# Prompt Engineering (UNCHANGED)
+# CLI Prompt Construction
 # ---------------------------------------------------------------------
 
-def format_llama3_prompt(query: str, chunks: List[Dict]) -> str:
-    context_blocks: List[str] = []
+def _build_cli_prompt(
+    query: str, chunks: List[Dict]
+) -> Tuple[str, "TaskType", "AnswerCapability", "QualityReport"]:
+    """
+    Reproduce the production engine's STEP 1 / STEP 4 / STEP 5 / STEP 6
+    (routing, capability assessment, context assembly, prompt
+    construction) for the CLI harness, so `main()` exercises the same
+    PromptManager path production traffic does instead of a hand-rolled
+    template. Mirrors engine/execution_engine_streaming.py's STEP 4-6
+    sequence exactly, including reading capability_reason off the
+    metrics registry between assess() and generate_prompt() -- that
+    ordering is how the engine threads a refusal reason into the
+    prompt.
 
-    for chunk in chunks:
-        source = chunk.get("source_title") or "Unknown Source"
-        content = (chunk.get("content") or "").strip()
+    Imports are local so `import retriever.rag_retriever` doesn't drag
+    the whole `agent` package into every hermetic test that only needs
+    retrieval -- the same courtesy retriever/quality_gate.py extends by
+    not importing this module.
+    """
+    from agent.task_router import TaskRouter
+    from agent.capability.capability_assessor import CapabilityAssessor
+    from agent.context_assembler import ContextAssembler
+    from agent.prompt_manager import PromptManager
+    from retriever.quality_gate import RetrievalQualityGate
 
-        context_blocks.append(
-            f"[Source: {source}]\n{content}\n"
-        )
+    decision = TaskRouter().route(query)
+    quality = RetrievalQualityGate().evaluate(query, decision.task, chunks)
 
-    context_str = "\n".join(context_blocks)
-
-    return (
-        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n"
-        "You are a helpful and honest assistant.\n"
-        "Answer strictly based on the provided context.\n"
-        "You must cite the source title for every key fact you mention using the format:\n"
-        "(Source: 'Title').\n"
-        "If the answer is not present in the context, say \"I don't know\".\n\n"
-        "Context:\n"
-        f"{context_str}"
-        "<|eot_id|><|start_header_id|>user<|end_header_id|>\n"
-        f"{query}"
-        "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+    capability = CapabilityAssessor().assess(
+        intent_signals=decision.intent_signals,
+        evidence=chunks,
+        quality=quality,
     )
+    capability_reason = MetricsRegistry.get().last_label("capability_reason")
+
+    assembled_chunks = ContextAssembler().assemble(chunks, decision.task)
+    prompt = PromptManager().generate_prompt(
+        query=query,
+        chunks=assembled_chunks,
+        task=decision.task,
+        capability=capability,
+        capability_reason=capability_reason,
+    )
+
+    return prompt, decision.task, capability, quality
 
 
 # ---------------------------------------------------------------------
@@ -522,7 +547,11 @@ def main() -> None:
             print(c["content"][:500])
             print("-" * 70)
 
-        prompt = format_llama3_prompt(args.query, chunks)
+        prompt, task, capability, quality = _build_cli_prompt(args.query, chunks)
+        print(
+            f"\nTask: {task.value} | Capability: {capability.value} | "
+            f"Quality: {quality.status.value}\n"
+        )
 
         try:
             from llm.ragent_client import chat_completion_remote

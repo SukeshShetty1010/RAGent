@@ -3,7 +3,7 @@
 # ============================================================
 # Core: Python 3.11+
 # Vector DB: Qdrant Cloud
-# LLM: Gemini 2.5 Flash (primary) + Groq Llama 3.1 8B Instant (fallback)
+# LLM: Gemini gemini-flash-lite-latest (primary) + Groq openai/gpt-oss-120b (fallback)
 # Backend: FastAPI + SSE
 # ============================================================
 

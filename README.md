@@ -18,7 +18,7 @@
 | Challenge | RAGent's Solution |
 |-----------|-------------------|
 | Generic RAG hallucinations | **Evidence-gated** capability assessment before generation |
-| Single-source data gaps | **Multi-source ETL** from RAWG, IGDB, and GameSpot APIs |
+| Single-source data gaps | **Multi-source ETL** from RAWG, IGDB, GameSpot, Wikipedia, and Steam |
 | One-size-fits-all retrieval | **Intent-aware routing** with task-specific strategies |
 | Black-box LLM behavior | **Full observability** with latency profiling & KPI dashboards |
 
@@ -89,12 +89,16 @@ flowchart LR
         RAWG[RAWG API]
         IGDB[IGDB API]
         GS[GameSpot API]
+        WIKI[Wikipedia]
+        STEAM[Steam]
     end
     
     subgraph Ingest["Ingestion Layer"]
         RI[rawg_identity_ingest.py]
         II[igdb_metadata_ingest.py]
         GI[ingest_gamespot.py]
+        WE[wikipedia_editorial_normalize.py]
+        SE[steam_editorial_normalize.py]
     end
     
     subgraph PreProcess["Pre-Processing"]
@@ -115,6 +119,8 @@ flowchart LR
     RAWG --> RI --> CL
     IGDB --> II --> CL
     GS --> GI --> CL
+    WIKI --> WE --> CL
+    STEAM --> SE --> CL
     CL --> MG --> CH --> EM --> UP --> WV
 ```
 
@@ -427,7 +433,7 @@ RAGent/
 │   └── task_router.py     # Deterministic task routing
 ├── api/                   # FastAPI backend (SSE /api/chat, /health, /ping)
 ├── chunking/              # Editorial text chunking
-├── data/                  # API clients (RAWG, IGDB, GameSpot)
+├── data/                  # API clients (RAWG, IGDB, GameSpot, Wikipedia, Steam)
 ├── embed/                 # Embedding payload preparation
 ├── engine/                # RageEngine (7-step execution) + streaming variant
 ├── evaluation/            # Golden set, RAGAS, ablation, relevance calibration

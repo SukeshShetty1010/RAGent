@@ -40,7 +40,17 @@ See the "Resolved" notes inside §16 and §22 for what shipped. Test suite now `
 
 While verifying, a pre-existing, order-dependent failure was found in `tests/test_llm_config.py::test_reranker_model_matches_calibration` — unrelated to T16/T22 (confirmed via `git stash` that it failed identically on `main` beforehand) but fixed anyway since the root cause was cheap to isolate and fix. The test's skip check called `resolve_reranker_provider()`, a *live* read of `RERANKER_PROVIDER`, while its assertion read `retriever.rag_retriever.reranker`, an object frozen at whichever moment that module was *first imported* in the test process — deliberately, per that module's own comment, so a local reranker never gets dispatched to after having been decided against at boot. Those two sources of truth can disagree depending on which test in the session happens to trigger the first import while a `monkeypatch.setenv("RERANKER_PROVIDER", ...)` from an unrelated test is active, which is exactly what made the test fail in isolation but pass inside the full suite. Fixed by making both the skip check and the assertion read the same frozen `rag_retriever.RERANKER_PROVIDER` / `rag_retriever.reranker` state, so the test can no longer contradict itself — verified stable across isolated, `-k`-filtered, and full-suite runs.
 
-Remaining 7 tasks are unchanged from the original audit below.
+**T15 and T21 fixed** together, 2026-08-21. Selected over the other 6 open tasks (T1, T3, T15, T17, T21, T23) because T1/T3/T17/T23 are one blocked chain — T3 needs a live Qdrant scroll plus Gemini embedding quota, T1 needs `evaluation/calibrate_relevance.py` run against the migrated corpus, T17/T23 both follow T1 — and this environment cannot execute or verify any of it: probing Qdrant Cloud with `.env` loaded, both sandboxed and with the sandbox disabled, produced `ResponseHandlingException: timed out` both times, the same condition the T18 and T13/T19 sessions recorded. T15 and T21 turned out to be genuinely coupled rather than merely both-small: T15 deletes `format_llama3_prompt()` from `retriever/rag_retriever.py`, and §21's fifth row is a stale docstring in that same file claiming two reranker providers when there are four.
+
+`format_llama3_prompt()` — Llama-3 chat-template control tokens for a model this repo no longer runs — is gone, along with its `# Prompt Engineering (UNCHANGED)` banner. The CLI harness's `main()` now calls a new `_build_cli_prompt()` that reproduces the production engine's STEP 1/4/5/6 (`TaskRouter.route` → `RetrievalQualityGate.evaluate` → `CapabilityAssessor.assess` → `ContextAssembler.assemble` → `PromptManager.generate_prompt`) using the real collaborators, mirroring `engine/execution_engine_streaming.py:316-365` exactly — including reading `capability_reason` off `MetricsRegistry` between `assess()` and `generate_prompt()`. An `INSUFFICIENT` capability now yields a real `insufficient_prompt()` refusal instead of the harness silently routing around it. Imports of `agent.*` and `quality_gate` are local to the new function, not module-level, so `import retriever.rag_retriever` still does not pull in the `agent` package — verified by checking `sys.modules` after the import.
+
+§21's five stale claims: `requirements.txt`'s header now names the live model defaults (`gemini-flash-lite-latest`, `openai/gpt-oss-120b`) instead of the retired ones; `vector/create_schema.py`'s `E5_VECTOR_SIZE` (a lie — the value was right, the name wasn't) is renamed `DENSE_VECTOR_SIZE`, and its docstring now says `gemini-embedding-001` instead of `E5-base-v2`; `retriever/rag_retriever.py`'s module docstring now points at `retriever/reranker_provider.py` as the single source of truth for the four providers instead of naming two of them a second time. The fifth row's original target, `CLAUDE.md`, is gitignored and absent from this checkout, so it was redirected to the live equivalent claim in `README.md` ("RAWG, IGDB, and GameSpot") — confirmed Wikipedia and Steam editorial are in fact wired into ingestion via `upsert/upsert_all.py`, `scripts/bulk_ingest.py`, and `data/wikipedia_data.py` / `data/steam_data.py` — and both are now named in the README's ETL claim, its data-ingestion diagram, and its `data/` tree comment. Left deliberately untouched: `README.md`'s API-keys line (already correct — Wikipedia/Steam need no keys) and `flagship.md` / `docs/superpowers/specs/` (historical design records, out of scope for this pass).
+
+Two new regression tests guard three of the five claims against drifting again: `tests/test_llm_config.py::test_requirements_header_names_live_models` (parses the header, asserts it names the live `GEMINI_MODEL`/`_GROQ_MODEL` constants) and `::test_create_schema_dense_size_matches_gemini_dim` (`DENSE_VECTOR_SIZE == GEMINI_EMBED_DIM`, and `E5` no longer appears in the file). `tests/test_rag_retriever_cli.py` (new) covers `_build_cli_prompt()` end to end on stub chunks (real prompt path, no Llama-3 tokens) and its `INSUFFICIENT`/empty-evidence case, hermetically stubbing only `retriever.quality_gate._get_entity_index` — no Qdrant. See the "Resolved" notes inside §15 and §21 for the full list.
+
+Test suite now `263 passed, 3 skipped` (hermetic `-m unit` subset: `252 passed, 3 skipped` — up from 246 — 6 net new tests). The CLI smoke test (`py -3.10 -m retriever.rag_retriever --query "..."`) cannot pass in this environment: it fails inside `RAGRetriever.retrieve()`'s `query_points` call (not at `__init__`, which succeeds without touching the network) with the same `ResponseHandlingException: timed out` as the Qdrant probe above — the wiring at that one call site is unverified end to end, though `_build_cli_prompt`'s unit tests cover everything downstream of retrieval. `py -3.10 -m tests.verify_engine` still reports `✅ ENGINE READY FOR UI` (fail-soft, degraded retrieval), unchanged from before.
+
+Remaining 4 tasks (T1, T3, T17, T23) are unchanged from the original audit below — still blocked on the same Qdrant/quota chain.
 
 ---
 
@@ -62,13 +72,13 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T12** — Either send `insufficient_prompt()` to the LLM or delete it (§12) — Fixed 2026-08-20
 - [x] **T13** — Render the `stage` SSE events in the UI (§13) — Fixed 2026-08-20
 - [x] **T14** — Decide whether the product is multi-turn; wire history if so (§14) — Fixed 2026-08-20
-- [ ] **T15** — Delete `format_llama3_prompt()` (§15)
+- [x] **T15** — Delete `format_llama3_prompt()` (§15) — Fixed 2026-08-21
 - [x] **T16** — Pin `fastembed` in the root `requirements.txt` (§16) — Fixed 2026-08-21
 - [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17)
 - [x] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18) — Fixed 2026-08-20
 - [x] **T19** — Cancel the engine thread when the SSE client disconnects (§19) — Fixed 2026-08-20
 - [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
-- [ ] **T21** — Fix stale comments and docs that describe retired infrastructure (§21)
+- [x] **T21** — Fix stale comments and docs that describe retired infrastructure (§21) — Fixed 2026-08-21
 - [x] **T22** — Drop the unused `transformers` dependency (§22) — Fixed 2026-08-21
 - [ ] **T23** — Invert the two "uncalibrated placeholder" tests once T1 lands (§23)
 
@@ -814,6 +824,16 @@ Emits Llama-3 chat-template control tokens (`<|begin_of_text|>`, `<|start_header
 
 **Fix:** delete it, and have the CLI harness call `PromptManager` so it exercises the real path.
 
+### Resolved — 2026-08-21
+
+`format_llama3_prompt()` and its `# Prompt Engineering (UNCHANGED)` banner are deleted. `main()` now calls a new `_build_cli_prompt(query, chunks)`, which reproduces the production engine's STEP 1/4/5/6 using the real collaborators — `TaskRouter().route()`, `RetrievalQualityGate().evaluate()`, `CapabilityAssessor().assess()` (reading `capability_reason` off `MetricsRegistry` immediately after, same ordering as `execution_engine_streaming.py:316-365`), `ContextAssembler().assemble()`, `PromptManager().generate_prompt()` — and returns `(prompt, task, capability, quality)` so the CLI now prints the gate's verdict instead of discarding it. An `INSUFFICIENT` capability (e.g. no evidence) now produces a real `insufficient_prompt()` refusal, per §12, rather than a special case the harness routes around.
+
+The five `agent.*` / `quality_gate` imports live inside `_build_cli_prompt()`, not at module level, so `import retriever.rag_retriever` still does not drag in the `agent` package — verified directly: after `import retriever.rag_retriever`, `[m for m in sys.modules if m == "agent" or m.startswith("agent.")]` is empty.
+
+`tests/test_rag_retriever_cli.py` (new) asserts `format_llama3_prompt` is gone, that no Llama-3 control token (`<|begin_of_text|>`, `<|start_header_id|>`, `<|eot_id|>`) appears anywhere in the module source, that `_build_cli_prompt()` on stub chunks returns a real `PromptManager`-shaped prompt containing the query and context, and that empty chunks produce `AnswerCapability.INSUFFICIENT` plus the exact `insufficient_prompt()` text. Hermetic — the only collaborator that can reach disk on its own, `RetrievalQualityGate`'s lazy `CorpusEntityIndex`, is stubbed via `retriever.quality_gate._get_entity_index`.
+
+Not verified end to end: `py -3.10 -m retriever.rag_retriever --query "Far Cry 5 combat"` still needs a live Qdrant. It fails inside `RAGRetriever.retrieve()`'s `query_points` call (not `__init__`, which succeeds without touching the network) with `ResponseHandlingException: timed out` — the same condition blocking T1/T3/T17/T23. The unit tests cover everything downstream of retrieval; what's unverified is the wiring at that one call site, not the logic.
+
 ---
 
 # Part C — Configuration, drift, and hygiene
@@ -1017,6 +1037,17 @@ Tests: `tests/test_rerank_failsoft.py` gained 3 tests (up from 4) — one exerci
 | `vector/create_schema.py:50` | `"dense": E5-base-v2 (768-dim, cosine)` in the docstring | Same. |
 | `CLAUDE.md` | multi-source ingestion is "RAWG, IGDB, GameSpot" | Wikipedia and Steam editorial are also wired in — `upsert/upsert_all.py:32`, `scripts/bulk_ingest.py:48`, `ingest/editorial_providers.py`, `ingest/wikipedia_editorial_normalize.py`, `ingest/steam_editorial_normalize.py`, `upsert/upsert_editorial_source.py`. |
 | `retriever/rag_retriever.py` module docstring | "the in-process fastembed cross-encoder, or Voyage's rerank HTTP API" | Four providers now; Cloudflare is the active one. |
+
+### Resolved — 2026-08-21
+
+All five rows fixed, with the fourth redirected: `CLAUDE.md` is gitignored *and absent from disk* in this checkout, so its row had no target. Its live equivalent — the same "RAWG, IGDB, GameSpot" ingestion claim — lives in `README.md`, so that became the fix target instead.
+
+- `requirements.txt`'s header now reads `gemini-flash-lite-latest` (primary) / `openai/gpt-oss-120b` (fallback) — the live defaults in `llm/gemini_client.py:35` / `llm/ragent_client.py:30` — instead of the two retired models. `tests/test_llm_config.py::test_requirements_header_names_live_models` parses the header and asserts it names both live constants, so a future model swap that forgets the header turns the build red.
+- `vector/create_schema.py`'s `E5_VECTOR_SIZE` is renamed `DENSE_VECTOR_SIZE` (both the constant and its one use site); the docstring's `"dense": E5-base-v2 (768-dim, cosine)` now reads `gemini-embedding-001`. `tests/test_llm_config.py::test_create_schema_dense_size_matches_gemini_dim` asserts `DENSE_VECTOR_SIZE == GEMINI_EMBED_DIM` and that `E5` no longer appears anywhere in the file.
+- `retriever/rag_retriever.py`'s module docstring no longer names two providers; it points at `retriever/reranker_provider.py`, which already documents all four (`local`, `hfspace`, `cloudflare`, `voyage`) and their score scales in one place, rather than becoming a third copy of the same list.
+- The `CLAUDE.md` row, redirected: `README.md`'s "Multi-source ETL from RAWG, IGDB, and GameSpot APIs" claim, its Data Ingestion mermaid diagram, and its `data/` tree comment now also name Wikipedia and Steam — confirmed wired into ingestion via `upsert/upsert_all.py`, `scripts/bulk_ingest.py`, and the presence of `data/wikipedia_data.py` / `data/steam_data.py`. `README.md`'s separate API-keys line ("RAWG, IGDB, GameSpot, Tavily") was left as-is — it's already correct, since Wikipedia and Steam need no keys.
+
+Left out of scope, stated rather than silently skipped: `flagship.md` and `docs/superpowers/specs/` carry their own dated claims (Modal verification steps, "~500 tok" chunking); they're historical design records, not live documentation, and were judged not worth touching in this pass.
 
 ---
 

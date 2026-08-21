@@ -149,3 +149,30 @@ def test_root_fastembed_pin_matches_hf_space():
     assert root_match, "requirements.txt must pin fastembed==<version>, not float it"
     assert space_match, "hf_space/requirements.txt must pin fastembed==<version>"
     assert root_match.group(1) == space_match.group(1)
+
+
+def test_requirements_header_names_live_models():
+    """The header comment is documentation, not code -- nothing forces it
+    to track a model swap. Assert it names the live defaults so a future
+    swap that forgets the header turns the build red instead of just
+    quietly lying to the next reader."""
+    from llm.gemini_client import GEMINI_MODEL
+    from llm.ragent_client import _GROQ_MODEL
+
+    src = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+    header = src.split("# ----------", 1)[0]
+
+    assert GEMINI_MODEL in header
+    assert _GROQ_MODEL in header
+
+
+def test_create_schema_dense_size_matches_gemini_dim():
+    """DENSE_VECTOR_SIZE must track whatever Gemini actually returns, and
+    the retired E5 model it was renamed away from must not resurface."""
+    from llm.gemini_client import GEMINI_EMBED_DIM
+    from vector.create_schema import DENSE_VECTOR_SIZE
+
+    assert DENSE_VECTOR_SIZE == GEMINI_EMBED_DIM
+
+    src = (REPO_ROOT / "vector" / "create_schema.py").read_text(encoding="utf-8")
+    assert "E5" not in src
