@@ -1,0 +1,34 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "refusal_precision": 1.0,
+  "refusal_recall": 0.8,
+  "refusal_f1": 0.8889,
+  "false_answer_rate": 0.2,
+  "over_refusal_rate": 0.0,
+  "confusion": {
+    "tp": 8,
+    "fp": 0,
+    "fn": 2,
+    "tn": 40
+  },
+  "by_merge_state": {
+    "LOCAL_ONLY": {
+      "total": 50,
+      "refused": 8,
+      "should_refuse": 10
+    }
+  },
+  "false_answers": [
+    {
+      "id": "g047",
+      "query": "What platforms can I play Beyond Good and Evil 2 on?"
+    },
+    {
+      "id": "g050",
+      "query": "Who won the 2024 US presidential election?"
+    }
+  ],
+  "over_refusals": [],
+  "errored_ids": []
+}

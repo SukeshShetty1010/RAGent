@@ -1,0 +1,154 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "engine_latency_ms": {
+    "p50": 4079.56,
+    "p95": 12422.77,
+    "p99": 13736.41,
+    "mean": 5254.57
+  },
+  "llm_latency_ms": {
+    "p50": 843.75,
+    "p95": 2486.27,
+    "mean": 1125.29
+  },
+  "cost_usd_per_query": {
+    "mean": 0.00010605,
+    "median": 0.00010605,
+    "total_for_run": 0.000106
+  },
+  "tokens_per_query": {
+    "mean_prompt_tokens": 843.8,
+    "mean_completion_tokens": 172.7
+  },
+  "stage_latency_attribution": {
+    "REQUEST_TOTAL -> Retrieval": {
+      "avg_ms": 4182.09,
+      "pct_of_total": 79.66
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition": {
+      "avg_ms": 3898.26,
+      "pct_of_total": 74.26
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch": {
+      "avg_ms": 3842.61,
+      "pct_of_total": 73.2
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch -> WebSearch": {
+      "avg_ms": 3839.49,
+      "pct_of_total": 73.14
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch -> WebSearch -> TavilyAPICall": {
+      "avg_ms": 3838.85,
+      "pct_of_total": 73.12
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch": {
+      "avg_ms": 2516.55,
+      "pct_of_total": 47.94
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 2516.19,
+      "pct_of_total": 47.93
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge -> ScoreWebEvidence": {
+      "avg_ms": 2117.0,
+      "pct_of_total": 40.33
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch": {
+      "avg_ms": 1948.92,
+      "pct_of_total": 37.12
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 1948.62,
+      "pct_of_total": 37.12
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> CrossEncoderRerank": {
+      "avg_ms": 1551.43,
+      "pct_of_total": 29.55
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> CrossEncoderRerank": {
+      "avg_ms": 1140.75,
+      "pct_of_total": 21.73
+    },
+    "REQUEST_TOTAL -> LLMGenerationStreaming": {
+      "avg_ms": 1062.66,
+      "pct_of_total": 20.24
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearchDecision": {
+      "avg_ms": 1016.91,
+      "pct_of_total": 19.37
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearchDecision -> LLMDecision": {
+      "avg_ms": 1016.53,
+      "pct_of_total": 19.36
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 508.91,
+      "pct_of_total": 9.69
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 477.19,
+      "pct_of_total": 9.09
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> VectorQuery": {
+      "avg_ms": 454.6,
+      "pct_of_total": 8.66
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge": {
+      "avg_ms": 424.7,
+      "pct_of_total": 8.09
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> VectorQuery": {
+      "avg_ms": 329.3,
+      "pct_of_total": 6.27
+    },
+    "REQUEST_TOTAL -> Retrieval -> QualityGate": {
+      "avg_ms": 12.26,
+      "pct_of_total": 0.23
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge -> QualityGateReMerge": {
+      "avg_ms": 5.32,
+      "pct_of_total": 0.1
+    },
+    "REQUEST_TOTAL -> ContextAssembly": {
+      "avg_ms": 2.61,
+      "pct_of_total": 0.05
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Deduplication": {
+      "avg_ms": 0.6,
+      "pct_of_total": 0.01
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> SafeContextCap": {
+      "avg_ms": 0.45,
+      "pct_of_total": 0.01
+    },
+    "REQUEST_TOTAL -> PromptConstruction": {
+      "avg_ms": 0.29,
+      "pct_of_total": 0.01
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> ResultFormatting": {
+      "avg_ms": 0.27,
+      "pct_of_total": 0.01
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> ResultFormatting": {
+      "avg_ms": 0.22,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch -> WebSearch -> WebResultNormalization": {
+      "avg_ms": 0.18,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> TaskRouting": {
+      "avg_ms": 0.14,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Ordering": {
+      "avg_ms": 0.1,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> PromptConstruction -> ContextFormatting": {
+      "avg_ms": 0.08,
+      "pct_of_total": 0.0
+    }
+  }
+}

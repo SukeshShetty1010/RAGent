@@ -9,8 +9,10 @@ llm/gemini_client.py), so this is just langchain-openai's ChatOpenAI
 pointed at Gemini's base URL, wrapped the same way the Groq judge
 already is in evaluation/ragas_eval.py.
 
-Unlike Modal, Gemini has no n>1 restriction, so ragas's self-consistency
-sampling works natively here — no bypass_n needed.
+Like Groq (see the ChatGroq judge in evaluation/ragas_eval.py), Gemini's
+OpenAI-compat endpoint rejects n>1 ("Multiple candidates is not enabled
+for this model"), so ragas's self-consistency sampling (answer_relevancy's
+question generation, faithfulness) must bypass it the same way.
 """
 
 from __future__ import annotations
@@ -37,5 +39,6 @@ def build_gemini_judge() -> LangchainLLMWrapper:
             api_key=api_key,
             temperature=0.0,
             max_tokens=8192,
-        )
+        ),
+        bypass_n=True,
     )

@@ -1,0 +1,43 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "refusal_precision": 1.0,
+  "refusal_recall": 0.7,
+  "refusal_f1": 0.8235,
+  "false_answer_rate": 0.3,
+  "over_refusal_rate": 0.0,
+  "confusion": {
+    "tp": 7,
+    "fp": 0,
+    "fn": 3,
+    "tn": 40
+  },
+  "by_merge_state": {
+    "LOCAL_ONLY": {
+      "total": 40,
+      "refused": 0,
+      "should_refuse": 0
+    },
+    "LOCAL_PLUS_WEB": {
+      "total": 10,
+      "refused": 7,
+      "should_refuse": 10
+    }
+  },
+  "false_answers": [
+    {
+      "id": "g047",
+      "query": "What platforms can I play Beyond Good and Evil 2 on?"
+    },
+    {
+      "id": "g049",
+      "query": "What's a good recipe for chocolate chip cookies?"
+    },
+    {
+      "id": "g050",
+      "query": "Who won the 2024 US presidential election?"
+    }
+  ],
+  "over_refusals": [],
+  "errored_ids": []
+}

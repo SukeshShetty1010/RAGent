@@ -10,9 +10,10 @@ scored separately by evaluation/refusal_metrics.py).
 Never imported on the Render request path — this is an offline dev
 tool (see requirements-dev.txt).
 
-- Judge: Groq llama-3.3-70b-versatile via langchain-groq, deliberately
-  NOT the llama-3.1-8b-instant generator — a model shouldn't grade its
-  own output, and 8B is a weak judge.
+- Judge: Groq qwen/qwen3.6-27b via langchain-groq (or Gemini via
+  evaluation/gemini_judge_llm.py with --judge-backend gemini),
+  deliberately NOT the generator model — a model shouldn't grade its
+  own output.
 - Embeddings: evaluation/ragas_embeddings.py's GeminiEmbeddings, so
   no torch/sentence-transformers lands locally.
 - Rate limits: RunConfig(max_workers=2), scored in batches, each batch

@@ -66,6 +66,26 @@ Test suite now `269 passed, 3 skipped` full run including all `live`-marked test
 
 Remaining task: **T17** (re-run the evaluation suite) is deliberately left for a future session — it should measure the system *after* this pass, not before, and it is a separate multi-script measurement effort rather than a code fix.
 
+## Status update — 2026-08-21 (T17, in progress)
+
+4 of 5 steps done; the 5th is blocked on a daily API quota, not a bug. See the "In Progress" note inside §17 for the full measured numbers and the exact command to resume with.
+
+Installed `requirements-dev.txt` and found it does not install cleanly as written: latest `ragas` (0.4.3) unconditionally imports `langchain_community.chat_models.vertexai`, a module `langchain-community` removed in its 0.4.x "sunset" split into standalone packages — so the newest versions of both packages, which is what unpinned `pip install` resolves to, are mutually incompatible. Fixed by pinning `langchain-community==0.3.27` (pre-split, still ships that module) on top of the dev install; `requirements-dev.txt` itself was left unpinned since this is a dev-only, offline-eval-only dependency chain, not something worth freezing broadly for one transitive import. Full 258-test unit suite passed clean afterward.
+
+Ran `run_eval.py` (default + `--corpus-only`, 50 golden-set queries each, live Gemini/Cloudflare/Qdrant/Tavily): 0/50 errors both runs. `refusal_metrics.py` on both: default `refusal_recall=0.7, false_answer_rate=0.3` (3/10 should-refuse queries got answered); corpus-only (no Tavily fallback) `refusal_recall=0.8, false_answer_rate=0.2` — the gap is web augmentation rescuing answers on queries the corpus-only path correctly refuses, worth a look but not investigated further this session. `cost_latency_metrics.py` on the default run: `p50=4080ms/p95=12423ms` engine latency, `$0.000106`/query mean cost (`openai/gpt-oss-120b` + Gemini pricing, correctly picked up from `llm/pricing.py`), retrieval (particularly `WebSearch`/`TavilyAPICall` and `LocalVectorSearch`) dominates the latency budget at ~80% of total.
+
+A second real bug was found and fixed while running `ragas_eval.py --judge-backend gemini`: `evaluation/gemini_judge_llm.py`'s docstring claimed "Gemini has no n>1 restriction, so ragas's self-consistency sampling works natively here — no bypass_n needed." That claim is false for the live `gemini-flash-lite-latest` endpoint — every job failed with `OpenAIInvalidRequestError: Multiple candidates is not enabled for this model`, the identical failure mode `ragas_eval.py`'s Groq judge already has a documented workaround for (`bypass_n=True`, since "Groq's API rejects n>1"). Applied the same `bypass_n=True` fix to `build_gemini_judge()` in `evaluation/gemini_judge_llm.py` and corrected the docstring; also fixed a separate stale docstring line in `evaluation/ragas_eval.py` naming the Groq judge as `llama-3.3-70b-versatile` when the actual `JUDGE_MODEL` constant is `qwen/qwen3.6-27b`. After the fix, `ragas_eval.py` completed clean: `context_precision=0.3604, faithfulness=0.9608, answer_relevancy=0.5953` (`evaluation/results/ragas_2026-08-21_default_gemini.json`).
+
+`ablation.py --judge-backend gemini` hit a second, different Gemini limit: not the per-minute RPM cap seen earlier, but the **daily** free-tier request cap (500 requests/day for the resolved model, `gemini-3.5-flash-lite`) — `RESOURCE_EXHAUSTED` / `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, which the earlier steps (run_eval's 50+50 queries, ragas_eval's ~30 judge calls) had already been eating into over the course of the session. `ablation.py`'s RAGAS half (`context_precision` over a 20-query × 4-mode subset, 80 judge calls) has no checkpoint, so the run was stopped rather than left retrying against an exhausted daily quota (confirmed via the tail of its output — same `429`/`RESOURCE_EXHAUSTED` on every retry, no progress). The cheap, no-LLM retrieval-only half (40 queries × 4 modes) had also not finished printing/writing by the time it was stopped, so **nothing from this run was persisted** — `evaluation/results/ablation_2026-08-21.json` does not exist yet; only the stale `ablation_2026-08-09.json` is on disk.
+
+**To resume:** wait for Gemini's daily quota to reset (free-tier daily caps reset at midnight Pacific — roughly 19h from 2026-08-21 ~12:00 UTC, i.e. sometime around 2026-08-22 07:00 UTC), then run:
+
+```
+py -3.10 -m evaluation.ablation --judge-backend gemini
+```
+
+from the repo root with `py -3.10` (this repo's working interpreter). Everything else needed for T17 is already in place: dependencies installed and the `langchain-community` pin applied, the `bypass_n` fix already shipped so this run won't repeat the earlier failure, and `evaluation/results/runs_2026-08-21_default.jsonl` already exists for anything else that needs it. Once `ablation_2026-08-21.json` exists, T17's last measurement is done — write up the AUDIT_TASKS.md resolution note for §17 (numbers above plus the ablation result) and flip the checklist box.
+
 ---
 
 ## Task checklist
@@ -88,7 +108,7 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T14** — Decide whether the product is multi-turn; wire history if so (§14) — Fixed 2026-08-20
 - [x] **T15** — Delete `format_llama3_prompt()` (§15) — Fixed 2026-08-21
 - [x] **T16** — Pin `fastembed` in the root `requirements.txt` (§16) — Fixed 2026-08-21
-- [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17)
+- [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17) — In progress 2026-08-21, 4/5 steps done, blocked on Gemini daily quota reset
 - [x] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18) — Fixed 2026-08-20
 - [x] **T19** — Cancel the engine thread when the SSE client disconnects (§19) — Fixed 2026-08-20
 - [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
@@ -913,6 +933,16 @@ Since 08-14 the system has changed: dense embeddings moved E5 → `gemini-embedd
 The most consequential item is `relevance_calibration_2026-08-12.json`. It is the **sole justification** for `_FLOORS["local"] = (-3.0, 2.0)`, and it was measured on the pre-migration E5 corpus. The floors threshold the *cross-encoder's* output, and the cross-encoder scores whatever the retriever hands it — so changing which chunks retrieval surfaces changes the score distribution those floors were fitted to. Even reverting `RERANKER_PROVIDER=local` today would not restore a correctly-calibrated gate.
 
 **Fix:** after §3 completes, re-run in order: `calibrate_relevance` (→ §1), then `refusal_metrics`, `ragas_eval`, `ablation`, `cost_latency`. Keep the old files; the date-stamped naming already supports side-by-side comparison, and the before/after is genuinely interesting.
+
+### In Progress — 2026-08-21
+
+See the status update near the top of this file for the full account. `calibrate_relevance` (§1) was already done. This session ran `run_eval` (default + `--corpus-only`, 0/50 errors both), `refusal_metrics` on both (`refusal_recall` 0.7 default / 0.8 corpus-only, `false_answer_rate` 0.3 / 0.2 — web augmentation on the default run rescues some answers the corpus-only path correctly refuses), `ragas_eval` (`context_precision=0.3604, faithfulness=0.9608, answer_relevancy=0.5953`), and `cost_latency_metrics` (`p50=4080ms` engine latency, `$0.000106`/query mean cost, retrieval ~80% of total latency). Judge backend was deliberately Gemini, not Groq, per a prior-session decision (08-09's Groq run hit Groq's daily cap at 5/40 scored records).
+
+Only `ablation.py --judge-backend gemini` remains — it hit **Gemini's own daily free-tier request cap** (500/day, distinct from the per-minute RPM limit; `GenerateRequestsPerDayPerProjectPerModel-FreeTier`), consumed in part by the four steps that already ran earlier in the same session. Its RAGAS half has no checkpoint, so the run was stopped rather than left retrying against an exhausted daily quota, and nothing from it was persisted — `evaluation/results/ablation_2026-08-21.json` does not exist yet.
+
+A real bug was found and fixed en route: `evaluation/gemini_judge_llm.py` claimed Gemini's OpenAI-compat endpoint has "no n>1 restriction" — false; it 400s with `Multiple candidates is not enabled for this model`, the same failure Groq's judge already works around via `bypass_n=True`. Applied the identical fix to the Gemini judge and corrected both that docstring and a stale Groq-model-name docstring line in `ragas_eval.py`.
+
+**Resume with:** `py -3.10 -m evaluation.ablation --judge-backend gemini`, after Gemini's daily quota resets (~2026-08-22, midnight Pacific). No other setup is needed — dependencies, the `langchain-community==0.3.27` pin, and the `bypass_n` fix are all already in place. Once `ablation_2026-08-21.json` exists, add its numbers to this section, flip the T17 checklist box, and update the top-of-file status section.
 
 ---
 
