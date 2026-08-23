@@ -1,0 +1,136 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "engine_latency_ms": {
+    "p50": 3205.4,
+    "p95": 6656.52,
+    "p99": 8727.41,
+    "mean": 3912.2
+  },
+  "llm_latency_ms": {
+    "p50": 992.01,
+    "p95": 2490.14,
+    "mean": 1290.51
+  },
+  "cost_usd_per_query": {
+    "mean": 1.883e-05,
+    "median": 0.0,
+    "total_for_run": 0.000941,
+    "queries_priced": 50,
+    "queries_at_zero_cost": 49
+  },
+  "tokens_per_query": {
+    "mean_prompt_tokens": 767.9,
+    "mean_completion_tokens": 185.3
+  },
+  "stage_latency_attribution": {
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition": {
+      "avg_ms": 4030.82,
+      "pct_of_total": 103.51
+    },
+    "REQUEST_TOTAL -> LLMGenerationStreaming -> GroqFallback": {
+      "avg_ms": 3572.58,
+      "pct_of_total": 91.74
+    },
+    "REQUEST_TOTAL -> Retrieval": {
+      "avg_ms": 2695.62,
+      "pct_of_total": 69.22
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch": {
+      "avg_ms": 2186.31,
+      "pct_of_total": 56.14
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 2185.86,
+      "pct_of_total": 56.13
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch": {
+      "avg_ms": 2015.12,
+      "pct_of_total": 51.75
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 2014.77,
+      "pct_of_total": 51.74
+    },
+    "REQUEST_TOTAL -> LLMGenerationStreaming": {
+      "avg_ms": 1173.02,
+      "pct_of_total": 30.12
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> CrossEncoderRerank": {
+      "avg_ms": 1084.36,
+      "pct_of_total": 27.85
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> CrossEncoderRerank": {
+      "avg_ms": 957.42,
+      "pct_of_total": 24.59
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearchDecision": {
+      "avg_ms": 851.35,
+      "pct_of_total": 21.86
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearchDecision -> LLMDecision": {
+      "avg_ms": 850.94,
+      "pct_of_total": 21.85
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 767.4,
+      "pct_of_total": 19.71
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 766.0,
+      "pct_of_total": 19.67
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> VectorQuery": {
+      "avg_ms": 334.19,
+      "pct_of_total": 8.58
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> VectorQuery": {
+      "avg_ms": 288.65,
+      "pct_of_total": 7.41
+    },
+    "REQUEST_TOTAL -> Retrieval -> QualityGate": {
+      "avg_ms": 20.31,
+      "pct_of_total": 0.52
+    },
+    "REQUEST_TOTAL -> ContextAssembly": {
+      "avg_ms": 2.25,
+      "pct_of_total": 0.06
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Deduplication": {
+      "avg_ms": 0.7,
+      "pct_of_total": 0.02
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> SafeContextCap": {
+      "avg_ms": 0.66,
+      "pct_of_total": 0.02
+    },
+    "REQUEST_TOTAL -> PromptConstruction": {
+      "avg_ms": 0.43,
+      "pct_of_total": 0.01
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> ResultFormatting": {
+      "avg_ms": 0.18,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> ResultFormatting": {
+      "avg_ms": 0.18,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> TaskRouting": {
+      "avg_ms": 0.16,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge": {
+      "avg_ms": 0.14,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Ordering": {
+      "avg_ms": 0.14,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> PromptConstruction -> ContextFormatting": {
+      "avg_ms": 0.12,
+      "pct_of_total": 0.0
+    }
+  }
+}

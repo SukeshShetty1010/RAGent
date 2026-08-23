@@ -1,0 +1,25 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "refusal_precision": 1.0,
+  "refusal_recall": 1.0,
+  "refusal_f1": 1.0,
+  "false_answer_rate": 0.0,
+  "over_refusal_rate": 0.0,
+  "confusion": {
+    "tp": 10,
+    "fp": 0,
+    "fn": 0,
+    "tn": 40
+  },
+  "by_merge_state": {
+    "LOCAL_ONLY": {
+      "total": 50,
+      "refused": 10,
+      "should_refuse": 10
+    }
+  },
+  "false_answers": [],
+  "over_refusals": [],
+  "errored_ids": []
+}

@@ -65,6 +65,18 @@ def _normalize(text: str) -> Tuple[str, ...]:
     return tuple(t.lower() for t in _tokenize(text))
 
 
+def _strip_leading_stopwords(tokens: Tuple[str, ...]) -> Tuple[str, ...]:
+    """Drop leading _STOPWORDS tokens ("The", "It", ...). candidate_spans()
+    never seeds a span on a stopword, so a real title that opens with one
+    ("The Legend of Zelda...", "It Takes Two") produces a query span
+    missing that word — the title-prefix check in assess_grounding must
+    skip the same leading run or it can never anchor at position 0."""
+    i = 0
+    while i < len(tokens) and tokens[i] in _STOPWORDS:
+        i += 1
+    return tokens[i:]
+
+
 class CorpusEntityIndex:
     """
     Fail-soft, lazily-loaded set of game titles the corpus anchors.
@@ -216,10 +228,26 @@ class CorpusEntityIndex:
         """
         None: the query names no candidate entity, or the index failed
               to load — the relevance floor is the only signal.
-        True: some candidate span matches a known corpus title, or
-              appears in a retrieved chunk's source_title (covers
-              Game.title drifting from EditorialChunk.source_title).
+        True: some candidate span matches a known corpus title, or is a
+              token-prefix of a retrieved chunk's source_title once that
+              title's own leading stopwords are stripped (covers
+              Game.title drifting from EditorialChunk.source_title, e.g.
+              "Far Cry 5" vs "Far Cry 5 Review — GameSpot", and titles
+              that open with a word candidate_spans() never seeds a span
+              on, e.g. "It Takes Two" or "The Legend of Zelda...").
         False: the query names an entity the corpus does not anchor.
+
+        The source_title fallback is a PREFIX test, not substring
+        containment: span tokens must match the title's tokens starting
+        at position 0 (after stripping the title's leading stopwords —
+        see _strip_leading_stopwords). A raw substring test used to
+        accept g047's search-adjacent evidence ("Beyond Good and Evil 2")
+        as grounded via an unrelated corpus title ("Resident Evil 2")
+        because its fragmented span ('evil', '2') is a substring of that
+        title anywhere; prefix comparison rejects that (('resident',
+        'evil') != ('evil', '2')) while still accepting the drift case
+        above, since a real (post-strip) title always leads with the
+        game name.
         """
         if self._load_failed or not self.known_titles:
             return None
@@ -236,11 +264,16 @@ class CorpusEntityIndex:
         # web-rescued off-corpus queries the gate needs to catch after
         # a re-merge (orchestrator.py's post-web-merge re-gate). Only
         # local corpus chunks count for the title-drift guard.
-        source_titles = " ".join(
-            (c.get("source_title") or "").lower()
+        #
+        # Tokenized per-chunk, not concatenated into one string: a
+        # prefix test needs each title's own token boundary, and joining
+        # titles together would let a span prefix-match across a
+        # boundary that was never a real title.
+        source_title_tokens: List[Tuple[str, ...]] = [
+            _strip_leading_stopwords(_normalize(c.get("source_title") or ""))
             for c in evidence
             if c.get("source_type") != "web"
-        )
+        ]
 
         # Greedy match set: includes the sentence-initial token, so a
         # bare title query ("Far Cry 5 combat") grounds even though its
@@ -258,8 +291,8 @@ class CorpusEntityIndex:
         for span in (*verdict_spans, *match_spans):
             if span in self.known_titles:
                 return True
-            span_text = " ".join(span)
-            if span_text and span_text in source_titles:
+            span_len = len(span)
+            if any(title[:span_len] == span for title in source_title_tokens):
                 return True
 
         return False

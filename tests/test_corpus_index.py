@@ -147,3 +147,78 @@ def test_sentence_initial_unknown_title_still_refuses(index):
         "Grand Theft Auto VI release date", evidence=[]
     )
     assert result is False
+
+
+# --------------------------------------------------------------------
+# T25 (defect B): the source_title fallback must be a token-PREFIX
+# test, not substring containment. A raw substring test let a
+# fragmented span match anywhere inside an unrelated corpus title.
+# --------------------------------------------------------------------
+
+def test_fragmented_span_does_not_substring_match_unrelated_title(index):
+    """
+    Regression for golden-set g047: "Beyond Good and Evil 2" splits
+    into ('good',) and ('evil', '2') because "and" is deliberately not
+    in _CONNECTORS (it separates two different entities in comparison
+    queries). Under the old substring rule, "evil 2" matched inside the
+    retrieved evidence's "Resident Evil 2" title — an entirely
+    different game — falsely grounding the query.
+    """
+    result = index.assess_grounding(
+        "Beyond Good and Evil 2 platforms",
+        evidence=[{"source_title": "Resident Evil 2 (2019 video game) — Release"}],
+    )
+    assert result is False
+
+
+def test_short_span_does_not_match_mid_word(index):
+    """
+    Regression for golden-set g050: a one-token span like ('us',) must
+    not ground just because "us" appears as a substring inside an
+    unrelated title's word (e.g. "Fergus"). Prefix comparison is
+    token-based, so "fergus" can never equal "us".
+    """
+    result = index.assess_grounding(
+        "What did the US do in this game?",
+        evidence=[{"source_title": "Fergus's Discount Adventures"}],
+    )
+    assert result is False
+
+
+def test_title_drift_prefix_match_still_grounds(index):
+    """
+    The fallback still has to do its actual job: a corpus chunk titled
+    "Far Cry 5 Review — GameSpot" (Game.title drifted into an editorial
+    headline) must ground a "Far Cry 5" query, since the span is a real
+    token-prefix of that title.
+    """
+    result = index.assess_grounding(
+        "What platforms can I play Far Cry 5 on?",
+        evidence=[{"source_title": "Far Cry 5 Review — GameSpot"}],
+    )
+    assert result is True
+
+
+def test_title_leading_stopword_still_grounds_via_prefix(index):
+    """
+    Regression: "It Takes Two" and "The Legend of Zelda: ..." open with
+    a word candidate_spans() never seeds a span on ("It"/"The" are
+    stopwords), so the query's span is missing the title's own first
+    token. A naive position-0 prefix test would then never match a
+    real, on-topic title — the prefix must be checked after stripping
+    the title's own leading stopword run.
+    """
+    it_takes_two_index = CorpusEntityIndex.from_titles(["It Takes Two"])
+    result = it_takes_two_index.assess_grounding(
+        "When was It Takes Two released?",
+        evidence=[{"source_title": "It Takes Two — Film"}],
+    )
+    assert result is True
+
+
+def test_exact_known_title_match_unaffected_by_prefix_change(index):
+    single_token_index = CorpusEntityIndex.from_titles(["Control"])
+    result = single_token_index.assess_grounding(
+        "What is the plot of Control?", evidence=[]
+    )
+    assert result is True

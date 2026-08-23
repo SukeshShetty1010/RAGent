@@ -34,12 +34,14 @@ def _floors(gate: RetrievalQualityGate):
     return floors
 
 
-def _chunk(content="Some editorial content about the game.", title="Far Cry 5 Wiki", rerank_score=None, score=0.8, url=None):
+def _chunk(content="Some editorial content about the game.", title="Far Cry 5 Wiki", rerank_score=None, score=0.8, url=None, source_type=None):
     c = {"source_title": title, "content": content, "score": score}
     if rerank_score is not None:
         c["rerank_score"] = rerank_score
     if url is not None:
         c["source_url"] = url
+    if source_type is not None:
+        c["source_type"] = source_type
     return c
 
 
@@ -285,3 +287,67 @@ def test_chunks_dropped_as_noise_metric_increments(gate):
     gate.evaluate(query="What is a good build for this game?", task=TaskType.FACTUAL, chunks=chunks)
     counters = MetricsRegistry.get().generate_report()["counters"]
     assert counters.get("chunks_dropped_as_noise") == 1
+
+
+# --------------------------------------------------------------------
+# T25: the post-web-merge re-gate must not let web evidence promote a
+# verdict the corpus evidence alone did not earn. See orchestrator.py's
+# STEP 5 (ChunkMerge/QualityGateReMerge) — this is what evaluate() sees
+# on that second call, merged local_chunks + web_chunks in one list.
+# --------------------------------------------------------------------
+
+def test_web_score_alone_cannot_lift_empty_to_ok(gate):
+    refuse_floor, weak_floor = _floors(gate)
+    chunks = [
+        _chunk(title="Far Cry 5 Wiki", rerank_score=refuse_floor - 3.0),
+        _chunk(title="Some Web Page", rerank_score=weak_floor + 5.0, source_type="web"),
+    ]
+    report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
+    assert report.status == QualityStatus.QUALITY_EMPTY
+    assert report.corpus_max_relevance == refuse_floor - 3.0
+    assert report.web_max_relevance == weak_floor + 5.0
+
+
+def test_web_score_alone_cannot_lift_weak_to_ok(gate):
+    refuse_floor, weak_floor = _floors(gate)
+    chunks = [
+        _chunk(title="Far Cry 5 Wiki", rerank_score=(refuse_floor + weak_floor) / 2),
+        _chunk(title="Some Web Page", rerank_score=weak_floor + 5.0, source_type="web"),
+    ]
+    report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
+    assert report.status == QualityStatus.QUALITY_WEAK
+
+
+def test_corpus_already_ok_stays_ok_with_web_present(gate):
+    refuse_floor, weak_floor = _floors(gate)
+    chunks = [
+        _chunk(title="Far Cry 5 Wiki", rerank_score=weak_floor + 3.0),
+        _chunk(title="Some Web Page", rerank_score=weak_floor + 5.0, source_type="web"),
+    ]
+    report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
+    assert report.status == QualityStatus.QUALITY_OK
+
+
+def test_pure_web_evidence_is_empty(gate):
+    _, weak_floor = _floors(gate)
+    chunks = [
+        _chunk(title="Some Web Page", rerank_score=weak_floor + 5.0, source_type="web"),
+    ]
+    report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
+    assert report.status == QualityStatus.QUALITY_EMPTY
+    assert report.corpus_max_relevance is None
+
+
+def test_missing_rerank_score_skip_path_wins_over_ceiling(gate):
+    """
+    Reranker unavailable on this call (no chunk anywhere carries
+    rerank_score, corpus or web) must still hit the existing fail-soft
+    OK skip path — the new ceiling logic must never run ahead of it.
+    """
+    chunks = [
+        _chunk(title="Far Cry 5 Wiki", rerank_score=None),
+        _chunk(title="Some Web Page", rerank_score=None, source_type="web"),
+    ]
+    report = gate.evaluate(query="What platforms can I play Far Cry 5 on?", task=TaskType.FACTUAL, chunks=chunks)
+    assert report.status == QualityStatus.QUALITY_OK
+    assert "relevance floor skipped" in report.reason

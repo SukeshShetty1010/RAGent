@@ -36,6 +36,26 @@ class QualityStatus(Enum):
     QUALITY_EMPTY = "quality_empty"
 
 
+# Ordering for the source-scoped ceiling clamp in evaluate(): web
+# evidence may confirm or enrich a verdict the corpus already earned,
+# never promote it. EMPTY < WEAK < OK.
+_STATUS_RANK: Dict[QualityStatus, int] = {
+    QualityStatus.QUALITY_EMPTY: 0,
+    QualityStatus.QUALITY_WEAK: 1,
+    QualityStatus.QUALITY_OK: 2,
+}
+
+
+def _status_for_relevance(
+    max_relevance: float, refuse_floor: float, weak_floor: float
+) -> QualityStatus:
+    if max_relevance < refuse_floor:
+        return QualityStatus.QUALITY_EMPTY
+    elif max_relevance < weak_floor:
+        return QualityStatus.QUALITY_WEAK
+    return QualityStatus.QUALITY_OK
+
+
 @dataclass(frozen=True)
 class QualityReport:
     status: QualityStatus
@@ -48,6 +68,12 @@ class QualityReport:
     # None = query names no entity (relevance floor is the only signal).
     entity_grounded: Optional[bool] = None
     evidence_count: int = 0
+    # Same max, but partitioned by source — corpus (non-web) chunks vs
+    # web chunks. None if that partition contributed no scored chunks.
+    # See T25: the post-web-merge re-gate must never let a web-only
+    # score promote a status the corpus evidence alone did not earn.
+    corpus_max_relevance: Optional[float] = None
+    web_max_relevance: Optional[float] = None
 
 
 # ============================================================
@@ -228,6 +254,8 @@ class RetrievalQualityGate:
         valid_chunks: List[Dict[str, Any]] = []
         scores: List[float] = []
         rerank_scores: List[float] = []
+        corpus_rerank_scores: List[float] = []
+        web_rerank_scores: List[float] = []
         temporal_signal = False
 
         for c in chunks:
@@ -245,7 +273,12 @@ class RetrievalQualityGate:
 
             rerank_score = c.get("rerank_score")
             if rerank_score is not None:
-                rerank_scores.append(float(rerank_score))
+                rs = float(rerank_score)
+                rerank_scores.append(rs)
+                if c.get("source_type") == "web":
+                    web_rerank_scores.append(rs)
+                else:
+                    corpus_rerank_scores.append(rs)
 
             if self._has_temporal_signal(title, content):
                 temporal_signal = True
@@ -303,15 +336,38 @@ class RetrievalQualityGate:
         max_relevance = max(rerank_scores)
         refuse_floor, weak_floor = floors
 
-        if max_relevance < refuse_floor:
-            status = QualityStatus.QUALITY_EMPTY
-            reason = "No evidence above relevance floor"
-        elif max_relevance < weak_floor:
-            status = QualityStatus.QUALITY_WEAK
-            reason = "Evidence below confident-relevance floor"
+        observed_status = _status_for_relevance(max_relevance, refuse_floor, weak_floor)
+
+        corpus_max_relevance = max(corpus_rerank_scores) if corpus_rerank_scores else None
+        web_max_relevance = max(web_rerank_scores) if web_rerank_scores else None
+
+        # Ceiling: what the corpus evidence alone would justify. No
+        # corpus-scored chunk at all (pure web, or a merged call whose
+        # corpus chunks carried no rerank_score) means the corpus signal
+        # is absent, not neutral — ceiling is QUALITY_EMPTY. When there
+        # is no web evidence in this call, corpus_max_relevance ==
+        # max_relevance and the ceiling trivially equals observed_status,
+        # so pre-web-only evaluate() calls are unchanged by construction.
+        if corpus_max_relevance is not None:
+            ceiling_status = _status_for_relevance(corpus_max_relevance, refuse_floor, weak_floor)
         else:
-            status = QualityStatus.QUALITY_OK
-            reason = "Evidence sufficient for LLM reasoning"
+            ceiling_status = QualityStatus.QUALITY_EMPTY
+
+        status = min(observed_status, ceiling_status, key=lambda s: _STATUS_RANK[s])
+
+        if status is observed_status:
+            reason = {
+                QualityStatus.QUALITY_EMPTY: "No evidence above relevance floor",
+                QualityStatus.QUALITY_WEAK: "Evidence below confident-relevance floor",
+                QualityStatus.QUALITY_OK: "Evidence sufficient for LLM reasoning",
+            }[status]
+        else:
+            MetricsRegistry.get().inc("web_relevance_clamped")
+            reason = (
+                f"Web evidence alone scored {observed_status.name}, but corpus "
+                f"evidence only supports {ceiling_status.name} — web cannot "
+                f"promote the verdict past what the corpus earned"
+            )
 
         report = QualityReport(
             status=status,
@@ -321,6 +377,8 @@ class RetrievalQualityGate:
             max_relevance=max_relevance,
             entity_grounded=entity_grounded,
             evidence_count=len(valid_chunks),
+            corpus_max_relevance=corpus_max_relevance,
+            web_max_relevance=web_max_relevance,
         )
         self._log(report)
         return report
