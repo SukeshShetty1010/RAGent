@@ -1,0 +1,31 @@
+name: Tests
+
+# Runs the hermetic `-m unit` subset (see pytest.ini: "no network, no
+# credentials, no external services") on every push/PR against main.
+# No repo secrets needed here on purpose -- that's the whole point of
+# the `unit` marker. The live-only tests (real Qdrant/Gemini/Groq calls,
+# `-m live` or unmarked) stay a manual/local check, same as before this
+# workflow existed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run hermetic unit tests
+        run: pytest tests/ -m unit -q
