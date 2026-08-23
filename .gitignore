@@ -76,3 +76,6 @@ evaluation/results/.ragas_checkpoint_*.jsonl
 
 # ---------- Migration checkpoint state (local, resumable, not repo content) ----------
 .migration_checkpoint_*.json
+
+# ---------- HF model cache (large blobs, regenerated locally) ----------
+hf_cache/
