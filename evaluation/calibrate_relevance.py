@@ -75,6 +75,40 @@ def _f1_at_threshold(records: List[Dict[str, Any]], threshold: float) -> Dict[st
     return {"threshold": threshold, "precision": precision, "recall": recall, "f1": f1, "tp": tp, "fp": fp, "fn": fn, "tn": tn}
 
 
+def _floor_candidates(answerable: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """WEAK_FLOOR candidates: every midpoint between adjacent answerable
+    max_relevance values, plus the WEAK% each midpoint would produce
+    among the answerable group.
+
+    quality_gate.py's derivation methodology (see its _FLOORS comment)
+    is "a real gap in the answerable distribution, targeting 10-20%
+    WEAK and 0 EMPTY" — done by hand off the raw per_query array for
+    every provider calibrated so far. This makes that derivation
+    reproducible instead of re-derived per provider. REFUSE_FLOOR is
+    not candidate-generated the same way — it is pinned strictly below
+    the answerable minimum (see answerable_relevance.min above), not
+    chosen from a gap.
+    """
+    values = sorted(r["max_relevance"] for r in answerable)
+    if len(values) < 2:
+        return []
+    n = len(values)
+    candidates = []
+    for lo, hi in zip(values, values[1:]):
+        if hi == lo:
+            continue
+        midpoint = (lo + hi) / 2
+        weak_count = sum(1 for v in values if v < midpoint)
+        candidates.append(
+            {
+                "midpoint": round(midpoint, 6),
+                "gap": round(hi - lo, 6),
+                "answerable_weak_pct": round(100 * weak_count / n, 2),
+            }
+        )
+    return candidates
+
+
 def _best_split(records: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
     candidates = sorted({r["max_relevance"] for r in records})
     if not candidates:
@@ -179,6 +213,7 @@ def calibrate(golden_set: List[Dict[str, Any]]) -> Dict[str, Any]:
         "should_refuse_relevance": _summarize(should_refuse_group),
         "answerable_relevance": _summarize(answerable_group),
         "best_split_relevance_only": best_split,
+        "weak_floor_candidates": _floor_candidates(answerable_group),
         "entity_grounding_on_unanswerable": {
             "false": sum(1 for r in should_refuse_group if r["entity_grounded"] is False),
             "none": sum(1 for r in should_refuse_group if r["entity_grounded"] is None),

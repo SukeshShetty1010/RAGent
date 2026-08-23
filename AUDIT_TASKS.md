@@ -2,7 +2,7 @@
 
 **Original audit:** 2026-08-18 — every module on the request path (`api/` → `engine/` → `agent/` → `retriever/` → `llm/` → `utils/` → `frontend/`), plus ingest, evaluation, config, Docker, and CI, read end to end. Claims about live behaviour are measured against the real Qdrant corpus and the real `.env`, never inferred.
 
-**Status (2026-08-23):** T1–T23, T25, T28, T33 closed. T24, T26, T27, T29–T32 open, raised while finishing T17. Test suite `285 passed, 3 skipped` full run including `live`-marked tests; `274 passed, 3 skipped` on the hermetic `-m unit` subset.
+**Status (2026-08-23):** T1–T25, T28, T33 closed. T26, T27, T29–T32 open, raised while finishing T17. Test suite `285 passed, 3 skipped` full run including `live`-marked tests; `274 passed, 3 skipped` on the hermetic `-m unit` subset.
 
 **How this file is kept:** a task collapses to one line in the Closed table as soon as its fix ships, because the durable knowledge from each fix lives in the code comments and regression tests that fix added — not here. The full per-task analysis and the dated status updates for T1–T23 remain in git history (`git log -p -- AUDIT_TASKS.md`). Open tasks keep their full evidence until they are fixed.
 
@@ -10,7 +10,6 @@
 
 ## Open tasks
 
-- [ ] **T24** — Recalibrate the `local`/`hfspace` relevance floors; they are still E5-era (§24)
 - [ ] **T26** — Measure the real-corpus noise drop rate that §18 left unrun (§26)
 - [ ] **T27** — `flagship.md` publishes superseded evaluation numbers (§27)
 - [ ] **T29** — `requirements-dev.txt` is unpinned and does not install cleanly (§29)
@@ -20,27 +19,6 @@
 
 ---
 
-## §24 — The `local`/`hfspace` relevance floors are still calibrated against the E5 corpus
-
-**Severity:** High — a latent, silent failure of the honesty gate, armed by a one-line env change.
-**Files:** `retriever/quality_gate.py:181-187`; `evaluation/results/relevance_calibration_2026-08-12.json`
-
-```python
-_FLOORS: Dict[str, Optional[Tuple[float, float]]] = {
-    "local": (-3.0, 2.0),    # ms-marco raw logits, calibrated 2026-08-12
-    "hfspace": (-3.0, 2.0),  # same model, same scale — shares that calibration
-    "cloudflare": (0.02, 0.90),  # bge-reranker-base 0..1, calibrated 2026-08-21
-    "voyage": None,          # 0..1 normalized — needs its own calibration
-}
-```
-
-Only `cloudflare` was recalibrated after the corpus moved to Gemini embeddings (T1/T3). The `local` and `hfspace` entries date from 2026-08-12, against the E5 corpus. T17's own analysis already stated the consequence and it still holds: the floors threshold the cross-encoder's output, the cross-encoder scores whatever retrieval surfaces, and retrieval now surfaces different chunks — so **reverting `RERANKER_PROVIDER=local` today would not restore a correctly-calibrated gate, it would arm a wrongly-calibrated one.** That revert is exactly what a Cloudflare outage invites.
-
-`test_active_provider_floors_are_calibrated` does not catch this: it asserts the active provider's entry is not `None`, and a stale entry is not `None`.
-
-**Fix:** run `evaluation/calibrate_relevance.py` with `RERANKER_PROVIDER=local`, derive both floors the way T1 derived Cloudflare's (refuse floor strictly below the answerable group's minimum; weak floor in a genuine gap, targeting 10–20% `QUALITY_WEAK`), and update the two entries plus their comments. `hfspace` may keep sharing `local`'s numbers only while the model and `fastembed` pin match — that is what makes it valid, not convenience. Then strengthen the meta-test to assert a *calibration date* per provider, so "present but stale" stops passing as "calibrated".
-
----
 
 ## §26 — The real-corpus noise drop rate §18 called for was never measured
 
@@ -142,7 +120,8 @@ Full analysis in git history (`git log -p -- AUDIT_TASKS.md`); the durable const
 | T20 | Harden `_rerank()` against a short score list | 08-19 | Length check in `_rerank_scores()`, the shared dispatch point; scoring and mutation are separate phases |
 | T21 | Fix stale comments and docs describing retired infrastructure | 08-21 | 5 claims fixed; 3 pinned by regression tests |
 | T22 | Drop the unused `transformers` dependency | 08-21 | Removed; chunker units renamed words-not-tokens, docs corrected (~300 words, not "500 tokens") |
-| T23 | Invert the two "uncalibrated placeholder" tests once T1 lands | 08-21 | Inverted for Cloudflare; `test_active_provider_floors_are_calibrated` added (see **§24** for its blind spot) |
+| T23 | Invert the two "uncalibrated placeholder" tests once T1 lands | 08-21 | Inverted for Cloudflare; `test_active_provider_floors_are_calibrated` added (see **T24** for its blind spot) |
+| T24 | `local`/`hfspace` relevance floors were still calibrated against the pre-migration E5 corpus | 08-23 | Recalibrated via `evaluation/calibrate_relevance.py` against the fully-migrated corpus (`evaluation/results/relevance_calibration_local_2026-08-23.json`); distribution matched the old run within rounding, so `_FLOORS["local"]`/`["hfspace"]` stayed `(-3.0, 2.0)`, now re-validated rather than merely carried forward. `test_active_provider_floors_are_calibrated` rewritten to check every provider's floors against its recorded calibration artifact (new `_CALIBRATION` dict) and reject one generated before `CORPUS_EMBEDDING_MIGRATION_DATE` — "present but stale" now fails instead of passing |
 | T25 | Web augmentation was overturning justified refusals | 08-23 | Source-scoped ceiling in `quality_gate.evaluate()`: web `rerank_score`s can no longer promote a status the corpus-only scores didn't already earn (`min(observed, ceiling)`, new `corpus_max_relevance`/`web_max_relevance` fields). Found a second, independent defect during investigation — see **T33** |
 | T28 | No cost/latency artifact for the corpus-only run | 08-23 | `cost_latency_2026-08-23_corpusonly.json` produced against the fresh post-T25/T33 corpus-only run (not the stale pre-fix `08-21` file T28 originally named — a same-session re-run made that the more useful baseline) |
 | T33 | `assess_grounding`'s source_title fallback grounded off-corpus entities via raw substring containment | 08-23 | Filed and closed same session as T25's second root cause. Replaced with a token-prefix test against each chunk's own tokenized title (`retriever/corpus_index.py`), stripping the title's leading stopwords first so titles like "It Takes Two"/"The Legend of Zelda..." — which a query span never seeds on — still anchor at position 0. Fixed g050 (`"US"` matching mid-word); g047 turned out to already ground correctly (real corpus Game identity) and is refused by T25's ceiling instead |

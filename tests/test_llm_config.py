@@ -5,8 +5,11 @@ Unit tests for LLM configuration consistency (Gemini primary, Groq
 fallback). Fully local — no network calls, no API keys required.
 """
 
+import json
 import pathlib
 import re
+from datetime import date
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -119,12 +122,23 @@ def test_cloudflare_floors_are_calibrated():
 
 
 def test_active_provider_floors_are_calibrated():
-    """§23: the honesty gate must not be silently switched off for
-    whichever provider is actually running. Deliberately red under
-    RERANKER_PROVIDER=voyage (still uncalibrated) — that failure IS the
-    signal this test exists to raise."""
+    """T24/§23: the honesty gate must not be silently switched off, or
+    silently thresholding a STALE calibration, for whichever provider
+    is actually running.
+
+    Checks every provider with non-None floors against the calibration
+    artifact RetrievalQualityGate._CALIBRATION records for it, rather
+    than only asserting "is not None" — a stale artifact (measuring a
+    corpus that no longer exists post-Gemini-embedding-migration) is
+    not None either, and used to pass this test while describing a
+    distribution that isn't there anymore. That was T24's bug.
+    Deliberately red if a provider's artifact predates
+    RetrievalQualityGate.CORPUS_EMBEDDING_MIGRATION_DATE, or if its
+    floors contradict what its own artifact measured — those failures
+    ARE the signal this test exists to raise. Still deliberately red
+    under RERANKER_PROVIDER=voyage (still uncalibrated)."""
     from retriever.quality_gate import RetrievalQualityGate
-    from retriever.reranker_provider import resolve_reranker_provider
+    from retriever.reranker_provider import resolve_reranker_provider, VALID_PROVIDERS
 
     active = resolve_reranker_provider()
     assert RetrievalQualityGate._FLOORS[active] is not None, (
@@ -132,6 +146,62 @@ def test_active_provider_floors_are_calibrated():
         "the honesty gate silently no-ops for every request. Run "
         "evaluation/calibrate_relevance.py and set _FLOORS accordingly."
     )
+
+    results_dir = REPO_ROOT / "evaluation" / "results"
+
+    for provider in VALID_PROVIDERS:
+        floors = RetrievalQualityGate._FLOORS[provider]
+        if floors is None:
+            continue
+        refuse_floor, weak_floor = floors
+
+        artifact_name = RetrievalQualityGate._CALIBRATION.get(provider)
+        assert artifact_name, (
+            f"_FLOORS[{provider!r}] = {floors!r} but _CALIBRATION[{provider!r}] "
+            "is unset — floors with no recorded artifact cannot be verified as current."
+        )
+        artifact_path = results_dir / artifact_name
+        assert artifact_path.exists(), (
+            f"_CALIBRATION[{provider!r}] names {artifact_name!r}, which does not "
+            f"exist under {results_dir} — floors point at a missing calibration run."
+        )
+
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+        generated = date.fromisoformat(artifact["generated"])
+        assert generated >= RetrievalQualityGate.CORPUS_EMBEDDING_MIGRATION_DATE, (
+            f"{artifact_name} was generated {generated}, before the corpus embedding "
+            f"migration ({RetrievalQualityGate.CORPUS_EMBEDDING_MIGRATION_DATE}) — it "
+            "measured a different corpus and no longer describes what the reranker "
+            "scores today. Re-run evaluation/calibrate_relevance.py."
+        )
+
+        # The artifact must have been produced by this provider itself,
+        # or by whichever provider it shares an artifact with (e.g.
+        # hfspace -> local) — resolved via _CALIBRATION identity rather
+        # than a hardcoded pair, so a future shared-model provider
+        # needs no new special case here.
+        owner = next(
+            p for p, name in RetrievalQualityGate._CALIBRATION.items()
+            if name == artifact_name
+        )
+        assert artifact["reranker_provider"] in (provider, owner), (
+            f"{artifact_name} was generated for provider "
+            f"{artifact['reranker_provider']!r}, not {provider!r} or its shared "
+            f"owner {owner!r}."
+        )
+
+        answerable = artifact["answerable_relevance"]
+        assert refuse_floor < answerable["min"], (
+            f"_FLOORS[{provider!r}].refuse_floor={refuse_floor} is not strictly "
+            f"below {artifact_name}'s answerable minimum ({answerable['min']}) — "
+            "it would false-refuse evidence its own calibration run scored as answerable."
+        )
+        assert refuse_floor < weak_floor <= answerable["max"], (
+            f"_FLOORS[{provider!r}]=({refuse_floor}, {weak_floor}) is inconsistent "
+            f"with {artifact_name}'s answerable range (min={answerable['min']}, "
+            f"max={answerable['max']})."
+        )
 
 
 def test_hfspace_shares_local_floors():

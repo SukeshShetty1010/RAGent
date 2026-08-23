@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from typing import List, Dict, Any, Optional, Set, Tuple
 
@@ -138,21 +139,37 @@ class RetrievalQualityGate:
     #
     # ms-marco-MiniLM-L-6-v2 turns out to apply Identity, not Sigmoid
     # (raw logits, roughly -8..+11 on this corpus) — confirmed by
-    # evaluation/calibrate_relevance.py, NOT assumed. See
-    # evaluation/results/relevance_calibration_2026-08-12.json:
-    #   should_refuse group max_relevance: min=-7.97 max=4.87 mean=-2.38
-    #   answerable group max_relevance:    min=-2.74 max=10.77 mean=6.42
-    # REFUSE_FLOOR sits in the gap between the answerable group's
-    # minimum (-2.74, "Rust") and the lowest genuinely-unanswerable
-    # score that isn't already caught by entity grounding (-4.32,
-    # g050). One unanswerable query (g047, "Beyond Good and Evil 2",
-    # max_relevance=1.07) has a real corpus Game identity despite no
-    # editorial content — entity_grounded=True there, and no floor
-    # can separate it from legitimately-weak answerable evidence like
-    # RimWorld's 0.02 without causing over-refusal, so it lands WEAK
-    # (partial answer, not refused). That is the honest bound of a
-    # single scalar signal; see flagship.md Phase 3.5 for the accepted
-    # miss.
+    # evaluation/calibrate_relevance.py, NOT assumed. Recalibrated
+    # 2026-08-23 against the fully-migrated (Gemini-embedded) corpus —
+    # see evaluation/results/relevance_calibration_local_2026-08-23.json:
+    #   should_refuse group max_relevance: min=-7.97 max=4.87 mean=-2.35
+    #   answerable group max_relevance:    min=-2.74 max=10.77 mean=6.41
+    # Distribution is within rounding of the pre-migration
+    # relevance_calibration_2026-08-12.json run — the migration changed
+    # which chunks retrieval surfaces, but not the score range the
+    # cross-encoder assigns them — so REFUSE_FLOOR/WEAK_FLOOR are
+    # unchanged, now re-validated rather than merely carried forward.
+    # REFUSE_FLOOR=-3.0 sits strictly below the answerable group's
+    # minimum (-2.74, "Rust"): zero false refusals on the golden set.
+    # WEAK_FLOOR=2.0 lands 5/40 (12.5%) of answerable golden queries
+    # WEAK and 0 EMPTY — inside the 10-20% target band, sitting in the
+    # real (if narrow, ~0.2 wide) gap between 1.94 and 2.15 rather than
+    # an arbitrary percentile.
+    #
+    # T33 (AUDIT_TASKS.md) replaced entity grounding's title fallback
+    # from raw substring containment to a token-prefix test, which
+    # changes what this floor is actually backstopping: in the
+    # 2026-08-23 run, 9 of the 10 should_refuse queries are caught by
+    # entity_grounded=False alone (evaluate() short-circuits to
+    # QUALITY_EMPTY before the relevance floor is even consulted, see
+    # below) — including g047 ("Beyond Good and Evil 2"), which the
+    # pre-T33 substring match had falsely grounded via a fragment like
+    # "evil 2" matching an unrelated title. That query now correctly
+    # reaches QUALITY_EMPTY through entity grounding rather than
+    # sliding through as a WEAK floor miss. The relevance floor's
+    # remaining job is the one should_refuse query with no entity
+    # verdict at all (g049, entity_grounded=None, max_relevance=-7.97,
+    # "chocolate chip cookies") — REFUSE_FLOOR is what catches that one.
     #
     # The floors are PROVIDER-SCOPED because the reranker backends do
     # not all share a score scale. What decides the entry is the MODEL,
@@ -206,10 +223,29 @@ class RetrievalQualityGate:
 
     _FLOORS: Dict[str, Optional[Tuple[float, float]]] = {
         # provider: (REFUSE_FLOOR, WEAK_FLOOR)
-        "local": (-3.0, 2.0),    # ms-marco raw logits, calibrated 2026-08-12
+        "local": (-3.0, 2.0),    # ms-marco raw logits, calibrated 2026-08-23
         "hfspace": (-3.0, 2.0),  # same model, same scale — shares that calibration
         "cloudflare": (0.02, 0.90),  # bge-reranker-base 0..1, calibrated 2026-08-21
         "voyage": None,          # 0..1 normalized — needs its own calibration
+    }
+
+    # The corpus was fully re-embedded into Gemini's vector space by
+    # this date (AUDIT_TASKS.md T1/T3). A calibration artifact produced
+    # before it measured a different corpus and no longer describes
+    # what the reranker scores today, even if the provider name and
+    # floor values happen to look unchanged (see "local" above).
+    CORPUS_EMBEDDING_MIGRATION_DATE = date(2026, 8, 21)
+
+    # Which calibration artifact each provider's floors are backed by.
+    # Providers sharing a model share an artifact (hfspace -> local) —
+    # that is what makes the sharing in _FLOORS valid in the first
+    # place. None means "no calibrated floors" (see _FLOORS["voyage"])
+    # and has no artifact to point to.
+    _CALIBRATION: Dict[str, Optional[str]] = {
+        "local": "relevance_calibration_local_2026-08-23.json",
+        "hfspace": "relevance_calibration_local_2026-08-23.json",  # same model
+        "cloudflare": "relevance_calibration_cloudflare_2026-08-21.json",
+        "voyage": None,
     }
 
     # --------------------------------------------------------
