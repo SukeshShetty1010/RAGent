@@ -1,0 +1,224 @@
+{
+  "generated": "2026-08-23",
+  "collection": "EditorialChunk",
+  "total_chunks_scanned": 2791,
+  "qdrant_total_count": 2791,
+  "keyword_set": [
+    "bundle",
+    "buy",
+    "community",
+    "deal",
+    "discount",
+    "discussion",
+    "forum",
+    "price",
+    "purchase",
+    "sale",
+    "sales",
+    "store",
+    "thread"
+  ],
+  "content_noise_density_threshold": 3,
+  "summary": {
+    "old_rule_drop_count": 558,
+    "old_rule_drop_pct": 19.9928,
+    "new_rule_drop_count": 122,
+    "new_rule_drop_pct": 4.3712,
+    "new_rule_by_reason": {
+      "source_match": 107,
+      "content_density": 15
+    },
+    "recovered_by_t18": {
+      "count": 436,
+      "pct_of_total": 15.6216,
+      "description": "old=True, new=False -- chunks T18 saved"
+    },
+    "new_only_drops": {
+      "count": 0,
+      "pct_of_total": 0.0,
+      "description": "new=True, old=False -- url-only match, old rule never saw url"
+    },
+    "both_drop_count": 122,
+    "both_keep_count": 2233
+  },
+  "per_keyword": [
+    {
+      "keyword": "bundle",
+      "old_rule_drop_count": 27,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 3
+    },
+    {
+      "keyword": "buy",
+      "old_rule_drop_count": 42,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 0
+    },
+    {
+      "keyword": "community",
+      "old_rule_drop_count": 139,
+      "new_rule_source_match_count": 6,
+      "new_rule_content_density_count": 6
+    },
+    {
+      "keyword": "deal",
+      "old_rule_drop_count": 60,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 3
+    },
+    {
+      "keyword": "discount",
+      "old_rule_drop_count": 8,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 2
+    },
+    {
+      "keyword": "discussion",
+      "old_rule_drop_count": 9,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 0
+    },
+    {
+      "keyword": "forum",
+      "old_rule_drop_count": 4,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 2
+    },
+    {
+      "keyword": "price",
+      "old_rule_drop_count": 36,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 6
+    },
+    {
+      "keyword": "purchase",
+      "old_rule_drop_count": 100,
+      "new_rule_source_match_count": 1,
+      "new_rule_content_density_count": 11
+    },
+    {
+      "keyword": "sale",
+      "old_rule_drop_count": 29,
+      "new_rule_source_match_count": 3,
+      "new_rule_content_density_count": 4
+    },
+    {
+      "keyword": "sales",
+      "old_rule_drop_count": 155,
+      "new_rule_source_match_count": 97,
+      "new_rule_content_density_count": 0
+    },
+    {
+      "keyword": "store",
+      "old_rule_drop_count": 71,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 9
+    },
+    {
+      "keyword": "thread",
+      "old_rule_drop_count": 6,
+      "new_rule_source_match_count": 0,
+      "new_rule_content_density_count": 0
+    }
+  ],
+  "samples": {
+    "recovered_by_t18": [
+      {
+        "id": "00b6ee26-a65b-5c39-976a-4da2cb7dfbfc",
+        "title": "Valheim — About",
+        "url": "",
+        "content_snippet": "Valheim — About\n\nstamina and regeneration buffs depending on what foods you consume. Intuitive crafting where recipes are discovered as you explore the world, and pick up new resources and ingredients"
+      },
+      {
+        "id": "0139c435-6b66-56a4-aa3d-63fde147cd4b",
+        "title": "Persona 5 — Music",
+        "url": "",
+        "content_snippet": "Persona 5 — Music\n\nThe score was composed, performed, and produced by series sound director Shoji Meguro. Further contributions, among other general sound design, was handled by Toshiki Konishi, Kenic"
+      },
+      {
+        "id": "0170d012-1458-5cc6-a80f-5a4ac28ad666",
+        "title": "Red Dead Redemption 2 — Development",
+        "url": "",
+        "content_snippet": "Red Dead Redemption 2 — Development\n\nor force any employee to work as long as was stated, and those staying late were powered by their passion. However, other Rockstar employees argued Houser's statem"
+      },
+      {
+        "id": "02081f22-18e3-5c6f-b27b-60b006f07c76",
+        "title": "Animal Crossing: New Horizons — Gameplay",
+        "url": "",
+        "content_snippet": "Animal Crossing: New Horizons — Gameplay\n\nAs in previous Animal Crossing games, New Horizons is a life simulation game that is played in real time. Weather also adjusts to the seasons of the Northern "
+      },
+      {
+        "id": "0221b45c-7efc-56ac-9c78-e974fa6def60",
+        "title": "Minecraft — Controversies",
+        "url": "",
+        "content_snippet": "Minecraft — Controversies\n\nMinecraft has been subject to several notable controversies. In June 2014, Mojang announced that it would begin enforcing the portion of Minecraft's end-user license agreeme"
+      },
+      {
+        "id": "025e2cee-73b1-5e5c-9a01-5bf281a65f66",
+        "title": "Ghost of Tsushima — Critical reception",
+        "url": "",
+        "content_snippet": "Ghost of Tsushima — Critical reception\n\n2020, the game's community came together and created a crowdfunding campaign raising over 27 million yen for repairs."
+      },
+      {
+        "id": "02700b0c-dd1b-5722-83af-2a604da947ab",
+        "title": "Doom Eternal — Release",
+        "url": "",
+        "content_snippet": "Doom Eternal — Release\n\nDoom Eternal was announced by publisher Bethesda Softworks at E3 2018. Originally set to be released for Windows, PlayStation 5, Xbox One and Stadia on November 22, 2019, the g"
+      },
+      {
+        "id": "028cd23b-5b65-57a3-98fe-2465f8b78f39",
+        "title": "No Man's Sky — Subsequent updates",
+        "url": "",
+        "content_snippet": "No Man's Sky — Subsequent updates\n\nthat the game fell into upon its initial release. To avoid any repeat of the mistakes from the game's launch, nearly all subsequent major updates were only preannoun"
+      },
+      {
+        "id": "02b274e7-bbb5-57f6-af33-ba16d853c6e1",
+        "title": "Forza Horizon 5 — Commercial performance",
+        "url": "",
+        "content_snippet": "Forza Horizon 5 — Commercial performance\n\nBefore the game's release on 9 November, over 1.2 million players had accessed the game by buying either the premium edition of the game or the premium add-on"
+      },
+      {
+        "id": "02f772dc-6d1a-5a47-a1f2-b8789e77bae4",
+        "title": "Genshin Impact — Commercial performance",
+        "url": "",
+        "content_snippet": "Genshin Impact — Commercial performance\n\nOn mobile platforms, Genshin Impact saw 23 million downloads and grossed approximately US$60 million within a week of its release. Within two weeks, revenue ex"
+      },
+      {
+        "id": "03057297-916d-5295-9637-70dd68150034",
+        "title": "Minecraft — Java Edition",
+        "url": "",
+        "content_snippet": "Minecraft — Java Edition\n\n1.0.0, was officially released on 18 November 2011, adding several changes, including the End and the Ender Dragon. Version 1.3, released on 1 August 2012, introduced village"
+      },
+      {
+        "id": "032a43e8-5516-5ffd-9b36-bf6003a7c904",
+        "title": "Apex Legends — Controversies",
+        "url": "",
+        "content_snippet": "Apex Legends — Controversies\n\nwebsite that purportedly was trying to \"Save Titanfall\". The site and messages spoke of the weak security that both Titanfall and Titanfall 2 servers had, leading to the "
+      },
+      {
+        "id": "03517813-21a7-52cc-91fc-f41427f8e815",
+        "title": "FINAL FANTASY VII REMAKE INTERGRADE — Description",
+        "url": "",
+        "content_snippet": "FINAL FANTASY VII REMAKE INTERGRADE — Description\n\nFINAL FANTASY VII REMAKE & REBIRTH Twin Pack This product is a bundle containing FINAL FANTASY VII REMAKE INTERGRADE and FINAL FANTASY VII REBIRTH. F"
+      },
+      {
+        "id": "0362e8ee-0d03-54a5-b322-d6205d6bf16e",
+        "title": "Call of Duty — Call of Duty: Modern Warfare",
+        "url": "",
+        "content_snippet": "Call of Duty — Call of Duty: Modern Warfare\n\nCall of Duty: Modern Warfare is the sixteenth entry in the Call of Duty series and is also a reboot of the Modern Warfare sub-series. The story has been de"
+      },
+      {
+        "id": "038d26b5-d35b-523a-9cd7-062e22c1d9f1",
+        "title": "Spider-Man — Overview",
+        "url": "",
+        "content_snippet": "Spider-Man — Overview\n\nSpider-Man is a superhero in American comic books published by Marvel Comics. Created by writer-editor Stan Lee and artist Steve Ditko, he first appeared in the anthology comic "
+      }
+    ],
+    "new_only_drops": []
+  },
+  "sanity_checks": {
+    "scanned_matches_qdrant_count": true,
+    "both_drop_plus_recovered_equals_old_drop": true,
+    "both_drop_plus_new_only_equals_new_drop": true
+  }
+}

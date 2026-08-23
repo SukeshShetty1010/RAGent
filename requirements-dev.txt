@@ -13,7 +13,11 @@ colorama                        # used by tests/verify_engine.py
 # httpx is already pinned in requirements.txt; fastapi.testclient uses it directly.
 
 # Phase 3 — offline evaluation only (never imported on the Render request path)
-ragas
+ragas==0.4.3
+# ragas/llms/base.py unconditionally imports langchain_community.chat_models.vertexai,
+# a module langchain-community removed in its 0.4.x split. Unpinned installs resolve
+# both to latest and the import fails at ragas import time. Diagnosed 2026-08-21.
+langchain-community<0.4
 datasets
 langchain-groq
 langchain-openai                 # Gemini RAGAS judge backend (Gemini is OpenAI-compatible)

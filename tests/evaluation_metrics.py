@@ -27,8 +27,20 @@ from agent.output_validator import CITATION_PATTERN
 # Internal Utilities
 # ============================================================
 
+# See retriever/corpus_index.py's _APOSTROPHE_VARIANTS for the root
+# cause (AUDIT_TASKS.md T34): eval/KPI fixtures write curly apostrophes
+# (U+2019) while the real corpus stores ASCII ones (U+0027), so a raw
+# substring/equality comparison never matches across the two.
+_APOSTROPHE_VARIANTS = str.maketrans({
+    "‘": "'",
+    "’": "'",
+    "‛": "'",
+    "ʼ": "'",
+})
+
+
 def _normalize(text: str) -> str:
-    return text.lower().strip()
+    return text.translate(_APOSTROPHE_VARIANTS).lower().strip()
 
 
 def _resolve_entity(chunk: Dict[str, Any]) -> str | None:
@@ -39,6 +51,17 @@ def _resolve_entity(chunk: Dict[str, Any]) -> str | None:
         "source_title",
     ):
         value = chunk.get(key)
+        # agent/tools/web_search.py sets retrieval_context="fallback" as a
+        # merge-state marker on web-augmented evidence, not an entity name.
+        # Left unguarded, that sentinel shadows the chunk's real
+        # source_title for every web-sourced chunk, so a temporal query
+        # whose evidence is entirely web-augmented (e.g. AUDIT_TASKS.md
+        # T34's "Latest patch notes for Assassin's Creed Valhalla") always
+        # resolved to the literal string "fallback" and never matched any
+        # expected entity — confirmed live, independent of the curly-
+        # apostrophe fix above.
+        if key == "retrieval_context" and value == "fallback":
+            continue
         if isinstance(value, str) and value.strip():
             return _normalize(value)
     return None

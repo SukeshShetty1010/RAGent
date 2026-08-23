@@ -222,3 +222,35 @@ def test_exact_known_title_match_unaffected_by_prefix_change(index):
         "What is the plot of Control?", evidence=[]
     )
     assert result is True
+
+
+# --------------------------------------------------------------------
+# T34: curly-apostrophe entity grounding regression.
+# --------------------------------------------------------------------
+
+def test_curly_apostrophe_query_matches_straight_apostrophe_title(index):
+    """
+    Regression for AUDIT_TASKS §34 (T34): "Assassin's Creed Valhalla"
+    written with a curly right-quote (U+2019, as it appears literally in
+    tests/regression_suite.py's BUG-003 case) failed to ground against
+    the corpus's real ASCII-apostrophe title, flipping BUG-003 from FULL
+    to INSUFFICIENT even though the corpus held real, on-topic Valhalla
+    evidence. Confirmed live: the tokenizer split "Assassin's" into
+    two tokens ("assassin", "s") instead of one ("assassin's",), which
+    never matched the corpus title's token sequence.
+    """
+    result = index.assess_grounding(
+        "Latest update for Assassin’s Creed Valhalla", evidence=[]
+    )
+    assert result is True
+
+
+def test_curly_apostrophe_source_title_fallback_still_grounds(index):
+    """Same fix, exercised through the source_title prefix-fallback path
+    (the branch that actually fires in production, since real
+    EditorialChunk source_titles carry the ASCII apostrophe)."""
+    result = index.assess_grounding(
+        "Latest update for Assassin’s Creed Valhalla",
+        evidence=[{"source_title": "Assassin's Creed Valhalla — Gameplay"}],
+    )
+    assert result is True

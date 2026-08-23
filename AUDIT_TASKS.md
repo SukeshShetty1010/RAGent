@@ -2,7 +2,7 @@
 
 **Original audit:** 2026-08-18 — every module on the request path (`api/` → `engine/` → `agent/` → `retriever/` → `llm/` → `utils/` → `frontend/`), plus ingest, evaluation, config, Docker, and CI, read end to end. Claims about live behaviour are measured against the real Qdrant corpus and the real `.env`, never inferred.
 
-**Status (2026-08-23):** T1–T25, T28, T33 closed. T26, T27, T29–T32 open, raised while finishing T17. Test suite `285 passed, 3 skipped` full run including `live`-marked tests; `274 passed, 3 skipped` on the hermetic `-m unit` subset.
+**Status (2026-08-23):** T1–T35 closed, no open tasks. T30's re-run (`evaluation/run_kpi_suite.py`) surfaced T34; fixing T34 surfaced a second, independent defect filed as T35. Test suite `283 passed, 3 skipped` on the hermetic `-m unit` subset (up from 274 — 6 new regression tests from T34's fix, 3 more from T35's).
 
 **How this file is kept:** a task collapses to one line in the Closed table as soon as its fix ships, because the durable knowledge from each fix lives in the code comments and regression tests that fix added — not here. The full per-task analysis and the dated status updates for T1–T23 remain in git history (`git log -p -- AUDIT_TASKS.md`). Open tasks keep their full evidence until they are fixed.
 
@@ -10,85 +10,7 @@
 
 ## Open tasks
 
-- [ ] **T26** — Measure the real-corpus noise drop rate that §18 left unrun (§26)
-- [ ] **T27** — `flagship.md` publishes superseded evaluation numbers (§27)
-- [ ] **T29** — `requirements-dev.txt` is unpinned and does not install cleanly (§29)
-- [ ] **T30** — The `KPI/` suite has never been re-run against the migrated corpus (§30)
-- [ ] **T31** — `ablation.py --limit` overwrites the real results file (§31)
-- [ ] **T32** — `--rescore-modes` can only target today's results file (§32)
-
----
-
-
-## §26 — The real-corpus noise drop rate §18 called for was never measured
-
-**Severity:** Medium — an unverified assumption sitting under a live filter.
-**File:** `retriever/quality_gate.py` (`SOURCE_NOISE_KEYWORDS`, `is_noise()`)
-
-T18 narrowed the noise filter and shipped 10 regression tests, but its Resolved note explicitly recorded one thing as not done: the old-rule-vs-new-rule drop rate against the real corpus, by keyword. It was blocked at the time because every Qdrant attempt timed out from that environment.
-
-**That blocker is gone.** The timeouts were the `QDRANT_URL` port issue (the client appends 6333; some networks allow only 443), not an absent corpus — Qdrant now connects in 0.86s from this machine. The measurement is runnable and remains unrun, so `MetricsRegistry.inc("chunks_dropped_as_noise")` still has no baseline to be read against.
-
-**Fix:** scroll the `EditorialChunk` collection, apply both the pre-T18 and post-T18 rules to every chunk, and report the drop rate for each plus a per-keyword breakdown. Store it as a dated artifact under `evaluation/results/`.
-
----
-
-## §27 — `flagship.md` publishes superseded evaluation numbers
-
-**Severity:** Medium — this is the most public-facing document in the repo.
-**File:** `flagship.md:255-281`, `:484-488`
-
-It carries the 2026-08-09 ablation table verbatim (`dense | 0.9400 | 0.8875 | 0.6537`, and the claim "RRF hybrid beats dense/BM25 on precision@k (0.95 vs 0.94/0.935)") plus RAGAS `context_precision 0.5722`, `faithfulness 0.9077`. Every one of those figures was superseded on 2026-08-23, and the headline claim actually inverted: `dense` now leads precision@k at 0.9850, and `hybrid_rerank` does not win.
-
-T21 ruled `flagship.md` out of scope as a "historical design record". That was defensible for a stale infrastructure reference; it is weaker for published metrics, since T17's whole premise is that stale numbers mislead whoever reads them next.
-
-**Fix:** a decision, not a mechanical edit — either update the tables to the 08-23 measurements, or stamp the section as a dated snapshot with a pointer to `evaluation/results/`. Note that `context_precision` cannot be compared across the two dates (different judges — see Facts below), so a naive column swap would be its own distortion.
-
----
-
-## §29 — `requirements-dev.txt` is unpinned and does not install cleanly
-
-**Severity:** Low — but it re-breaks for the next person on a fresh machine.
-**File:** `requirements-dev.txt`
-
-The file lists `ragas` unpinned and does not mention `langchain-community` at all. Latest `ragas` (0.4.3) unconditionally imports `langchain_community.chat_models.vertexai`, a module `langchain-community` removed in its 0.4.x split — so the newest versions of both, which is what unpinned `pip install` resolves to, are mutually incompatible.
-
-This was diagnosed on 2026-08-21 and fixed by pinning `langchain-community==0.3.27` **in that session's environment only**; the file was deliberately left alone. The result is that the knowledge lives in prose while the file that would prevent the breakage still reproduces it.
-
-**Fix:** add the `langchain-community<0.4` constraint (and consider pinning `ragas`) with a comment naming the vertexai import as the reason. Dev-only dependency chain, never imported on the Render request path, so pinning it costs nothing at runtime.
-
----
-
-## §30 — The `KPI/` suite has never been re-run against the migrated corpus
-
-**Severity:** Unknown, and that is the finding.
-**Directory:** `KPI/` (`Unified_KPI_Runner.py` plus 5 modules)
-
-T17 scoped `evaluation/` only. `KPI/Unified_KPI_Runner.py` orchestrates a second, independent measurement surface — grounding fidelity, honesty rate, routing accuracy, retrieval quality, latency attribution — and it has no stored outputs anywhere in the repo, so there is no way to tell whether it still runs at all after the embedding migration, the reranker swap, the model swaps, and the engine reconciliation (T7).
-
-**Fix:** run `python -m KPI.Unified_KPI_Runner` and find out. If it errors, that is a real defect the evaluation re-run did not cover; if it succeeds, persist the output as a dated artifact so this question is answerable next time without re-running it.
-
----
-
-## §31 — `ablation.py --limit` overwrites the real results file
-
-**Severity:** Low — a foot-gun that has already fired once.
-**File:** `evaluation/ablation.py`
-
-`--limit N` exists for smoke tests, but the output path is derived only from today's date, so a 2-query smoke run writes to the same `ablation_<date>.json` a real 40-query run does. During T17 a smoke run clobbered the real file and had to be deleted by hand; the only thing that made that recoverable was noticing `"n": 2` in the output.
-
-**Fix:** when `--limit` is set, write to a clearly-marked path (e.g. `ablation_<date>_smoke.json`), or refuse to overwrite a file whose `n` is larger than the current run's.
-
----
-
-## §32 — `--rescore-modes` can only target today's results file
-
-**Severity:** Trivial.
-**File:** `evaluation/ablation.py`
-
-`--rescore-modes` merges into `ablation_<today>.json`. A repair that crosses midnight — likely, since the thing it repairs is usually a daily-quota casualty and the quota resets at 07:00 UTC — cannot reach yesterday's file, and the run errors out rather than merging.
-
-**Fix:** a `--results-file PATH` override for both the read and the write.
+None.
 
 ---
 
@@ -115,7 +37,7 @@ Full analysis in git history (`git log -p -- AUDIT_TASKS.md`); the durable const
 | T15 | Delete `format_llama3_prompt()` | 08-21 | Gone; CLI harness now reproduces the production prompt path |
 | T16 | Pin `fastembed` in the root `requirements.txt` | 08-21 | Pinned to `0.7.4`, matching `hf_space/`; drift had already occurred undetected |
 | T17 | Re-run the evaluation suite — every stored result predated the system | 08-23 | All 5 steps re-run; 4 measurement-layer defects fixed (see Facts) |
-| T18 | Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded | 08-20 | Source-field matching + ≥3-distinct-hit density rule; drop counter added. Corpus drop-rate still unmeasured → **§26** |
+| T18 | Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded | 08-20 | Source-field matching + ≥3-distinct-hit density rule; drop counter added. Corpus drop-rate measured later as **T26** |
 | T19 | Cancel the engine thread when the SSE client disconnects | 08-20 | `cancel_event` checkpoints at the 7 stage boundaries; `q.get(timeout=1.0)` |
 | T20 | Harden `_rerank()` against a short score list | 08-19 | Length check in `_rerank_scores()`, the shared dispatch point; scoring and mutation are separate phases |
 | T21 | Fix stale comments and docs describing retired infrastructure | 08-21 | 5 claims fixed; 3 pinned by regression tests |
@@ -125,6 +47,14 @@ Full analysis in git history (`git log -p -- AUDIT_TASKS.md`); the durable const
 | T25 | Web augmentation was overturning justified refusals | 08-23 | Source-scoped ceiling in `quality_gate.evaluate()`: web `rerank_score`s can no longer promote a status the corpus-only scores didn't already earn (`min(observed, ceiling)`, new `corpus_max_relevance`/`web_max_relevance` fields). Found a second, independent defect during investigation — see **T33** |
 | T28 | No cost/latency artifact for the corpus-only run | 08-23 | `cost_latency_2026-08-23_corpusonly.json` produced against the fresh post-T25/T33 corpus-only run (not the stale pre-fix `08-21` file T28 originally named — a same-session re-run made that the more useful baseline) |
 | T33 | `assess_grounding`'s source_title fallback grounded off-corpus entities via raw substring containment | 08-23 | Filed and closed same session as T25's second root cause. Replaced with a token-prefix test against each chunk's own tokenized title (`retriever/corpus_index.py`), stripping the title's leading stopwords first so titles like "It Takes Two"/"The Legend of Zelda..." — which a query span never seeds on — still anchor at position 0. Fixed g050 (`"US"` matching mid-word); g047 turned out to already ground correctly (real corpus Game identity) and is refused by T25's ceiling instead |
+| T30 | `KPI/` suite never re-run against the migrated corpus | 08-23 | New `evaluation/run_kpi_suite.py` (additive, zero edits under `KPI/`) imports all 5 modules directly, captures stdout/timing/exceptions per module into a dated artifact (`evaluation/results/kpi_suite_cloudflare_2026-08-23.json`). All 5 modules completed, no crashes, no Groq-fallback signature. Surfaced a real regression (Regression Guard Coverage 1/3, not 3/3) → filed as **T34** rather than fixed here, per T30's own "run it and find out" scope |
+| T26 | Measure the real-corpus noise drop rate that §18 left unrun | 08-23 | New `evaluation/measure_noise_drop_rate.py` (additive, imports the live `RetrievalQualityGate.is_noise()` for production parity) scrolled all 2791 `EditorialChunk` points. Old rule dropped 558 (19.99%); new rule drops 122 (4.37%) — 436 recovered by T18 (15.62% of corpus, confirmed incidental-prose false positives on spot check), 0 new-only url-triggered drops. Sanity assertions (scanned==Qdrant count, partition identities) held; re-run is byte-identical. Artifact: `evaluation/results/noise_drop_rate_2026-08-23.json` |
+| T34 | Regression Guard Coverage dropped to 1/3 under the Cloudflare reranker — BUG-003 flipped FULL→INSUFFICIENT | 08-23 | Resolved the audit's own open question: a genuine, **provider-agnostic** entity-index bug, not a reranker-floor mismatch (the entity-grounding short-circuit in `quality_gate.evaluate()` fires before floors are ever read). Root cause: `retriever/corpus_index.py`'s `_TOKEN_RE` only treated the ASCII apostrophe as token-internal, so a curly right-quote (U+2019, as written in `tests/regression_suite.py`'s BUG-003 query and in `KPI/Retrieval_Quality_KPI.py`'s fixtures) tokenized "Assassin's" as two tokens instead of one and never matched the corpus's ASCII-apostrophe title — even with 16 real, on-topic Valhalla chunks as evidence, confirmed live. Fixed via a `_APOSTROPHE_VARIANTS` translation table applied in `_tokenize()`. The matching `RetrievalQualityKPI` symptom (Entity Coverage 0.00%, Evidence Hit: NO) needed a second, independent fix in `tests/evaluation_metrics.py`: the same apostrophe gap in `_normalize()`, plus a distinct bug in `_resolve_entity()`, whose key-priority list checked `retrieval_context` before `source_title` — but `agent/tools/web_search.py` sets `retrieval_context="fallback"` as a merge-state marker (not an entity name) on web-augmented evidence, so every web-sourced chunk in a temporal query resolved to the literal string `"fallback"` and never matched. Both fixes verified live: `RegressionRunner().run()` now passes BUG-002/BUG-003 under both `cloudflare` and `local` (BUG-001 still fails, unrelated — filed as **T35**); `evaluation/results/kpi_suite_cloudflare_2026-08-23.json` re-run shows Regression Guard Coverage 2/3, Evidence Hit Rate 100%, Avg Entity Coverage 100%. 6 new regression tests (`tests/test_corpus_index.py` ×2, `tests/test_evaluation_metrics.py` ×4, new file) |
+| T27 | `flagship.md` publishes superseded evaluation numbers | 08-23 | Stamped, not overwritten: `flagship.md:255-273`, `:275-292`, `:520/524` each get a "Superseded — current numbers as of 2026-08-23" block with the `ablation_2026-08-23.json`/`ragas_2026-08-21_default_gemini.json` figures and an explicit non-comparability note for `context_precision` (different judge, not a regression). Historical 08-09 numbers left in place per T21's precedent |
+| T31 | `ablation.py --limit` overwrites the real results file | 08-23 | `main()` now derives `out_path` with an `_smoke` suffix whenever `--limit` is set, so a smoke run lands at `ablation_<date>_smoke.json` and never shares a path with a real full run. `--rescore-modes` is unaffected — it still targets the non-smoke path. Verified live: `--limit 2 --skip-ragas` wrote `ablation_2026-08-23_smoke.json` while the real `ablation_2026-08-23.json` (hash-checked before/after) was untouched |
+| T29 | `requirements-dev.txt` is unpinned and does not install cleanly | 08-23 | Pinned `ragas==0.4.3` and added `langchain-community<0.4` with a comment naming the `ragas/llms/base.py` vertexai import as the reason (confirmed live: that import only succeeds under `<0.4`, currently resolves to 0.3.31). Dev-only, never touches the Render request path. `pip install --dry-run -r requirements-dev.txt` resolves clean against the pins |
+| T35 | BUG-001's `required_structure_pattern` doesn't match current answer phrasing | 08-23 | Not a phrasing issue — real evidence loss. `retriever/orchestrator.py`'s `_decompose_query()` split on *every* "and"/"vs"/"versus"/"compare" match; "What is the comparison and differences between Far Cry 5 and Assassin's Creed Valhalla" split into 3 sub-queries, the first ("What is the comparison") a boilerplate group with no real entity. `order_comparison()` (`agent/context_algorithms.py`) guarantees each `retrieval_context` group one top budget slot, so that junk group's irrelevant top chunk (Forza Horizon 5, rerank 0.016) claimed a slot ahead of the real 2nd entity — the 4000-char cap (`agent/context_assembler.py`) then pushed all 5 Assassin's Creed Valhalla chunks (rerank 0.98-0.9999) out entirely. `answer_capability=FULL` was correct (graded off the pre-assembly evidence), but the LLM never saw the Valhalla chunks and answered "no mention of Assassin's Creed Valhalla" — confirmed live before the fix. Fixed by splitting on only the LAST conjunction match, capping decomposition at exactly 2 sub-queries; verified live the assembled context now carries both entities and the answer naturally uses Gameplay/Story/World Design/Tone/Systems structure. 3 new hermetic tests (`tests/test_orchestrator.py`) |
+| T32 | `--rescore-modes` can only target today's results file | 08-23 | Added `--results-file PATH` override, applied to both the read (existing-file check + merge) and the write. Defaults to the unchanged `ablation_<date>[_smoke].json` derivation when omitted, so T31's smoke-suffix behavior is untouched. Verified live: `--rescore-modes` against a deliberately nonexistent `ablation_2026-08-20.json` raises the error against that exact filename (not today's), and a `--limit`+`--results-file` smoke run wrote to the overridden path |
 
 ---
 

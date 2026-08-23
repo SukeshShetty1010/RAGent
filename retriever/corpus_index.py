@@ -36,6 +36,22 @@ if not logger.handlers:
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9']+")
 
+# Curly/typographic apostrophe variants that commonly appear in
+# copy-pasted prose (queries, KPI/eval fixtures) but never in the raw
+# corpus data, which stores titles with a plain ASCII apostrophe. Left
+# unnormalized, "Assassin's Creed Valhalla" (U+2019) and the corpus's
+# "Assassin's Creed Valhalla" (U+0027) tokenize to different token
+# sequences and never match — this is what flipped BUG-003 from FULL to
+# INSUFFICIENT (AUDIT_TASKS.md T34): a provider-agnostic entity-grounding
+# bug, not a reranker-floor issue (assess_grounding() returned False even
+# with 16 real, on-topic Valhalla chunks as evidence, confirmed live).
+_APOSTROPHE_VARIANTS = str.maketrans({
+    "‘": "'",  # LEFT SINGLE QUOTATION MARK
+    "’": "'",  # RIGHT SINGLE QUOTATION MARK
+    "‛": "'",  # SINGLE HIGH-REVERSED-9 QUOTATION MARK
+    "ʼ": "'",  # MODIFIER LETTER APOSTROPHE
+})
+
 _STOPWORDS: Set[str] = {
     "the", "a", "an", "what", "which", "who", "whose", "where", "when",
     "why", "how", "is", "are", "was", "were", "can", "could", "should",
@@ -58,7 +74,7 @@ _CONNECTORS: Set[str] = {"of", "to", "the", "in", "on", "for", "at"}
 
 
 def _tokenize(text: str) -> List[str]:
-    return _TOKEN_RE.findall(text or "")
+    return _TOKEN_RE.findall((text or "").translate(_APOSTROPHE_VARIANTS))
 
 
 def _normalize(text: str) -> Tuple[str, ...]:

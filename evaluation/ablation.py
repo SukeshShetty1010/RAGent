@@ -248,6 +248,18 @@ def main() -> None:
         default="groq",
         help="Same choice as ragas_eval.py -- groq (daily token quota) or gemini (gemini-flash-latest, free tier).",
     )
+    parser.add_argument(
+        "--results-file",
+        type=Path,
+        default=None,
+        help=(
+            "Override the results JSON path (read and write), instead of "
+            "today's date-derived ablation_<date>.json. Needed for "
+            "--rescore-modes once the repair crosses the 07:00 UTC Gemini "
+            "quota reset -- the file it's repairing is yesterday's, not "
+            "today's."
+        ),
+    )
     args = parser.parse_args()
 
     golden = _load_jsonl(Path(args.golden))
@@ -255,7 +267,9 @@ def main() -> None:
     if args.limit:
         answerable = answerable[: args.limit]
 
-    out_path = RESULTS_DIR / f"ablation_{date.today().isoformat()}.json"
+    smoke = bool(args.limit)
+    smoke_suffix = "_smoke" if smoke else ""
+    out_path = args.results_file or RESULTS_DIR / f"ablation_{date.today().isoformat()}{smoke_suffix}.json"
     judge_backend = None if args.skip_ragas else args.judge_backend
 
     if args.rescore_modes:

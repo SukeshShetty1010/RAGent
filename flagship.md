@@ -272,6 +272,26 @@ latency in the KPI runner's profile). Worth a follow-up look at the cross-encode
 or a corpus-specific relevance check before the README cites reranking as a differentiator —
 right now the honest claim is the opposite of what the architecture intends.
 
+**Superseded — current numbers as of 2026-08-23:** the table and claim above are a 2026-08-09
+snapshot, left in place as the historical record. The re-run against the current system
+(`evaluation/results/ablation_2026-08-23.json`, retrieval n=40/mode, judged n=20/mode, 0 dropped
+samples):
+
+| Mode | Precision@K | Entity Coverage | RAGAS Context Precision |
+|---|---|---|---|
+| `dense` | **0.9850** | 0.8750 | 0.4607 |
+| `bm25` | 0.9350 | 0.8375 | 0.2683 |
+| `hybrid` (RRF, no rerank) | 0.9600 | **0.9125** | 0.3550 |
+| `hybrid_rerank` (production default) | 0.9650 | 0.8875 | 0.3433 |
+
+The headline claim above no longer holds as stated: `dense` now leads precision@k, not plain
+RRF hybrid, and `hybrid_rerank` still does not win outright on either metric — it did narrow
+the gap and no longer scores lowest of all four modes. The `RAGAS Context Precision` column
+here is **not comparable to the 08-09 column** (different judges — Modal then, Gemini now; all
+four modes fell by a similar ~0.2, which reflects a stricter judge rather than a retrieval
+regression — see `AUDIT_TASKS.md`'s "Facts worth keeping"). The reasoning below for *why*
+rerank stays load-bearing in production is unaffected by either run and stands as-is.
+
 **RAGAS (context precision, faithfulness, answer relevancy) — complete, 40/40 answerable
 queries scored (2026-08-09):**
 
@@ -280,6 +300,22 @@ queries scored (2026-08-09):**
 | context_precision | 0.5722 |
 | faithfulness | 0.9077 *(6/40 null from per-job scoring timeouts, averaged over the remaining 34)* |
 | answer_relevancy | 0.7306 |
+
+**Superseded — current numbers as of 2026-08-23:** table above is the 2026-08-09 Modal-judged
+snapshot, left in place as historical record. Current pipeline-level RAGAS run
+(`evaluation/results/ragas_2026-08-21_default_gemini.json`, Gemini judge, 40/40 answerable,
+0 null):
+
+| Metric | Score |
+|---|---|
+| context_precision | 0.3604 |
+| faithfulness | 0.9608 |
+| answer_relevancy | 0.5953 |
+
+`context_precision` is **not comparable to the 08-09 number above** — judged by Gemini, not the
+retired Modal judge, per a stricter judge rather than a retrieval regression (see
+`AUDIT_TASKS.md`'s "Facts worth keeping"). `faithfulness` and `answer_relevancy` moved on the
+same judge-change basis and shouldn't be read as a quality trend either.
 
 Getting a full run took two independent judge tracks. Groq was tried first —
 `llama-3.3-70b-versatile` (100K TPD), then `openai/gpt-oss-120b` (200K TPD), then
@@ -481,11 +517,11 @@ the system it measures is wrong.
 
 | # | Rubric item | Status | Action |
 |---|---|---|---|
-| 1 | Hybrid dense+sparse, RRF | ✅ PRESENT | Ablation run (2026-08-09): RRF hybrid beats dense/BM25 on precision@k (0.95 vs 0.94/0.935); production `hybrid_rerank` default scores *lowest of all four modes* on both precision@k (0.92) and RAGAS context precision (0.5168) on the reordering ablation. Phase 3.5 (2026-08-12) gives the cross-encoder's `rerank_score` a second job it does earn: the calibrated relevance floor that drives the honesty gate below — it lost the reordering ablation but is now load-bearing for refusal |
+| 1 | Hybrid dense+sparse, RRF | ✅ PRESENT | Ablation run (2026-08-09): RRF hybrid beats dense/BM25 on precision@k (0.95 vs 0.94/0.935); production `hybrid_rerank` default scores *lowest of all four modes* on both precision@k (0.92) and RAGAS context precision (0.5168) on the reordering ablation. Phase 3.5 (2026-08-12) gives the cross-encoder's `rerank_score` a second job it does earn: the calibrated relevance floor that drives the honesty gate below — it lost the reordering ablation but is now load-bearing for refusal. **Superseded — current numbers as of 2026-08-23** (`evaluation/results/ablation_2026-08-23.json`): `dense` now leads precision@k at 0.9850; `hybrid_rerank` scores 0.9650 precision@k, no longer lowest of all four, but still doesn't win outright. RAGAS context precision (0.4607/0.2683/0.3550/0.3433 for dense/bm25/hybrid/hybrid_rerank) is judged by Gemini, not comparable to the 08-09 Modal-judged number. The load-bearing-for-refusal reasoning is unaffected |
 | 2 | Specific non-generic corpus | ✅ PRESENT | Rebuilt: 100 games, 2791 chunks, verified zero orphans/duplicates |
 | 3 | "Insufficient information" refusal | ✅ WORKING (one accepted miss) | Phase 3.5 (2026-08-12): refusal recall **0.0 → 0.9** corpus-only, `over_refusal_rate = 0.0` on all 40 answerable queries — see Phase 3.5 results and resolved row 21 below |
 | 4 | Source/citation attribution | ✅ ENFORCED (compliance not 100%) | Citation format specified + `validate_answer()` checks against context (0.2); live runs show the LLM doesn't always comply — validator correctly flags it |
-| 5 | RAGAS: context precision, faithfulness, answer relevancy | ✅ COMPLETE | 40/40 answerable queries scored (Modal-judged, 2026-08-09): context_precision 0.5722, faithfulness 0.9077, answer_relevancy 0.7306. Groq track partial (5/40, quota-exhausted) and preserved separately, not mixed |
+| 5 | RAGAS: context precision, faithfulness, answer relevancy | ✅ COMPLETE | 40/40 answerable queries scored (Modal-judged, 2026-08-09): context_precision 0.5722, faithfulness 0.9077, answer_relevancy 0.7306. Groq track partial (5/40, quota-exhausted) and preserved separately, not mixed. **Superseded — current numbers as of 2026-08-23** (`evaluation/results/ragas_2026-08-21_default_gemini.json`, Gemini judge, 40/40 answerable, 0 null): context_precision 0.3604, faithfulness 0.9608, answer_relevancy 0.5953. context_precision not comparable to the 08-09 number — different judge, not a retrieval regression |
 | 6 | Live public deployment | ✅ RESOLVED (2026-08-14) | `https://rag-ent.onrender.com` — `/health` 200, a real sourced query, and the GTA VI refusal path all verified against the live URL |
 | 7 | Containerized / one-command | ✅ RESOLVED (2026-08-14) | `docker build -t ragent . && docker run -m 512m --env-file .env ragent` — booted at 124-135MB resident, well under the cap; `/health`/`/ping`/a real query/the refusal path all verified inside the container |
 | 8 | Observability: latency | ✅ PRESENT | `ProfileBlock` — keep |

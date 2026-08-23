@@ -332,12 +332,34 @@ class RetrievalOrchestrator:
     # =========================================================
 
     def _decompose_query(self, query: str) -> List[str]:
-        parts = re.split(
+        # Split on the LAST conjunction only, not every occurrence.
+        # order_comparison() (agent/context_algorithms.py) treats each
+        # distinct `retrieval_context` as its own entity and guarantees it
+        # one top budget slot -- a real guarantee for a genuine 2-entity
+        # split, but a foot-gun for natural phrasing like "What is the
+        # comparison and differences between Far Cry 5 and Assassin's
+        # Creed Valhalla", where an earlier re.split() on every "and" cut
+        # a 3rd, entity-less group ("What is the comparison") out of the
+        # boilerplate. That group's junk chunk then claimed a budget slot
+        # ahead of the real 2nd entity, and the tight 4000-char cap
+        # (agent/context_assembler.py) pushed every real 2nd-entity chunk
+        # out entirely -- confirmed live 2026-08-23, filed as AUDIT_TASKS
+        # T35. The two named entities are always the ones nearest the end
+        # of a comparison query, so splitting at the last separator keeps
+        # any earlier boilerplate attached to entity 1's sub-query instead
+        # of spawning a 3rd group.
+        matches = list(re.finditer(
             r"\bvs\b|\bversus\b|\band\b|\bcompare\b",
             query,
             flags=re.IGNORECASE,
-        )
-        cleaned = [p.strip() for p in parts if p.strip()]
+        ))
+        if not matches:
+            return [query]
+
+        last = matches[-1]
+        left = query[: last.start()].strip()
+        right = query[last.end():].strip()
+        cleaned = [p for p in (left, right) if p]
         return cleaned if len(cleaned) >= 2 else [query]
 
     def _merge_and_dedupe(

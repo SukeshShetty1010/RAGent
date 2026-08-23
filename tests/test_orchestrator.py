@@ -135,3 +135,43 @@ def test_no_web_contribution_leaves_report_untouched(monkeypatch):
     assert quality_report is pre_web_quality_report
     assert quality_report.status == QualityStatus.QUALITY_OK
     assert merge_state == "LOCAL_ONLY"
+
+
+# ============================================================
+# _decompose_query -- splits on the LAST conjunction only
+# ============================================================
+#
+# order_comparison() (agent/context_algorithms.py) gives every distinct
+# retrieval_context group one guaranteed top-budget slot. Splitting on
+# EVERY "and"/"vs"/"versus"/"compare" match turns natural boilerplate
+# phrasing into a spurious 3rd, entity-less group whose (irrelevant)
+# top chunk then steals a budget slot ahead of the real 2nd entity --
+# confirmed live 2026-08-23 against "What is the comparison and
+# differences between Far Cry 5 and Assassin's Creed Valhalla", where
+# the tight 4000-char cap (agent/context_assembler.py) pushed every
+# real Assassin's Creed Valhalla chunk out entirely. AUDIT_TASKS T35.
+
+
+def _decompose(query: str) -> list[str]:
+    orch = RetrievalOrchestrator.__new__(RetrievalOrchestrator)
+    return orch._decompose_query(query)
+
+
+def test_decompose_boilerplate_and_does_not_spawn_a_third_group():
+    result = _decompose(
+        "What is the comparison and differences between Far Cry 5 "
+        "and Assassin's Creed Valhalla"
+    )
+    assert len(result) == 2
+    assert result[1] == "Assassin's Creed Valhalla"
+    assert result[0].endswith("Far Cry 5")
+
+
+def test_decompose_simple_vs_still_splits_in_two():
+    result = _decompose("Far Cry 5 vs Assassin's Creed Valhalla")
+    assert result == ["Far Cry 5", "Assassin's Creed Valhalla"]
+
+
+def test_decompose_no_separator_returns_original_query():
+    result = _decompose("What is Far Cry 5 about")
+    assert result == ["What is Far Cry 5 about"]
