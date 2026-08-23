@@ -1,0 +1,85 @@
+<svg viewBox="0 0 640 400" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .grid { stroke: #e2e2e2; stroke-width: 1; }
+    .axis { stroke: #888888; stroke-width: 1; }
+    .label { fill: #444444; font-size: 12px; }
+    .title { fill: #1a1a1a; font-size: 14px; font-weight: 600; }
+    .recall-default { stroke: #2b6cb0; }
+    .recall-corpus { stroke: #63b3ed; }
+    .far-default { stroke: #c05621; }
+    .far-corpus { stroke: #f0a35c; }
+    .legend-text { fill: #444444; font-size: 11px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1a1a; }
+      .grid { stroke: #333333; }
+      .axis { stroke: #777777; }
+      .label { fill: #cccccc; }
+      .title { fill: #f0f0f0; }
+      .legend-text { fill: #cccccc; }
+      .recall-default { stroke: #63b3ed; }
+      .recall-corpus { stroke: #90cdf4; }
+      .far-default { stroke: #f0a35c; }
+      .far-corpus { stroke: #fbd38d; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="640" height="400"/>
+
+  <text class="title" x="20" y="24">Refusal recall &amp; false-answer rate, 50-query golden set</text>
+
+  <!-- gridlines + y labels: 0.0 .. 1.0 -->
+  <g>
+    <line class="grid" x1="60" y1="30" x2="600" y2="30"/>
+    <line class="grid" x1="60" y1="84" x2="600" y2="84"/>
+    <line class="grid" x1="60" y1="138" x2="600" y2="138"/>
+    <line class="grid" x1="60" y1="192" x2="600" y2="192"/>
+    <line class="grid" x1="60" y1="246" x2="600" y2="246"/>
+    <line class="grid" x1="60" y1="300" x2="600" y2="300"/>
+    <text class="label" x="40" y="34" text-anchor="end">1.0</text>
+    <text class="label" x="40" y="88" text-anchor="end">0.8</text>
+    <text class="label" x="40" y="142" text-anchor="end">0.6</text>
+    <text class="label" x="40" y="196" text-anchor="end">0.4</text>
+    <text class="label" x="40" y="250" text-anchor="end">0.2</text>
+    <text class="label" x="40" y="304" text-anchor="end">0.0</text>
+  </g>
+
+  <line class="axis" x1="60" y1="300" x2="600" y2="300"/>
+  <line class="axis" x1="60" y1="30" x2="60" y2="300"/>
+
+  <!-- x labels -->
+  <text class="label" x="100" y="322" text-anchor="middle">08-09</text>
+  <text class="label" x="260" y="322" text-anchor="middle">08-12</text>
+  <text class="label" x="420" y="322" text-anchor="middle">08-21</text>
+  <text class="label" x="580" y="322" text-anchor="middle">08-23</text>
+
+  <!-- recall, web-on (default) -->
+  <polyline class="recall-default" fill="none" stroke-width="2.5" points="100,300 260,84 420,111 580,30"/>
+  <!-- recall, web-off (corpus-only) -->
+  <polyline class="recall-corpus" fill="none" stroke-width="2.5" stroke-dasharray="1,0" points="100,300 260,57 420,84 580,30"/>
+  <!-- false-answer rate, web-on -->
+  <polyline class="far-default" fill="none" stroke-width="2.5" stroke-dasharray="6,4" points="100,30 260,246 420,219 580,300"/>
+  <!-- false-answer rate, web-off -->
+  <polyline class="far-corpus" fill="none" stroke-width="2.5" stroke-dasharray="6,4" points="100,30 260,273 420,246 580,300"/>
+
+  <g>
+    <circle class="recall-default" cx="100" cy="300" r="3.5"/><circle class="recall-default" cx="260" cy="84" r="3.5"/><circle class="recall-default" cx="420" cy="111" r="3.5"/><circle class="recall-default" cx="580" cy="30" r="3.5"/>
+    <circle class="recall-corpus" cx="100" cy="300" r="3.5"/><circle class="recall-corpus" cx="260" cy="57" r="3.5"/><circle class="recall-corpus" cx="420" cy="84" r="3.5"/><circle class="recall-corpus" cx="580" cy="30" r="3.5"/>
+    <circle class="far-default" cx="100" cy="30" r="3.5"/><circle class="far-default" cx="260" cy="246" r="3.5"/><circle class="far-default" cx="420" cy="219" r="3.5"/><circle class="far-default" cx="580" cy="300" r="3.5"/>
+    <circle class="far-corpus" cx="100" cy="30" r="3.5"/><circle class="far-corpus" cx="260" cy="273" r="3.5"/><circle class="far-corpus" cx="420" cy="246" r="3.5"/><circle class="far-corpus" cx="580" cy="300" r="3.5"/>
+  </g>
+
+  <!-- legend -->
+  <g transform="translate(60,350)">
+    <line x1="0" y1="0" x2="24" y2="0" class="recall-default" stroke-width="2.5"/>
+    <text class="legend-text" x="30" y="4">Recall, web-on</text>
+    <line x1="150" y1="0" x2="174" y2="0" class="recall-corpus" stroke-width="2.5"/>
+    <text class="legend-text" x="180" y="4">Recall, web-off</text>
+    <line x1="330" y1="0" x2="354" y2="0" class="far-default" stroke-width="2.5" stroke-dasharray="6,4"/>
+    <text class="legend-text" x="360" y="4">False-answer rate, web-on</text>
+  </g>
+  <g transform="translate(60,372)">
+    <line x1="0" y1="0" x2="24" y2="0" class="far-corpus" stroke-width="2.5" stroke-dasharray="6,4"/>
+    <text class="legend-text" x="30" y="4">False-answer rate, web-off</text>
+  </g>
+</svg>

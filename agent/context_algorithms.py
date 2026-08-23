@@ -198,15 +198,21 @@ def apply_character_budget(
     ordered_chunks: List[Dict[str, Any]],
     *,
     char_cap: int,
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], int]:
     """
     Enforce a hard character cap with atomic chunk inclusion
     and Jaccard-based redundancy filtering.
+
+    Returns (final_chunks, redundant_rejections) — the second value
+    counts chunks dropped specifically by is_redundant(), separate
+    from drops caused by the character cap, so callers can report
+    redundancy filtering as its own metric.
     """
 
     final_chunks: List[Dict[str, Any]] = []
     used_chars = 0
     accepted_token_sets: List[Set[str]] = []
+    redundant_rejections = 0
 
     for c in ordered_chunks:
         content = (c.get("content") or "").strip()
@@ -222,13 +228,14 @@ def apply_character_budget(
             continue
 
         if is_redundant(content, accepted_token_sets):
+            redundant_rejections += 1
             continue
 
         final_chunks.append(c)
         used_chars += content_len
         accepted_token_sets.append(tokenize(content))
 
-    return final_chunks
+    return final_chunks, redundant_rejections
 
 
 def is_redundant(

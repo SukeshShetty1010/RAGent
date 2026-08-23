@@ -1,0 +1,60 @@
+<svg viewBox="0 0 640 380" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .grid { stroke: #e2e2e2; stroke-width: 1; }
+    .axis { stroke: #888888; stroke-width: 1; }
+    .label { fill: #444444; font-size: 12px; }
+    .value { fill: #333333; font-size: 11px; }
+    .title { fill: #1a1a1a; font-size: 14px; font-weight: 600; }
+    .bar { fill: #2b6cb0; }
+    .cost-box { fill: #f5f5f5; stroke: #d8d8d8; }
+    .cost-text { fill: #1a1a1a; font-size: 12px; }
+    .cost-sub { fill: #666666; font-size: 10.5px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1a1a; }
+      .grid { stroke: #333333; }
+      .axis { stroke: #777777; }
+      .label { fill: #cccccc; }
+      .value { fill: #dddddd; }
+      .title { fill: #f0f0f0; }
+      .bar { fill: #63b3ed; }
+      .cost-box { fill: #242424; stroke: #3a3a3a; }
+      .cost-text { fill: #f0f0f0; }
+      .cost-sub { fill: #999999; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="640" height="380"/>
+  <text class="title" x="20" y="24">Engine latency, p50 / p95 / p99 (50-query golden set, default mode, 2026-08-21)</text>
+
+  <g>
+    <line class="grid" x1="60" y1="300" x2="600" y2="300"/>
+    <line class="grid" x1="60" y1="206.9" x2="600" y2="206.9"/>
+    <line class="grid" x1="60" y1="113.8" x2="600" y2="113.8"/>
+    <line class="grid" x1="60" y1="39.3" x2="600" y2="39.3"/>
+    <text class="label" x="40" y="304" text-anchor="end">0ms</text>
+    <text class="label" x="40" y="210.9" text-anchor="end">5000ms</text>
+    <text class="label" x="40" y="117.8" text-anchor="end">10000ms</text>
+    <text class="label" x="40" y="43.3" text-anchor="end">14000ms</text>
+  </g>
+  <line class="axis" x1="60" y1="300" x2="600" y2="300"/>
+  <line class="axis" x1="60" y1="30" x2="60" y2="300"/>
+
+  <rect class="bar" x="120" y="224.02" width="60" height="75.98"/>
+  <text class="value" x="150" y="217" text-anchor="middle">p50: 4079.56ms</text>
+  <text class="label" x="150" y="318" text-anchor="middle">p50</text>
+
+  <rect class="bar" x="290" y="68.7" width="60" height="231.3"/>
+  <text class="value" x="320" y="61.7" text-anchor="middle">p95: 12422.77ms</text>
+  <text class="label" x="320" y="318" text-anchor="middle">p95</text>
+
+  <rect class="bar" x="460" y="44.23" width="60" height="255.77"/>
+  <text class="value" x="490" y="37.2" text-anchor="middle">p99: 13736.41ms</text>
+  <text class="label" x="490" y="318" text-anchor="middle">p99</text>
+
+  <g transform="translate(60,340)">
+    <rect class="cost-box" x="0" y="0" width="540" height="34" rx="4"/>
+    <text class="cost-text" x="14" y="15">Mean cost/query: $0.00000212 · Total for 50 queries: $0.000106</text>
+    <text class="cost-sub" x="14" y="29">49 of 50 queries served at zero marginal cost by Gemini's free tier — evaluation/results/cost_latency_2026-08-21_default.json</text>
+  </g>
+</svg>

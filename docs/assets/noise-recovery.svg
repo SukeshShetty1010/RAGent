@@ -1,0 +1,63 @@
+<svg viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .label { fill: #444444; font-size: 12px; }
+    .value { fill: #333333; font-size: 11px; }
+    .title { fill: #1a1a1a; font-size: 14px; font-weight: 600; }
+    .subtitle { fill: #555555; font-size: 12px; font-weight: 600; }
+    .old { fill: #c05621; }
+    .new { fill: #2b6cb0; }
+    .kept { fill: #2f855a; }
+    .recovered { fill: #2b6cb0; }
+    .dropped { fill: #c05621; }
+    .sub { fill: #666666; font-size: 10.5px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1a1a; }
+      .label { fill: #cccccc; }
+      .value { fill: #dddddd; }
+      .title { fill: #f0f0f0; }
+      .subtitle { fill: #dddddd; }
+      .old { fill: #f0a35c; }
+      .new { fill: #63b3ed; }
+      .kept { fill: #68d391; }
+      .recovered { fill: #63b3ed; }
+      .dropped { fill: #f0a35c; }
+      .sub { fill: #999999; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="640" height="360"/>
+  <text class="title" x="20" y="24">Noise-filter recovery — full 2,791-chunk corpus scan, 2026-08-23</text>
+
+  <text class="subtitle" x="20" y="60">Drop rate, old rule vs new rule</text>
+  <text class="label" x="20" y="90">old</text>
+  <rect class="old" x="60" y="76" width="107.9" height="18"/>
+  <text class="value" x="172" y="90">558 chunks dropped (19.99%)</text>
+
+  <text class="label" x="20" y="120">new</text>
+  <rect class="new" x="60" y="106" width="23.6" height="18"/>
+  <text class="value" x="88" y="120">122 chunks dropped (4.37%)</text>
+
+  <text class="subtitle" x="20" y="170">Where the corpus's 2,791 chunks landed under the new rule</text>
+  <rect class="kept" x="60" y="185" width="432.0" height="34"/>
+  <rect class="recovered" x="492.0" y="185" width="84.3" height="34"/>
+  <rect class="dropped" x="576.3" y="185" width="23.6" height="34"/>
+
+  <text class="value" x="80" y="206">2,233 kept (80.01%)</text>
+  <text class="value" x="497" y="176" text-anchor="start">436</text>
+  <text class="value" x="578" y="176" text-anchor="start">122</text>
+
+  <g transform="translate(60,240)">
+    <rect class="kept" x="0" y="0" width="14" height="14"/>
+    <text class="label" x="20" y="12">Kept under both rules</text>
+    <rect class="recovered" x="220" y="0" width="14" height="14"/>
+    <text class="label" x="240" y="12">Recovered by the T18 fix (old dropped, new keeps)</text>
+  </g>
+  <g transform="translate(60,264)">
+    <rect class="dropped" x="0" y="0" width="14" height="14"/>
+    <text class="label" x="20" y="12">Still dropped under both rules</text>
+  </g>
+
+  <text class="sub" x="20" y="310">0 chunks are dropped only by the new rule (new_only_drops = 0) — the fix strictly recovers, it introduces no new losses.</text>
+  <text class="sub" x="20" y="326">evaluation/results/noise_drop_rate_2026-08-23.json</text>
+</svg>

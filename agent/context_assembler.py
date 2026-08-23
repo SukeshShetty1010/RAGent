@@ -115,9 +115,14 @@ class ContextAssembler:
                 )
 
             with ProfileBlock("SafeContextCap"):
-                final_chunks = apply_character_budget(
+                final_chunks, redundant_rejections = apply_character_budget(
                     ordered_chunks=ordered,
                     char_cap=self.MAX_CONTEXT_CHARS,
+                )
+
+            if redundant_rejections:
+                MetricsRegistry.get().inc(
+                    "context_redundant_rejections", redundant_rejections
                 )
 
             MetricsRegistry.get().observe(

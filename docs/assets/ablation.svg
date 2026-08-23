@@ -1,0 +1,83 @@
+<svg viewBox="0 0 640 420" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .grid { stroke: #e2e2e2; stroke-width: 1; }
+    .axis { stroke: #888888; stroke-width: 1; }
+    .label { fill: #444444; font-size: 12px; }
+    .value { fill: #333333; font-size: 10.5px; }
+    .title { fill: #1a1a1a; font-size: 14px; font-weight: 600; }
+    .note { fill: #666666; font-size: 11px; font-style: italic; }
+    .pak { fill: #2b6cb0; }
+    .ec { fill: #c05621; }
+    .legend-text { fill: #444444; font-size: 11px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1a1a; }
+      .grid { stroke: #333333; }
+      .axis { stroke: #777777; }
+      .label { fill: #cccccc; }
+      .value { fill: #dddddd; }
+      .title { fill: #f0f0f0; }
+      .note { fill: #999999; }
+      .pak { fill: #63b3ed; }
+      .ec { fill: #f0a35c; }
+      .legend-text { fill: #cccccc; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="640" height="420"/>
+  <text class="title" x="20" y="24">Retrieval ablation — Precision@K vs entity coverage (n=40 retrieval / mode)</text>
+
+  <g>
+    <line class="grid" x1="60" y1="30" x2="600" y2="30"/>
+    <line class="grid" x1="60" y1="84" x2="600" y2="84"/>
+    <line class="grid" x1="60" y1="138" x2="600" y2="138"/>
+    <line class="grid" x1="60" y1="192" x2="600" y2="192"/>
+    <line class="grid" x1="60" y1="246" x2="600" y2="246"/>
+    <line class="grid" x1="60" y1="300" x2="600" y2="300"/>
+    <text class="label" x="40" y="34" text-anchor="end">1.0</text>
+    <text class="label" x="40" y="88" text-anchor="end">0.8</text>
+    <text class="label" x="40" y="142" text-anchor="end">0.6</text>
+    <text class="label" x="40" y="196" text-anchor="end">0.4</text>
+    <text class="label" x="40" y="250" text-anchor="end">0.2</text>
+    <text class="label" x="40" y="304" text-anchor="end">0.0</text>
+  </g>
+  <line class="axis" x1="60" y1="300" x2="600" y2="300"/>
+  <line class="axis" x1="60" y1="30" x2="60" y2="300"/>
+
+  <!-- dense -->
+  <rect class="pak" x="89.5" y="34.0" width="30" height="266.0"/>
+  <rect class="ec" x="135.5" y="63.75" width="30" height="236.25"/>
+  <text class="value" x="104.5" y="27" text-anchor="middle">0.985</text>
+  <text class="value" x="150.5" y="57" text-anchor="middle">0.875</text>
+  <text class="label" x="127.5" y="318" text-anchor="middle">dense</text>
+
+  <!-- bm25 -->
+  <rect class="pak" x="224.5" y="47.55" width="30" height="252.45"/>
+  <rect class="ec" x="270.5" y="73.875" width="30" height="226.125"/>
+  <text class="value" x="239.5" y="41" text-anchor="middle">0.935</text>
+  <text class="value" x="285.5" y="67" text-anchor="middle">0.838</text>
+  <text class="label" x="262.5" y="318" text-anchor="middle">bm25</text>
+
+  <!-- hybrid -->
+  <rect class="pak" x="359.5" y="40.8" width="30" height="259.2"/>
+  <rect class="ec" x="405.5" y="53.625" width="30" height="246.375"/>
+  <text class="value" x="374.5" y="34" text-anchor="middle">0.960</text>
+  <text class="value" x="420.5" y="47" text-anchor="middle">0.913</text>
+  <text class="label" x="397.5" y="318" text-anchor="middle">hybrid</text>
+
+  <!-- hybrid_rerank -->
+  <rect class="pak" x="494.5" y="39.45" width="30" height="260.55"/>
+  <rect class="ec" x="540.5" y="60.375" width="30" height="239.625"/>
+  <text class="value" x="509.5" y="33" text-anchor="middle">0.965</text>
+  <text class="value" x="555.5" y="54" text-anchor="middle">0.888</text>
+  <text class="label" x="532.5" y="318" text-anchor="middle">hybrid_rerank</text>
+
+  <text class="note" x="320" y="340" text-anchor="middle">hybrid_rerank does not lead on entity coverage — hybrid does (0.9125). Reported as measured, not adjusted.</text>
+
+  <g transform="translate(60,368)">
+    <rect class="pak" x="0" y="-10" width="16" height="16"/>
+    <text class="legend-text" x="22" y="4">Precision@K</text>
+    <rect class="ec" x="150" y="-10" width="16" height="16"/>
+    <text class="legend-text" x="172" y="4">Entity coverage</text>
+  </g>
+</svg>
