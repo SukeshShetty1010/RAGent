@@ -59,9 +59,20 @@ def compute_cost_latency_metrics(records: List[Dict[str, Any]]) -> Dict[str, Any
 
     engine_latencies = [r["engine_latency_ms"] for r in scored if r.get("engine_latency_ms") is not None]
     llm_latencies = [r["llm_latency_ms"] for r in scored if r.get("llm_latency_ms") is not None]
-    costs = [r["cost_usd"] for r in scored if r.get("cost_usd")]
-    prompt_tokens = [r["prompt_tokens"] for r in scored if r.get("prompt_tokens")]
-    completion_tokens = [r["completion_tokens"] for r in scored if r.get("completion_tokens")]
+    # `is not None`, not truthiness. A Gemini-served query costs exactly
+    # 0.0 -- llm/pricing.py prices the free tier at zero deliberately,
+    # not for want of a table entry -- so a truthiness filter drops every
+    # free query and averages only over the ones that fell back to Groq.
+    # Measured on runs_2026-08-21_default.jsonl: 49 of 50 queries cost
+    # 0.0 and one Groq fallback cost $0.000106, which the old filter
+    # reported as a $0.000106 *per-query mean*, ~50x the real figure.
+    # A never-generated query (a hard refusal) still records None here,
+    # so it stays excluded either way.
+    costs = [r["cost_usd"] for r in scored if r.get("cost_usd") is not None]
+    prompt_tokens = [r["prompt_tokens"] for r in scored if r.get("prompt_tokens") is not None]
+    completion_tokens = [
+        r["completion_tokens"] for r in scored if r.get("completion_tokens") is not None
+    ]
 
     stage_totals: Dict[str, List[float]] = defaultdict(list)
     for r in scored:
@@ -99,6 +110,12 @@ def compute_cost_latency_metrics(records: List[Dict[str, Any]]) -> Dict[str, Any
             "mean": round(statistics.mean(costs), 8) if costs else 0.0,
             "median": round(statistics.median(costs), 8) if costs else 0.0,
             "total_for_run": round(sum(costs), 6) if costs else 0.0,
+            # Which provider actually served the run is the whole story
+            # behind the mean above: a mean near zero means Gemini
+            # (free) served nearly everything, not that generation is
+            # somehow free.
+            "queries_priced": len(costs),
+            "queries_at_zero_cost": sum(1 for c in costs if c == 0),
         },
         "tokens_per_query": {
             "mean_prompt_tokens": round(statistics.mean(prompt_tokens), 1) if prompt_tokens else 0.0,

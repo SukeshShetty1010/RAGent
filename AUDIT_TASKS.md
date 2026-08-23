@@ -4,6 +4,7 @@
 **Scope:** every module on the request path (`api/` → `engine/` → `agent/` → `retriever/` → `llm/` → `utils/` → `frontend/`), plus ingest, evaluation, config, Docker, and CI.
 **Method:** read end to end, line by line. Claims about live behaviour were measured against the real Qdrant corpus and the real `.env`, not inferred.
 **Test suite at time of audit:** `159 passed, 3 skipped` (`python -m pytest tests/`).
+**Status:** all 23 tasks resolved as of 2026-08-23 (T17 last). Test suite now `273 passed, 3 skipped` full run including `live`-marked tests; `262 passed, 3 skipped` on the hermetic `-m unit` subset. Each task's "Resolved" note sits inside its own section, and the dated status updates below record what was fixed together and why.
 
 The system runs and answers queries. Nothing here is a crash. Everything here is a case where the code **executes successfully while not delivering the behaviour it was written to deliver**, or a case where a component was built and then never connected to anything.
 
@@ -70,6 +71,8 @@ Remaining task: **T17** (re-run the evaluation suite) is deliberately left for a
 
 4 of 5 steps done; the 5th is blocked on a daily API quota, not a bug. See the "In Progress" note inside §17 for the full measured numbers and the exact command to resume with.
 
+> **Superseded by the 2026-08-23 entry below**, which finished the 5th step. Two numbers recorded here did not survive that session: the `$0.000106`/query cost is ~50× too high (a truthiness filter in `cost_latency_metrics.py` discarded every free Gemini query — see §17), and the resume instructions name `py -3.10`, an interpreter that no longer exists on this machine.
+
 Installed `requirements-dev.txt` and found it does not install cleanly as written: latest `ragas` (0.4.3) unconditionally imports `langchain_community.chat_models.vertexai`, a module `langchain-community` removed in its 0.4.x "sunset" split into standalone packages — so the newest versions of both packages, which is what unpinned `pip install` resolves to, are mutually incompatible. Fixed by pinning `langchain-community==0.3.27` (pre-split, still ships that module) on top of the dev install; `requirements-dev.txt` itself was left unpinned since this is a dev-only, offline-eval-only dependency chain, not something worth freezing broadly for one transitive import. Full 258-test unit suite passed clean afterward.
 
 Ran `run_eval.py` (default + `--corpus-only`, 50 golden-set queries each, live Gemini/Cloudflare/Qdrant/Tavily): 0/50 errors both runs. `refusal_metrics.py` on both: default `refusal_recall=0.7, false_answer_rate=0.3` (3/10 should-refuse queries got answered); corpus-only (no Tavily fallback) `refusal_recall=0.8, false_answer_rate=0.2` — the gap is web augmentation rescuing answers on queries the corpus-only path correctly refuses, worth a look but not investigated further this session. `cost_latency_metrics.py` on the default run: `p50=4080ms/p95=12423ms` engine latency, `$0.000106`/query mean cost (`openai/gpt-oss-120b` + Gemini pricing, correctly picked up from `llm/pricing.py`), retrieval (particularly `WebSearch`/`TavilyAPICall` and `LocalVectorSearch`) dominates the latency budget at ~80% of total.
@@ -85,6 +88,23 @@ py -3.10 -m evaluation.ablation --judge-backend gemini
 ```
 
 from the repo root with `py -3.10` (this repo's working interpreter). Everything else needed for T17 is already in place: dependencies installed and the `langchain-community` pin applied, the `bypass_n` fix already shipped so this run won't repeat the earlier failure, and `evaluation/results/runs_2026-08-21_default.jsonl` already exists for anything else that needs it. Once `ablation_2026-08-21.json` exists, T17's last measurement is done — write up the AUDIT_TASKS.md resolution note for §17 (numbers above plus the ablation result) and flip the checklist box.
+
+## Status update — 2026-08-23 (T17 complete — all 23 tasks closed)
+
+`ablation.py` finished: `evaluation/results/ablation_2026-08-23.json`, four modes × `n=40` retrieval / `n=20` judged, 0 dropped samples, `ragas_complete: true`. Full numbers and their comparability boundary are in §17's Resolved note; the short version is that the retrieval half improved wherever the Gemini embedding migration could reach (`dense` +0.045 precision@k) with BM25 identical to four decimals as a control, `hybrid_rerank` still does not win on precision@k, and the `context_precision` column cannot be compared to 08-09 because that run was scored by the retired Modal judge.
+
+Reaching that result took four measurement-layer fixes, none of which touch the system under test — worth reading as a group, because the first three are the same defect at three different depths and the fourth had already corrupted a published number:
+
+1. `ablation.py` only persisted after *both* halves finished, which is what destroyed the 08-21 attempt. It now writes after the retrieval half and after each judged mode, and stamps `ragas_complete`.
+2. The Gemini judge lost samples to RPM throttling because ragas has no retry layer of its own and the OpenAI SDK's default `max_retries=2` covers ~1.5s against a 429 asking for 45s. Now 10.
+3. ragas's 180s per-job timeout then cancelled samples that sat through several throttle windows, which is how `hybrid` first scored at n=16 while its neighbours scored n=20. Now `max_workers=1, timeout=900` on the Gemini path; rescored, `hybrid` returned n=20.
+4. `cost_latency_metrics.py` filtered costs by truthiness, so every $0.00 Gemini query (49 of 50) was dropped and the mean was taken over the single Groq fallback. The `$0.000106`/query cost this file published on 08-21 is therefore ~50× too high; the real figure is `$0.00000212`. Fixed, artifact regenerated from the stored records, and pinned by `tests/test_cost_latency_metrics.py`.
+
+Also added `--rescore-modes`, which repairs named modes into an existing results file (~100 judge calls instead of ~400) — the only reason the n=16 repair fit inside one day's 500-request cap.
+
+Gemini's free tier turned out to enforce **two** independent caps, and this session hit both: 15 requests/minute (absorbed by fix 2) and 500 requests/day (a hard stop, and the same wall the 08-21 session hit). The daily window resets at midnight Pacific — 07:00 UTC — which is hours, not a day, from when it typically trips.
+
+Test suite now `262 passed, 3 skipped` on the hermetic `-m unit` subset (up from 258 — 4 net new tests in `tests/test_cost_latency_metrics.py`, a file that did not exist before).
 
 ---
 
@@ -108,7 +128,7 @@ Ordered by impact. Items 1–3 are the ones that change what the user actually r
 - [x] **T14** — Decide whether the product is multi-turn; wire history if so (§14) — Fixed 2026-08-20
 - [x] **T15** — Delete `format_llama3_prompt()` (§15) — Fixed 2026-08-21
 - [x] **T16** — Pin `fastembed` in the root `requirements.txt` (§16) — Fixed 2026-08-21
-- [ ] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17) — In progress 2026-08-21, 4/5 steps done, blocked on Gemini daily quota reset
+- [x] **T17** — Re-run the evaluation suite; every stored result predates the current system (§17) — Fixed 2026-08-23
 - [x] **T18** — Narrow `NOISE_KEYWORDS` so ordinary review prose isn't discarded (§18) — Fixed 2026-08-20
 - [x] **T19** — Cancel the engine thread when the SSE client disconnects (§19) — Fixed 2026-08-20
 - [x] **T20** — Harden `_rerank()` against a short score list (§20) — Fixed 2026-08-19
@@ -934,7 +954,7 @@ The most consequential item is `relevance_calibration_2026-08-12.json`. It is th
 
 **Fix:** after §3 completes, re-run in order: `calibrate_relevance` (→ §1), then `refusal_metrics`, `ragas_eval`, `ablation`, `cost_latency`. Keep the old files; the date-stamped naming already supports side-by-side comparison, and the before/after is genuinely interesting.
 
-### In Progress — 2026-08-21
+### In Progress — 2026-08-21 (superseded by the Resolved note below)
 
 See the status update near the top of this file for the full account. `calibrate_relevance` (§1) was already done. This session ran `run_eval` (default + `--corpus-only`, 0/50 errors both), `refusal_metrics` on both (`refusal_recall` 0.7 default / 0.8 corpus-only, `false_answer_rate` 0.3 / 0.2 — web augmentation on the default run rescues some answers the corpus-only path correctly refuses), `ragas_eval` (`context_precision=0.3604, faithfulness=0.9608, answer_relevancy=0.5953`), and `cost_latency_metrics` (`p50=4080ms` engine latency, `$0.000106`/query mean cost, retrieval ~80% of total latency). Judge backend was deliberately Gemini, not Groq, per a prior-session decision (08-09's Groq run hit Groq's daily cap at 5/40 scored records).
 
@@ -943,6 +963,46 @@ Only `ablation.py --judge-backend gemini` remains — it hit **Gemini's own dail
 A real bug was found and fixed en route: `evaluation/gemini_judge_llm.py` claimed Gemini's OpenAI-compat endpoint has "no n>1 restriction" — false; it 400s with `Multiple candidates is not enabled for this model`, the same failure Groq's judge already works around via `bypass_n=True`. Applied the identical fix to the Gemini judge and corrected both that docstring and a stale Groq-model-name docstring line in `ragas_eval.py`.
 
 **Resume with:** `py -3.10 -m evaluation.ablation --judge-backend gemini`, after Gemini's daily quota resets (~2026-08-22, midnight Pacific). No other setup is needed — dependencies, the `langchain-community==0.3.27` pin, and the `bypass_n` fix are all already in place. Once `ablation_2026-08-21.json` exists, add its numbers to this section, flip the T17 checklist box, and update the top-of-file status section.
+
+### Resolved — 2026-08-23
+
+The ablation ran to completion: `evaluation/results/ablation_2026-08-23.json`, all four modes at a full `n=20` on the judged half and `n=40` on the retrieval half, `ragas_complete: true`, 0 dropped samples. That closes the last of the five re-runs this section asked for.
+
+| Mode | Precision@K | (08-09) | Entity coverage | (08-09) | RAGAS ctx precision | (08-09) |
+|---|---|---|---|---|---|---|
+| `dense` | 0.9850 | 0.9400 | 0.8750 | 0.8875 | 0.4607 | 0.6537 |
+| `bm25` | 0.9350 | 0.9350 | 0.8375 | 0.8375 | 0.2683 | 0.5208 |
+| `hybrid` | 0.9600 | 0.9500 | 0.9125 | 0.8750 | 0.3550 | 0.6397 |
+| `hybrid_rerank` | 0.9650 | 0.9200 | 0.8875 | 0.8125 | 0.3433 | 0.5168 |
+
+Reading it, with the comparability boundary stated rather than glossed:
+
+- **The retrieval-only half is comparable across dates** — same deterministic code, same golden set, no LLM in the loop — and it improved everywhere the embedding migration could touch. `dense` gained the most (+0.045 P@K), which is what a corpus re-embedded into Gemini's vector space (§3) should do. `bm25` is **identical to four decimals on both metrics** (0.9350 / 0.8375, both runs): the sparse path never touches the dense vectors, so this is a free control confirming the harness measured the same corpus, not a coincidence.
+- **The `context_precision` column is *not* comparable across dates.** 08-09 was judged by the Modal-hosted Gemma judge (`"ragas_judge_backend": "modal"`); this run is judged by Gemini. All four modes fall by a similar 0.18–0.29, which is the signature of a stricter judge rather than a retrieval regression — a real retrieval regression would not move BM25-only and rerank-only alike while their retrieval-side metrics *improve*. Treat 08-23 as the new baseline for this metric and compare forward, not back.
+- **`hybrid_rerank` still does not win on precision@k**, so `hybrid_rerank_wins_on_precision_at_k` remains `false`, as it was on 08-09. What changed is who beats it: `hybrid` (0.95) on 08-09, `dense` (0.9850) now. Reported as-is per this module's own docstring. Note the two signals disagree in the usual way — `hybrid` leads on entity coverage (0.9125) while `dense` leads on precision@k — and the production default remains `hybrid_rerank`, whose value shows up in the honesty gate's calibrated relevance floors (§1), not in top-5 precision on a golden set where nearly every mode already scores >0.93.
+
+**Three harness defects were found and fixed while running this**, all in the measurement layer, none touching the system under test:
+
+1. **`ablation.py` persisted nothing until both halves finished.** That is precisely why the 08-21 attempt above lost a completed retrieval half to a quota wall. It now writes the retrieval half immediately and re-writes after *each* RAGAS mode (`on_mode_done`), and records `ragas_complete` so a partial file is self-describing. This paid for itself the same day: when the daily cap hit again mid-run, 3 of 4 modes were already on disk.
+2. **The Gemini judge dropped samples under RPM throttling, silently and unevenly.** ragas has no retry layer — `ragas.executor` catches the exception and records the sample as `NaN` — so the OpenAI SDK's own `max_retries` (default **2**, backing off ~1.5s total) was the only thing between a 429 asking for a 45s wait and a lost sample. Modes scored during a busy minute therefore got a smaller `n` than modes scored during a quiet one: an invisible bias in exactly the cross-mode comparison this file exists to make. `evaluation/gemini_judge_llm.py` now sets `max_retries=10` (`GEMINI_JUDGE_MAX_RETRIES` overrides).
+3. **ragas's 180s per-job timeout then became the same bug one layer out.** It bounds a sample's *entire* scoring including retry waits, so a sample that sat through two or three throttle windows was cancelled anyway — observed live: `hybrid` scored `0.3344` at **n=16** while `dense` and `bm25` scored a full n=20. `RunConfig` is now `max_workers=1, timeout=900` on the Gemini path (Groq keeps `max_workers=2`). Rescored under the fix, `hybrid` came back at **n=20 → 0.3550**, confirming the short-`n` figure was a throttle artifact and that a ~0.02 difference was all it distorted.
+
+A `--rescore-modes` flag was added for the repair itself: it re-runs the judged half for named modes only and merges into that day's existing results file, keeping the retrieval half and the other modes as measured — ~100 judge calls instead of ~400, which is what let the repair fit inside one day's quota. Its merge path was verified byte-equivalent against a backup before being used on real data.
+
+**A fourth defect, in a number this section already published:** `cost_latency_metrics.py` built its cost list with `if r.get("cost_usd")` — a **truthiness** filter. A Gemini-served query costs exactly `0.0` (`llm/pricing.py` prices the free tier at zero deliberately, and says so), so every free query was dropped and the mean was taken over the Groq fallbacks alone. On `runs_2026-08-21_default.jsonl` that is 49 free queries discarded and **one** $0.000106 fallback kept — which is how the `$0.000106`/query figure in the In-Progress note above, and in the stored artifact, came to be ~50× the real number. Corrected to `is not None` (a never-generated hard refusal records `None`, so it stays excluded on its own merits), and `queries_priced` / `queries_at_zero_cost` were added so the provider mix behind the mean is visible rather than inferred. Recomputed from the same stored records — no re-run, no quota:
+
+| | as published 08-21 | corrected |
+|---|---|---|
+| mean cost/query | $0.000106 | **$0.00000212** |
+| median | $0.000106 | $0.00 |
+| total for the 50-query run | $0.000106 | $0.000106 (unchanged — the sum was always right) |
+| provider mix | not reported | 49/50 Gemini free tier, 1 Groq fallback |
+
+`evaluation/results/cost_latency_2026-08-21_default.json` was regenerated in place; the pre-fix version remains in git history. `tests/test_cost_latency_metrics.py` (new, 4 tests) pins it — the two cost cases fail against the pre-fix filter and pass after, verified by stashing the fix.
+
+**The other four steps' numbers**, re-verified from their artifacts rather than restated from the note above: `refusal_metrics` — default `precision=1.0, recall=0.7, F1=0.8235, false_answer_rate=0.3, over_refusal_rate=0.0`; corpus-only `precision=1.0, recall=0.8, F1=0.8889, false_answer_rate=0.2`. `ragas_eval` (Gemini judge, 40 answerable scored, corpus fingerprint 100 games / 2791 chunks) — `context_precision=0.3604, faithfulness=0.9608, answer_relevancy=0.5953`. `cost_latency_metrics` — engine `p50=4079.56ms / p95=12422.77ms / p99=13736.41ms`, LLM `p50=843.75ms`, with retrieval at **79.66%** of total (Tavily alone 73.12%, local vector search 47.94% — these overlap because the tree double-counts nested spans).
+
+Two environment notes for whoever runs this next, since the resume instructions above were written for a machine that no longer matches: `py -3.10` does not exist here — the working interpreter is `RAG_env\Scripts\python.exe` (3.12), which already carries `ragas 0.4.3` + `langchain-community 0.3.31` (still pre-split 0.3.x, so the 08-21 pin's intent holds). And `QDRANT_URL` needs no `:443` on this machine; port 6333 connects in 0.86s.
 
 ---
 

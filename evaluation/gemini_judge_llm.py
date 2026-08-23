@@ -26,6 +26,20 @@ from llm.gemini_client import GEMINI_MODEL, _GEMINI_BASE_URL
 
 JUDGE_MODEL_ID = f"gemini:{GEMINI_MODEL}"
 
+# Gemini's free tier caps *requests per minute* (measured live 2026-08-23:
+# `limit: 15, model: gemini-3.5-flash-lite`), and a multi-hundred-call job
+# like evaluation/ablation.py sits above that cap for its whole duration.
+# ragas has no retry layer of its own -- ragas.executor catches the
+# exception and records the sample as NaN -- so the OpenAI SDK's own
+# retry budget is the only thing standing between an RPM throttle and a
+# silently dropped sample. The default of 2 is not enough: a 429 under
+# this cap asks for a ~45s wait, while 2 retries back off for ~1.5s
+# total, so modes scored during a busy minute end up with a smaller `n`
+# than modes scored during a quiet one -- an invisible bias in exactly
+# the cross-mode comparison the ablation exists to make. 10 retries with
+# the SDK's capped 8s backoff covers ~60s, i.e. past the reset.
+_JUDGE_MAX_RETRIES = int(os.environ.get("GEMINI_JUDGE_MAX_RETRIES", "10"))
+
 
 def build_gemini_judge() -> LangchainLLMWrapper:
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -39,6 +53,7 @@ def build_gemini_judge() -> LangchainLLMWrapper:
             api_key=api_key,
             temperature=0.0,
             max_tokens=8192,
+            max_retries=_JUDGE_MAX_RETRIES,
         ),
         bypass_n=True,
     )

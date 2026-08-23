@@ -13,9 +13,11 @@
     "mean": 1125.29
   },
   "cost_usd_per_query": {
-    "mean": 0.00010605,
-    "median": 0.00010605,
-    "total_for_run": 0.000106
+    "mean": 2.12e-06,
+    "median": 0.0,
+    "total_for_run": 0.000106,
+    "queries_priced": 50,
+    "queries_at_zero_cost": 49
   },
   "tokens_per_query": {
     "mean_prompt_tokens": 843.8,

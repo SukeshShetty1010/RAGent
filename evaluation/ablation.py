@@ -30,7 +30,7 @@ import sys
 import warnings
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -98,7 +98,12 @@ def retrieval_only_ablation(
 
 
 def ragas_context_precision_ablation(
-    golden_subset: List[Dict[str, Any]], limit: int = 5, judge_backend: str = "groq"
+    golden_subset: List[Dict[str, Any]],
+    limit: int = 5,
+    judge_backend: str = "groq",
+    on_mode_done: Callable[[Dict[str, Any]], None] | None = None,
+    modes: List[str] | None = None,
+    seed_summary: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     from ragas import evaluate, RunConfig
     from ragas.dataset_schema import EvaluationDataset, SingleTurnSample
@@ -110,12 +115,31 @@ def ragas_context_precision_ablation(
     retriever = RAGRetriever()
     llm, _judge_model_id = _build_judge(judge_backend)
     embeddings = GeminiEmbeddings()
-    run_config = RunConfig(max_workers=2)
+    # One worker on the Gemini judge: its free tier caps requests per
+    # minute (15, measured 2026-08-23), and two workers overshoot that
+    # cap continuously, forcing every call through the retry path rather
+    # than only the occasional one. Throughput is bounded by the cap
+    # either way -- this only decides whether the excess is absorbed by
+    # backoff or by dropped samples. Groq keeps 2, unchanged.
+    #
+    # The per-job timeout has to rise with it. ragas's 180s default is a
+    # bound on one sample's *whole* scoring, retries included, so once a
+    # sample spends two or three 45s throttle waits back to back it is
+    # cancelled and recorded as NaN -- measured live 2026-08-23, where
+    # three consecutive samples in one mode died this way while the two
+    # earlier modes scored a full n=20. That is the same cross-mode `n`
+    # bias the retry budget above exists to prevent, arriving one layer
+    # further out.
+    run_config = (
+        RunConfig(max_workers=1, timeout=900)
+        if judge_backend == "gemini"
+        else RunConfig(max_workers=2)
+    )
 
-    summary: Dict[str, Any] = {}
+    summary: Dict[str, Any] = dict(seed_summary or {})
 
     try:
-        for mode in MODES:
+        for mode in modes or MODES:
             print(f"  RAGAS context_precision for mode={mode}...")
             samples = []
             for record in golden_subset:
@@ -146,6 +170,12 @@ def ragas_context_precision_ablation(
 
             from utils.usage_counter import UsageCounter
             UsageCounter.get().record(judge_backend, "ablation", count=len(samples))
+
+            # Persist after every mode: this half has no checkpoint and a judge
+            # quota wall mid-run would otherwise discard the whole study,
+            # including the (LLM-free) retrieval half that already succeeded.
+            if on_mode_done is not None:
+                on_mode_done(dict(summary))
     finally:
         retriever.close()
 
@@ -170,11 +200,48 @@ def _markdown_table(retrieval_summary: Dict[str, Any], ragas_summary: Dict[str, 
     return "\n".join(lines)
 
 
+def _build_output(
+    retrieval_summary: Dict[str, Any],
+    ragas_summary: Dict[str, Any] | None,
+    judge_backend: str | None,
+) -> Dict[str, Any]:
+    baseline = retrieval_summary["hybrid_rerank"]["mean_precision_at_k"]
+    best_other = max(
+        retrieval_summary[m]["mean_precision_at_k"] for m in MODES if m != "hybrid_rerank"
+    )
+    return {
+        "retrieval_only": retrieval_summary,
+        "ragas_context_precision": ragas_summary,
+        "ragas_judge_backend": judge_backend,
+        "ragas_complete": bool(ragas_summary) and all(m in ragas_summary for m in MODES),
+        "hybrid_rerank_wins_on_precision_at_k": baseline >= best_other,
+        "markdown_table": _markdown_table(retrieval_summary, ragas_summary),
+    }
+
+
+def _write_output(output: Dict[str, Any], out_path: Path) -> None:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Retrieval ablation study over the golden set")
     parser.add_argument("--golden", default=str(GOLDEN_SET_PATH))
     parser.add_argument("--skip-ragas", action="store_true", help="Skip the RAGAS context_precision pass")
     parser.add_argument("--limit", type=int, default=None, help="Smoke-test on first N answerable records")
+    parser.add_argument(
+        "--rescore-modes",
+        nargs="+",
+        choices=MODES,
+        default=None,
+        help=(
+            "Re-run the RAGAS half for these modes only and merge the result "
+            "into today's existing results file, keeping the other modes' "
+            "scores and the retrieval half as already measured. For repairing "
+            "a mode whose `n` came out short (dropped samples) without "
+            "spending judge quota on the three that scored fully."
+        ),
+    )
     parser.add_argument(
         "--judge-backend",
         choices=["groq", "gemini"],
@@ -188,34 +255,49 @@ def main() -> None:
     if args.limit:
         answerable = answerable[: args.limit]
 
-    print(f"Retrieval-only ablation over {len(answerable)} answerable queries x {len(MODES)} modes...")
-    retrieval_summary = retrieval_only_ablation(answerable)
+    out_path = RESULTS_DIR / f"ablation_{date.today().isoformat()}.json"
+    judge_backend = None if args.skip_ragas else args.judge_backend
 
-    ragas_summary = None
+    if args.rescore_modes:
+        if not out_path.exists():
+            parser.error(f"--rescore-modes needs an existing {out_path.name} to merge into")
+        existing = json.loads(out_path.read_text(encoding="utf-8"))
+        retrieval_summary = existing["retrieval_only"]
+        seed_summary = existing.get("ragas_context_precision") or {}
+        print(f"Reusing the retrieval half already in {out_path.name}; rescoring {args.rescore_modes}")
+    else:
+        print(f"Retrieval-only ablation over {len(answerable)} answerable queries x {len(MODES)} modes...")
+        retrieval_summary = retrieval_only_ablation(answerable)
+        seed_summary = {}
+
+        output = _build_output(retrieval_summary, None, judge_backend)
+        _write_output(output, out_path)
+        print(f"Wrote retrieval-only results -> {out_path}")
+
+    ragas_summary = seed_summary or None
+    output = _build_output(retrieval_summary, ragas_summary, judge_backend)
+
     if not args.skip_ragas:
         subset = [r for r in answerable if r.get("ground_truth_answer")][:RAGAS_SUBSET_SIZE]
-        print(f"RAGAS context_precision ablation over {len(subset)}-query subset x {len(MODES)} modes...")
-        ragas_summary = ragas_context_precision_ablation(subset, judge_backend=args.judge_backend)
+        modes = args.rescore_modes or MODES
+        print(f"RAGAS context_precision ablation over {len(subset)}-query subset x {len(modes)} modes...")
 
-    table = _markdown_table(retrieval_summary, ragas_summary)
+        def _persist_partial(partial: Dict[str, Any]) -> None:
+            _write_output(_build_output(retrieval_summary, partial, judge_backend), out_path)
+            print(f"  persisted {len(partial)}/{len(MODES)} RAGAS modes -> {out_path}")
 
-    baseline = retrieval_summary["hybrid_rerank"]["mean_precision_at_k"]
-    best_other = max(
-        retrieval_summary[m]["mean_precision_at_k"] for m in MODES if m != "hybrid_rerank"
-    )
-    rrf_wins = baseline >= best_other
+        ragas_summary = ragas_context_precision_ablation(
+            subset,
+            judge_backend=args.judge_backend,
+            on_mode_done=_persist_partial,
+            modes=modes,
+            seed_summary=seed_summary,
+        )
+        output = _build_output(retrieval_summary, ragas_summary, judge_backend)
+        _write_output(output, out_path)
 
-    output = {
-        "retrieval_only": retrieval_summary,
-        "ragas_context_precision": ragas_summary,
-        "ragas_judge_backend": args.judge_backend if not args.skip_ragas else None,
-        "hybrid_rerank_wins_on_precision_at_k": rrf_wins,
-        "markdown_table": table,
-    }
-
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = RESULTS_DIR / f"ablation_{date.today().isoformat()}.json"
-    out_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+    table = output["markdown_table"]
+    rrf_wins = output["hybrid_rerank_wins_on_precision_at_k"]
 
     print(f"\nWrote ablation results -> {out_path}")
     print()
