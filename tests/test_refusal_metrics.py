@@ -11,6 +11,8 @@ import pytest
 
 from evaluation.refusal_metrics import compute_refusal_metrics
 
+pytestmark = pytest.mark.unit
+
 
 def _rec(should_refuse: bool, refused: bool, merge_state: str = "LOCAL_ONLY", **extra):
     return {

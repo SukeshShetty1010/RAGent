@@ -2,6 +2,17 @@
 
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import {
+  ms,
+  msShort,
+  capabilityTone,
+  qualityTone,
+  stageLabel,
+  stageDetail,
+  providerLabel,
+  type Stage,
+} from '@/lib/format';
+import { splitSSEBuffer, parseSSEFrame } from '@/lib/sse';
 
 type Evidence = {
   source?: string;
@@ -27,16 +38,6 @@ type Kpis = {
   finish_reason: string | null;
   answer_truncated: boolean;
   answer_model?: string | null;
-};
-
-// Mirrors the StreamingStage dataclass in
-// engine/execution_engine_streaming.py -- one entry per pipeline step,
-// emitted at "started" and again at "completed"/"skipped"/"cancelled".
-type Stage = {
-  name: string;
-  status: string; // started | completed | skipped | cancelled | failed
-  duration_ms: number | null;
-  data?: Record<string, unknown>;
 };
 
 // Mirrors agent_decisions as built in execution_engine_streaming.py.
@@ -193,31 +194,6 @@ function Metric({ label, value, tone = 'default', className = '' }: { label: str
   );
 }
 
-const ms = (v: number | null | undefined) => (v == null ? '—' : `${(v / 1000).toFixed(2)} s`);
-
-// ms() rounds everything to seconds, which turns a 12ms routing stage
-// into "0.01 s" -- too coarse to tell a fast stage from a stalled one.
-const msShort = (v: number | null | undefined) => {
-  if (v == null) return '—';
-  return v < 1000 ? `${Math.round(v)} ms` : `${(v / 1000).toFixed(2)} s`;
-};
-
-// Tone only -- the label itself is whatever the backend sent, so a new
-// capability or gate status still renders rather than vanishing.
-function capabilityTone(v: string): 'good' | 'warn' | 'bad' | 'default' {
-  if (v === 'full') return 'good';
-  if (v === 'partial') return 'warn';
-  if (v === 'insufficient') return 'bad';
-  return 'default';
-}
-
-function qualityTone(v: string): 'good' | 'warn' | 'bad' | 'default' {
-  if (v === 'quality_ok') return 'good';
-  if (v === 'quality_weak') return 'warn';
-  if (v === 'quality_empty') return 'bad';
-  return 'default';
-}
-
 function KpiPanel({ kpis }: { kpis: Kpis }) {
   const tokens =
     kpis.prompt_tokens == null && kpis.completion_tokens == null
@@ -250,60 +226,6 @@ function KpiPanel({ kpis }: { kpis: Kpis }) {
 }
 
 /* ── Pipeline Stage Progress ──────────────────────────── */
-
-// Display names only. Which stages exist is the backend's call -- an
-// unrecognized stage name still renders via the fallback, same reasoning
-// as PROVIDER_LABELS above.
-const STAGE_LABELS: Record<string, string> = {
-  query_rewrite: 'Query Rewrite',
-  routing: 'Routing',
-  strategy: 'Strategy Selection',
-  retrieval: 'Retrieval',
-  capability: 'Capability Assessment',
-  context_assembly: 'Context Assembly',
-  prompt_construction: 'Prompt Construction',
-  generation: 'Generation',
-};
-
-function stageLabel(name: string): string {
-  return STAGE_LABELS[name] ?? name.replace(/_/g, ' ');
-}
-
-function stageDetail(stage: Stage): string | undefined {
-  const d = stage.data ?? {};
-  switch (stage.name) {
-    case 'query_rewrite':
-      if (d.source == null) return undefined;
-      return d.rewritten ? `rewritten · ${d.source}` : `unchanged · ${d.source}`;
-    case 'routing': {
-      const signals = Array.isArray(d.signals) ? (d.signals as string[]) : [];
-      return d.task ? `${d.task}${signals.length ? ' · ' + signals.join(', ') : ''}` : undefined;
-    }
-    case 'strategy': {
-      const config = (d.config ?? {}) as Record<string, unknown>;
-      if (config.limit == null) return undefined;
-      return `limit ${config.limit}${config.allow_web_fallback ? ' · web fallback' : ''}`;
-    }
-    case 'retrieval': {
-      if (d.chunks_found == null) return undefined;
-      const dropped = typeof d.chunks_dropped_as_noise === 'number' && d.chunks_dropped_as_noise > 0
-        ? ` · ${d.chunks_dropped_as_noise} dropped as noise`
-        : '';
-      return `${d.chunks_found} chunks · ${d.merge_state} · ${d.quality}${dropped}`;
-    }
-    case 'capability':
-      return typeof d.capability === 'string' ? d.capability : undefined;
-    case 'context_assembly':
-      return d.chunks_assembled != null ? `${d.chunks_assembled} chunks` : undefined;
-    case 'prompt_construction':
-      return d.prompt_length != null ? `${d.prompt_length} chars` : undefined;
-    case 'generation':
-      if (stage.status === 'skipped') return typeof d.reason === 'string' ? d.reason : undefined;
-      return d.tokens_generated != null ? `${d.tokens_generated} tokens` : undefined;
-    default:
-      return undefined;
-  }
-}
 
 function StageGlyph({ status }: { status: string }) {
   if (status === 'started') {
@@ -504,21 +426,6 @@ type UsageData = {
   by_surface: Record<string, SurfaceUsage>;
 };
 
-// Display names only. Which providers exist is the backend's call —
-// /api/usage returns them — so this map is a lookup, never the source of
-// truth: an unrecognized key still renders, capitalized.
-const PROVIDER_LABELS: Record<string, string> = {
-  gemini: 'Gemini',
-  groq: 'Groq',
-  cloudflare: 'Cloudflare',
-  voyage: 'Voyage',
-  hfspace: 'HF Space',
-};
-
-function providerLabel(key: string): string {
-  return PROVIDER_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
-}
-
 function UsageCard({ name, usage }: { name: string; usage?: ProviderUsage }) {
   const pct = usage?.percent_of_rpd ?? 0;
   const barColor = pct >= 90 ? 'bg-red-500' : pct >= 60 ? 'bg-amber-500' : 'bg-cyan-500';
@@ -718,18 +625,13 @@ export default function ChatApp() {
       };
 
       const handleFrame = (frame: string) => {
-        let event = 'message';
-        const dataLines: string[] = [];
-        for (const rawLine of frame.split('\n')) {
-          const line = rawLine.replace(/\r$/, '');
-          if (line.startsWith('event:')) event = line.slice(6).trim();
-          else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
-        }
-        if (dataLines.length === 0) return;
+        const sseFrame = parseSSEFrame(frame);
+        if (sseFrame == null) return;
+        const { event, data } = sseFrame;
 
         let parsed;
         try {
-          parsed = JSON.parse(dataLines.join('\n'));
+          parsed = JSON.parse(data);
         } catch (err) {
           console.error('Error parsing SSE data', err);
           return;
@@ -771,14 +673,15 @@ export default function ChatApp() {
         if (done) break;
 
         // SSE frames end at a blank line, and a network read can stop
-        // anywhere -- including the middle of one. Everything after the
-        // last separator is held back until the rest arrives. Parsing
-        // each read independently dropped every frame that straddled a
-        // boundary, which is why the ~5.6KB done event carrying the KPIs
-        // and evidence never rendered while the small token frames did.
+        // anywhere -- including the middle of one. splitSSEBuffer holds
+        // back everything after the last separator until the rest
+        // arrives. Parsing each read independently dropped every frame
+        // that straddled a boundary, which is why the ~5.6KB done event
+        // carrying the KPIs and evidence never rendered while the small
+        // token frames did.
         buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split(/\r?\n\r?\n/);
-        buffer = frames.pop() ?? '';
+        const { frames, rest } = splitSSEBuffer(buffer);
+        buffer = rest;
         for (const frame of frames) handleFrame(frame);
       }
       // A final frame with no trailing blank line still counts.

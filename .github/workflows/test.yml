@@ -29,3 +29,18 @@ jobs:
 
       - name: Run hermetic unit tests
         run: pytest tests/ -m unit -q
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Run Vitest suite
+        run: cd frontend && npm test

@@ -1,0 +1,156 @@
+{
+  "total_scored": 50,
+  "total_errored": 0,
+  "engine_latency_ms": {
+    "p50": 4209.44,
+    "p95": 8829.27,
+    "p99": 9449.46,
+    "mean": 5011.29
+  },
+  "llm_latency_ms": {
+    "p50": 973.17,
+    "p95": 2443.27,
+    "mean": 1270.02
+  },
+  "cost_usd_per_query": {
+    "mean": 8.63e-06,
+    "median": 0.0,
+    "total_for_run": 0.000431,
+    "queries_priced": 50,
+    "queries_at_zero_cost": 49
+  },
+  "tokens_per_query": {
+    "mean_prompt_tokens": 769.6,
+    "mean_completion_tokens": 158.5
+  },
+  "stage_latency_attribution": {
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition": {
+      "avg_ms": 4377.86,
+      "pct_of_total": 87.64
+    },
+    "REQUEST_TOTAL -> Retrieval": {
+      "avg_ms": 3808.9,
+      "pct_of_total": 76.25
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch": {
+      "avg_ms": 3616.69,
+      "pct_of_total": 72.41
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch -> WebSearch": {
+      "avg_ms": 3612.56,
+      "pct_of_total": 72.32
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch -> WebSearch -> TavilyAPICall": {
+      "avg_ms": 3611.81,
+      "pct_of_total": 72.31
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch": {
+      "avg_ms": 2299.48,
+      "pct_of_total": 46.04
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 2299.02,
+      "pct_of_total": 46.03
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch": {
+      "avg_ms": 2188.63,
+      "pct_of_total": 43.82
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch": {
+      "avg_ms": 2188.25,
+      "pct_of_total": 43.81
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearchDecision": {
+      "avg_ms": 1385.66,
+      "pct_of_total": 27.74
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearchDecision -> LLMDecision": {
+      "avg_ms": 1385.25,
+      "pct_of_total": 27.73
+    },
+    "REQUEST_TOTAL -> LLMGenerationStreaming": {
+      "avg_ms": 1179.12,
+      "pct_of_total": 23.61
+    },
+    "REQUEST_TOTAL -> LLMGenerationStreaming -> GroqFallback": {
+      "avg_ms": 1176.0,
+      "pct_of_total": 23.54
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> CrossEncoderRerank": {
+      "avg_ms": 1029.94,
+      "pct_of_total": 20.62
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> CrossEncoderRerank": {
+      "avg_ms": 992.89,
+      "pct_of_total": 19.88
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 813.74,
+      "pct_of_total": 16.29
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> EmbeddingGeneration": {
+      "avg_ms": 794.24,
+      "pct_of_total": 15.9
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge -> ScoreWebEvidence": {
+      "avg_ms": 773.16,
+      "pct_of_total": 15.48
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> VectorQuery": {
+      "avg_ms": 491.13,
+      "pct_of_total": 9.83
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> VectorQuery": {
+      "avg_ms": 362.82,
+      "pct_of_total": 7.26
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge": {
+      "avg_ms": 156.25,
+      "pct_of_total": 3.13
+    },
+    "REQUEST_TOTAL -> Retrieval -> QualityGate": {
+      "avg_ms": 19.37,
+      "pct_of_total": 0.39
+    },
+    "REQUEST_TOTAL -> Retrieval -> ChunkMerge -> QualityGateReMerge": {
+      "avg_ms": 6.8,
+      "pct_of_total": 0.14
+    },
+    "REQUEST_TOTAL -> ContextAssembly": {
+      "avg_ms": 2.32,
+      "pct_of_total": 0.05
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Deduplication": {
+      "avg_ms": 0.84,
+      "pct_of_total": 0.02
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> SafeContextCap": {
+      "avg_ms": 0.62,
+      "pct_of_total": 0.01
+    },
+    "REQUEST_TOTAL -> PromptConstruction": {
+      "avg_ms": 0.41,
+      "pct_of_total": 0.01
+    },
+    "REQUEST_TOTAL -> Retrieval -> LocalVectorSearch -> LocalVectorSearch -> ResultFormatting": {
+      "avg_ms": 0.21,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> Retrieval -> QueryDecomposition -> LocalVectorSearch -> LocalVectorSearch -> ResultFormatting": {
+      "avg_ms": 0.17,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> ContextAssembly -> Ordering": {
+      "avg_ms": 0.16,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> Retrieval -> WebSearch -> WebSearch -> WebResultNormalization": {
+      "avg_ms": 0.16,
+      "pct_of_total": 0.0
+    },
+    "REQUEST_TOTAL -> PromptConstruction -> ContextFormatting": {
+      "avg_ms": 0.12,
+      "pct_of_total": 0.0
+    }
+  }
+}

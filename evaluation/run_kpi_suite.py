@@ -88,6 +88,26 @@ def _run_module(
     }
 
 
+def _derive_overall_status(modules: List[Dict[str, Any]]) -> str:
+    """A hard crash on an uncaught module means the real entrypoint
+    (python -m KPI.Unified_KPI_Runner) would have died at that point and
+    never reached later modules."""
+    hard_crash = False
+    any_failure = False
+    for m in modules:
+        if m["status"] == "crashed":
+            any_failure = True
+            if not m["caught_by_real_runner"]:
+                hard_crash = True
+                break  # modules after this point would never have run for real
+
+    if hard_crash:
+        return "hard_crash_before_completion"
+    if any_failure:
+        return "partial_failure"
+    return "all_completed"
+
+
 def main() -> None:
     from KPI.Context_Engineering_KPI import ContextEngineeringKPI
     from KPI.Faith_Fair_KPI import FaithFairKPI
@@ -154,25 +174,7 @@ def main() -> None:
     )
 
     total_duration_s = round(sum(m["duration_s"] for m in modules), 3)
-
-    # overall_status: a hard crash on an uncaught module means the real
-    # entrypoint (python -m KPI.Unified_KPI_Runner) would have died at that
-    # point and never reached later modules.
-    hard_crash = False
-    any_failure = False
-    for m in modules:
-        if m["status"] == "crashed":
-            any_failure = True
-            if not m["caught_by_real_runner"]:
-                hard_crash = True
-                break  # modules after this point would never have run for real
-
-    if hard_crash:
-        overall_status = "hard_crash_before_completion"
-    elif any_failure:
-        overall_status = "partial_failure"
-    else:
-        overall_status = "all_completed"
+    overall_status = _derive_overall_status(modules)
 
     artifact = {
         "date": date.today().isoformat(),
