@@ -59,6 +59,12 @@ CLAUDE.md
 **/CLAUDE.md
 .claude/settings.local.json
 
+# ---------- Dev planning / internal notes (local-only, not recruiter-facing) ----------
+AUDIT_TASKS.md
+flagship.md
+docs/readme_revision_notes.md
+docs/superpowers/specs/
+
 # ---------- Frontend (deployed separately on Vercel) ----------
 frontend/node_modules/
 frontend/.next/
