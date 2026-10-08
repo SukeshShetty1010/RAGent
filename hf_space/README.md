@@ -25,7 +25,7 @@ re-calibration.
 
 ### `GET /health`
 Unauthenticated liveness check. Also the keepalive target — free Spaces sleep after 48h idle,
-and RAGent's GitHub Actions cron pings this every 10 minutes.
+so ping this at least every few hours from an external cron (GitHub Actions cron is too unreliable on free runners).
 
 ```json
 { "status": "ok", "model": "Xenova/ms-marco-MiniLM-L-6-v2" }

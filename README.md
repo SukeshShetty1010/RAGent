@@ -521,9 +521,10 @@ python -m KPI.Unified_KPI_Runner                    # KPI dashboard
 
 Single Render web service, free tier, 512MB RAM. `Dockerfile` is a two-stage build: stage 1 (`node:20-alpine`) builds the Next.js frontend as a static export; stage 2 (`python:3.11-slim`) pre-downloads the BM25 and cross-encoder ONNX models **at build time** — so a model-download failure is a build error, not a first-request hang — and copies the static frontend build into `frontend_build/`, served by FastAPI alongside the API from one process. `HEALTHCHECK` polls `/health`.
 
-Two GitHub Actions workflows cover three keepalive purposes:
+Keepalives:
 
-- `.github/workflows/render-keepalive.yml` (every 10 minutes) pings Render's `/ping` to prevent free-tier spin-down, and in the same job, best-effort pings the Hugging Face Space's `/health` (`continue-on-error: true`, gated on the `HF_RERANK_URL` repo variable existing) to prevent its 48-hour idle sleep.
+- Render: an external cron-job.org job pings `/ping` every 10 minutes to prevent free-tier spin-down (15 min idle). A GitHub Actions cron was tried first and removed — measured over 100 runs, GitHub ran it with a median gap of 269 minutes, not 10, so Render idled out between pings.
+- Hugging Face Space (not currently deployed): would need its own `/health` ping against the 48-hour idle sleep.
 - `.github/workflows/qdrant-keepalive.yml` (daily, 12:00 UTC) pings Qdrant's `/collections` — its own header comment states plainly that this exists because a free-tier Qdrant cluster was already reaped once from inactivity, forcing a full corpus rebuild.
 
 ---
